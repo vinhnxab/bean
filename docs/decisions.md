@@ -128,3 +128,38 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   idiomatic). Package của binary vẫn là `BeanAgent` (để `cargo run -p BeanAgent -- chat` và tên
   file binary là `BeanAgent`), và `[[bin]] name = "BeanAgent"` được khai báo tường minh.
   Đây là sai khác nhỏ so với sơ đồ mục 4 của `agents.md` (chỉ khác chữ hoa/thường).
+
+## 6. Quyết định riêng của M2 (providers)
+
+* **D6.1** Mỗi lượt `LlmProvider::chat` phát đúng **một** HTTP request; retry/backoff nằm ở
+  `beanagent_llm::retry::retry_with_backoff` (tối đa 3 lần, tôn trọng `Retry-After` giây,
+  backoff 1s→2s→4s + jitter ≤ 25%) **bọc ngoài** closure request, không nằm trong provider.
+  Lý do: test đo được số request qua wiremock, và M17 (streaming) không phải nhân bản logic.
+* **D6.2** `reqwest` giữ backend mặc định rustls (0.13: rustls là default; **không** khai
+  feature `rustls-tls` — feature này đã đổi tên ở 0.13, khai sai sẽ fail build). Chỉ thêm
+  feature `json`. Timeout tổng 300s, connect 30s, User-Agent `BeanAgent/<version>`.
+* **D6.3** `LlmError::HttpStatus` nhúng tối đa **500 ký tự** body lỗi (cắt theo ranh giới
+  ký tự, không cắt giữa codepoint). Body lỗi không log ở mức info; chỉ đi vào `Display`
+  của lỗi khi hiện cho người dùng (CLI) hoặc trả về client ở M9.
+* **D6.4** OpenAI-compat gửi `max_tokens` (trường kinh điển). Không gửi
+  `max_completion_tokens` đồng thời vì OpenAI từ chối request khi có cả hai; các server
+  compat (Ollama/vLLM) hiểu `max_tokens`. Khi cần đổi, chỉ sửa một chỗ duy nhất
+  (`openai_compat::build_request_body`).
+* **D6.5** `openai_compat`: API key **tuỳ chọn** khi có `llm.base_url` (Ollama/vLLM không
+  cần key). Thiếu key mà không có `base_url` (mặc định trỏ tới OpenAI chính thức) là lỗi
+  cấu hình rõ ràng ngay khi dựng provider, không phải lỗi lúc gọi API.
+* **D6.6** `tool_calls[].function.arguments` của OpenAI-compat: parse **dung nham** — chuỗi
+  JSON (chuẩn), chuỗi rỗng → `{}`, object (server lệch chuẩn) → dùng nguyên; còn lại là
+  `LlmError::Decode` (agent loop ở M3 sẽ biến thành message lỗi cho model).
+* **D6.7** Anthropic: nhiều `Role::Tool` **liên tiếp** được gộp thành **một** message `user`
+  chứa nhiều block `tool_result` (định dạng đúng cho tool call song song của Messages API);
+  gặp message role khác thì flush trước. Assistant "rỗng" được chèn block text `""` vì
+  Anthropic từ chối `content: []`.
+* **D6.8** `Retry-After` chỉ hỗ trợ dạng **số giây**; HTTP-date bị bỏ qua (log debug) — cả
+  Anthropic lẫn OpenAI đều dùng số giây, còn HTTP-date cần crate phân tích ngày riêng.
+* **D6.9** Jitter của backoff dựa nano-giây đồng hồ hệ thống (không kéo crate `rand` vào
+  crate llm chỉ cho jitter); `rand`/`subtle` vẫn được thêm ở M9 cho token phiên.
+* **D6.10** `schemars` (M3) sinh draft 2020-12 với `$defs`/`$ref`; hai provider đều chạy
+  `schema::sanitize_tool_schema` trước khi gửi: inline `$ref` (trần độ sâu 16 chống đệ
+  quy), xoá `$schema`/`$defs`/`$id`, bảo đảm root `"type":"object"` (Anthropic yêu cầu).
+

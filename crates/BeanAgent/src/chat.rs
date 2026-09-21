@@ -1,7 +1,9 @@
 //! `BeanAgent chat` — REPL tối giản.
 //!
-//! * **M1**: `FakeProvider` (echo khi chưa có API key, hoặc kịch bản `--fake-llm`); chưa có agent loop.
-//! * **M2**: dùng provider thật theo `[llm]` (một lượt, chưa có tool).
+//! * ~~M1~~: `FakeProvider` (echo / kịch bản `--fake-llm`); chưa có agent loop.
+//! * **M2**: provider thật theo `[llm]` qua `beanagent_llm::build_provider`
+//!   (một lượt, chưa có tool). `--fake-llm` vẫn ghi đè lên provider thật — hữu ích
+//!   cho demo và test end-to-end không cần mạng.
 //! * **M3**: thêm agent loop + tool; **M8**: chuyển sang đi qua `Router` như một `Channel`
 //!   (`channel = "cli"`, `chat_id = "local"`), Ctrl-C trở thành `cancel` của run đang chạy.
 //!
@@ -26,17 +28,17 @@ use crate::cli::ChatArgs;
 
 const PROMPT: &str = "bạn> ";
 
-/// System prompt tối thiểu cho M1; bản đầy đủ theo agents.md mục 19 được dựng ở M3.
-const SYSTEM_PROMPT_M1: &str =
+/// System prompt tối thiểu cho M2; bản đầy đủ theo agents.md mục 19 được dựng ở M3.
+const SYSTEM_PROMPT_MINIMAL: &str =
     "You are BeanAgent, a personal AI assistant running on the user's own machine.";
 
 /// Chạy REPL.
 ///
 /// # Errors
-/// Lỗi khi nạp cấu hình/kịch bản, hoặc khi không mở được terminal.
+/// Lỗi khi nạp cấu hình/kịch bản/secret, hoặc khi không mở được terminal.
 pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     let config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
-    let provider = build_provider(args)?;
+    let provider = build_provider(args, &config)?;
 
     println!(
         "BeanAgent chat — provider: {}. Gõ /exit hoặc Ctrl-D để thoát.",
@@ -51,19 +53,21 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     }
 }
 
-/// Chọn provider: kịch bản `--fake-llm` hoặc chế độ echo (M2 sẽ thêm provider thật).
-fn build_provider(args: &ChatArgs) -> Result<Arc<dyn LlmProvider>> {
-    match args.fake_llm.as_deref() {
-        Some(path) => {
-            let provider =
-                FakeProvider::from_json_path(path).context("nạp kịch bản --fake-llm thất bại")?;
-            Ok(Arc::new(provider))
-        }
-        None => {
-            tracing::warn!("chưa cài provider thật (M2) — dùng chế độ echo của FakeProvider");
-            Ok(Arc::new(FakeProvider::echo()))
-        }
+/// Chọn provider: kịch bản `--fake-llm` nếu có, ngược lại provider thật theo `[llm]`.
+///
+/// Lỗi trả về luôn nêu rõ **nguyên nhân cấu hình** (thiếu biến môi trường, sai provider…)
+/// chứ không lộ giá trị secret.
+fn build_provider(args: &ChatArgs, config: &Config) -> Result<Arc<dyn LlmProvider>> {
+    if let Some(path) = args.fake_llm.as_deref() {
+        let provider =
+            FakeProvider::from_json_path(path).context("nạp kịch bản --fake-llm thất bại")?;
+        return Ok(Arc::new(provider));
     }
+    let secrets = config
+        .resolve_secrets()
+        .context("đọc secret từ biến môi trường thất bại")?;
+    beanagent_llm::build_provider(&config.llm, secrets.llm_api_key)
+        .context("dựng provider LLM thất bại (kiểm tra [llm] trong BeanAgent.toml)")
 }
 
 /// Gửi đúng một lượt rồi in kết quả. Lỗi provider **không** làm hỏng phiên.
@@ -76,7 +80,7 @@ async fn respond(
     messages.push(Message::user(text));
 
     let request = ChatRequest {
-        system: SYSTEM_PROMPT_M1,
+        system: SYSTEM_PROMPT_MINIMAL,
         messages,
         tools: &[],
         max_tokens: config.llm.max_tokens,

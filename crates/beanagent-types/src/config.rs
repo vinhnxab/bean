@@ -62,6 +62,9 @@ pub enum LlmProviderKind {
     /// Anthropic Messages API.
     Anthropic,
     /// Mọi endpoint tương thích OpenAI Chat Completions (OpenAI, Ollama, vLLM…).
+    // `snake_case` của variant này là `open_ai_compat` — đặt tên tường minh để khớp
+    // `as_str()` và `BeanAgent.example.toml`.
+    #[serde(rename = "openai_compat")]
     OpenAiCompat,
 }
 
@@ -663,8 +666,15 @@ impl Config {
 
     /// Đọc secret từ biến môi trường của tiến trình hiện tại.
     ///
+    /// Chính sách "fail fast có chừng mực" (D6.4):
+    /// * `llm.api_key_env` — bắt buộc **chỉ khi** provider cần key (`anthropic` luôn cần;
+    ///   `openai_compat` cần trừ khi `base_url` trỏ tới server tự host);
+    /// * `tools.web_search.api_key_env` — **không** bắt buộc (chỉ cảnh báo khi nhóm `web`
+    ///   bật mà thiếu; lỗi rõ ràng sẽ nổi tại lúc tool được gọi — M7);
+    /// * `telegram.token_env` — bắt buộc khi `telegram.enabled`.
+    ///
     /// # Errors
-    /// Trả [`ConfigError::MissingEnv`] khi biến môi trường chưa được đặt (nêu rõ **tên biến**
+    /// Trả [`ConfigError::MissingEnv`] khi secret bắt buộc chưa được đặt (nêu rõ **tên biến**
     /// và **trường cấu hình** khai báo nó, không bao giờ nêu giá trị).
     pub fn resolve_secrets(&self) -> Result<ResolvedSecrets, ConfigError> {
         self.resolve_secrets_with(|name| std::env::var(name).ok())
@@ -681,35 +691,39 @@ impl Config {
     where
         P: Fn(&str) -> Option<String>,
     {
-        fn read<P>(get_env: &P, field: &'static str, env: &str) -> Result<SecretString, ConfigError>
-        where
-            P: Fn(&str) -> Option<String>,
-        {
-            match get_env(env) {
-                Some(value) if !value.trim().is_empty() => Ok(SecretString::from(value)),
-                _ => Err(ConfigError::MissingEnv {
-                    field,
-                    env: env.to_string(),
-                }),
-            }
+        let llm_key = read_optional(&get_env, &self.llm.api_key_env);
+        // Fail-fast chỉ khi provider thực sự cần key:
+        // * `anthropic` — luôn cần;
+        // * `openai_compat` — cần trừ khi `base_url` trỏ tới server tự host (Ollama/vLLM).
+        // Lỗi khác "thiếu key" (ví dụ endpoint từ chối 401) sẽ nổi lên khi gọi API.
+        let llm_key_needed = match self.llm.provider {
+            LlmProviderKind::Anthropic => true,
+            LlmProviderKind::OpenAiCompat => self.llm.base_url.is_none(),
+        };
+        if llm_key_needed && llm_key.is_none() {
+            return Err(ConfigError::MissingEnv {
+                field: "llm.api_key_env",
+                env: self.llm.api_key_env.clone(),
+            });
         }
 
-        let llm_api_key = Some(read(&get_env, "llm.api_key_env", &self.llm.api_key_env)?);
-
+        // Key web_search **không** bắt buộc lúc khởi động: `chat` phải dùng được mà không
+        // cần Tavily (D6.4). Khi nhóm `web` bật mà thiếu key thì chỉ cảnh báo; M7 sẽ trả
+        // lỗi rõ ràng ngay tại lúc tool `web_search` được gọi mà không có key.
         let web_tools_enabled = self.tools.enabled.iter().any(|group| group == "web");
-        let web_search_api_key =
-            if web_tools_enabled && self.tools.web_search.provider.requires_api_key() {
-                Some(read(
-                    &get_env,
-                    "tools.web_search.api_key_env",
-                    &self.tools.web_search.api_key_env,
-                )?)
-            } else {
-                None
-            };
+        let web_search_api_key = read_optional(&get_env, &self.tools.web_search.api_key_env);
+        if web_tools_enabled
+            && self.tools.web_search.provider.requires_api_key()
+            && web_search_api_key.is_none()
+        {
+            tracing::warn!(
+                env = %self.tools.web_search.api_key_env,
+                "nhóm tool `web` đang bật nhưng chưa đặt biến môi trường cho key tìm kiếm — tool `web_search` sẽ báo lỗi khi được gọi"
+            );
+        }
 
         let telegram_token = if self.telegram.enabled {
-            Some(read(
+            Some(read_required(
                 &get_env,
                 "telegram.token_env",
                 &self.telegram.token_env,
@@ -719,11 +733,36 @@ impl Config {
         };
 
         Ok(ResolvedSecrets {
-            llm_api_key,
+            llm_api_key: llm_key,
             web_search_api_key,
             telegram_token,
         })
     }
+}
+
+/// Đọc env thành secret; trả `None` khi biến chưa đặt hoặc giá trị chỉ toàn khoảng trắng.
+fn read_optional<P>(get_env: &P, env: &str) -> Option<SecretString>
+where
+    P: Fn(&str) -> Option<String>,
+{
+    get_env(env)
+        .filter(|value| !value.trim().is_empty())
+        .map(SecretString::from)
+}
+
+/// Đọc env thành secret; lỗi [`ConfigError::MissingEnv`] khi thiếu (nêu tên biến + trường).
+fn read_required<P>(
+    get_env: &P,
+    field: &'static str,
+    env: &str,
+) -> Result<SecretString, ConfigError>
+where
+    P: Fn(&str) -> Option<String>,
+{
+    read_optional(get_env, env).ok_or_else(|| ConfigError::MissingEnv {
+        field,
+        env: env.to_string(),
+    })
 }
 
 /// Tạo lỗi cấu hình sai.
