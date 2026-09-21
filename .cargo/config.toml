@@ -1,0 +1,9 @@
+# Cấu hình Cargo cho toàn workspace.
+#
+# ts-rs (agents.md mục 3.1, 11): thư mục ghi kiểu TypeScript sinh tự động.
+# `relative = true` để đường dẫn tính từ gốc workspace, không phụ thuộc cwd.
+# Không sửa tay bất kỳ file nào trong web/src/api/generated/.
+[env]
+TS_RS_EXPORT_DIR = { value = "web/src/api/generated", relative = true }
+# i64/u64 trong kiểu API phải là `number` để khớp WebSocket/REST (message_id, session_id).
+TS_RS_LARGE_INT = "number"

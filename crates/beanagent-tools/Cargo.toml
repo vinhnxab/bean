@@ -1,0 +1,13 @@
+[package]
+name = "beanagent-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Trait Tool, registry, tool built-in, MCP client"
+
+[lints]
+workspace = true
+
+[dependencies]

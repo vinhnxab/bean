@@ -1,0 +1,13 @@
+[package]
+name = "beanagent-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "SQLite + FTS5 store, context builder, compaction"
+
+[lints]
+workspace = true
+
+[dependencies]

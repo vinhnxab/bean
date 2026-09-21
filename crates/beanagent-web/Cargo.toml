@@ -1,0 +1,19 @@
+[package]
+name = "beanagent-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Web server (axum): auth, REST, WebSocket, phục vụ UI nhúng"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# `ui`: nhúng web/dist vào binary bằng rust-embed (cài ở M9).
+ui = []
+
+[dependencies]
+beanagent-types.workspace = true

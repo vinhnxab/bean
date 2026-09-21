@@ -1,0 +1,13 @@
+[package]
+name = "beanagent-channels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Adapter kênh ngoài (Telegram, sau: Discord, Slack)"
+
+[lints]
+workspace = true
+
+[dependencies]

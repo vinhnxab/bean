@@ -1,0 +1,23 @@
+[package]
+name = "beanagent-llm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "LLM provider (Anthropic, OpenAI-compatible, Fake) cho BeanAgent"
+
+[lints]
+workspace = true
+
+[dependencies]
+beanagent-types.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

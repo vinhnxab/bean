@@ -1,0 +1,46 @@
+[package]
+name = "BeanAgent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Personal AI agent: một binary Rust (CLI + web + Telegram)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "BeanAgent"
+path = "src/main.rs"
+
+[features]
+default = ["ui"]
+# `ui`: nhúng giao diện React đã build (rust-embed) — bật ở M9.
+# `cargo build --no-default-features` cho bản headless không cần Node (agents.md mục 2).
+ui = ["dep:beanagent-web"]
+
+[dependencies]
+beanagent-llm.workspace = true
+beanagent-types.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+rustyline.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Web server (axum) — chỉ có khi feature `ui`. M1: crate còn rỗng.
+beanagent-web = { workspace = true, optional = true }
+
+# Các crate dưới đây sẽ được dùng ở các milestone sau (agents.md mục 21);
+# khai báo sẵn để `serve` ghép được toàn bộ hệ thống mà không phải sửa Cargo.toml.
+beanagent-channels.workspace = true
+beanagent-core.workspace = true
+beanagent-memory.workspace = true
+beanagent-security.workspace = true
+beanagent-skills.workspace = true
+beanagent-tools.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

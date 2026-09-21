@@ -1,0 +1,13 @@
+[package]
+name = "beanagent-skills"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Loader và tool cho skill"
+
+[lints]
+workspace = true
+
+[dependencies]

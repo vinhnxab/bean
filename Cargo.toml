@@ -1,0 +1,78 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/BeanAgent",
+  "crates/beanagent-channels",
+  "crates/beanagent-core",
+  "crates/beanagent-llm",
+  "crates/beanagent-memory",
+  "crates/beanagent-security",
+  "crates/beanagent-skills",
+  "crates/beanagent-tools",
+  "crates/beanagent-types",
+  "crates/beanagent-web",
+]
+# `default-members` để `cargo build --no-default-features` (bản headless, không UI)
+# chỉ áp dụng cho binary `BeanAgent` — xem agents.md mục 2 và 3.3.
+default-members = ["crates/BeanAgent"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# MSRV: ts-rs 12 / rmcp 3.4 / libsqlite3-sys 0.38 đều yêu cầu 1.88.
+rust-version = "1.88"
+license = "MIT"
+authors = ["BeanAgent contributors"]
+description = "Personal AI agent tự host: một binary Rust (CLI + web + Telegram)"
+publish = false
+
+[workspace.lints.rust]
+# agents.md mục 0.8: không panic trong code không phải test (clippy/rustc bật ở mức deny)
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+
+[workspace.dependencies]
+# --- crate nội bộ ---
+beanagent-types = { path = "crates/beanagent-types" }
+beanagent-llm = { path = "crates/beanagent-llm" }
+beanagent-security = { path = "crates/beanagent-security" }
+beanagent-tools = { path = "crates/beanagent-tools" }
+beanagent-memory = { path = "crates/beanagent-memory" }
+beanagent-skills = { path = "crates/beanagent-skills" }
+beanagent-core = { path = "crates/beanagent-core" }
+beanagent-channels = { path = "crates/beanagent-channels" }
+beanagent-web = { path = "crates/beanagent-web" }
+
+# --- ngoài (phiên bản đã xác nhận 2026-09-21 qua crates.io/docs.rs) ---
+anyhow = "1.0.104"
+async-trait = "0.1.89"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+rustyline = "18.0.1"
+secrecy = "0.10.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "signal",
+  "sync",
+  "time",
+  "fs",
+  "io-util",
+  "io-std",
+] }
+toml = "1.1.6"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[profile.release]
+lto = "thin"
+strip = true

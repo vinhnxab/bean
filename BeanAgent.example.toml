@@ -1,0 +1,64 @@
+# BeanAgent — cấu hình mẫu (agents.md mục 18)
+# Sao chép thành `BeanAgent.toml` rồi sửa theo nhu cầu:
+#     cp BeanAgent.example.toml BeanAgent.toml
+#
+# QUY TẮC: KHÔNG bao giờ ghi secret vào file này. Mọi secret đọc từ biến môi trường
+# theo trường *_env (ví dụ ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN).
+
+[agent]
+workspace = "./workspace"
+max_steps = 25
+context_budget_tokens = 100000
+timezone = "Asia/Ho_Chi_Minh"
+# Lớp kiểm tra thứ hai ở lõi, ngoài allowlist của từng kênh (mục 10).
+allowed_users = ["web:admin", "cli:local"]
+
+[data]
+dir = "~/.BeanAgent"                 # sqlite, audit log, auth.toml
+
+[llm]
+provider = "anthropic"               # anthropic | openai_compat
+model = "claude-sonnet-5"            # đổi tuỳ ý
+allowed_models = ["claude-sonnet-5"]
+api_key_env = "ANTHROPIC_API_KEY"
+# base_url = "http://localhost:11434/v1"   # cho openai_compat / Ollama
+max_tokens = 4096
+
+[tools]
+enabled = ["files", "shell", "web", "memory", "skills", "schedule"]
+
+[tools.web_search]
+provider = "tavily"                  # tavily | brave | searxng
+api_key_env = "TAVILY_API_KEY"
+
+[security]
+daily_token_budget = 2000000
+
+[security.sandbox]
+mode = "docker"                      # docker | host
+image = "BeanAgent-sandbox:latest"
+network = false
+memory = "512m"
+cpus = 1.0
+timeout_seconds = 60
+
+[web]
+enabled = true
+bind = "127.0.0.1:7878"
+public_origin = "http://127.0.0.1:7878"
+allow_remote = false
+session_ttl_hours = 168
+# trust_proxy = false                # bật CHỈ khi chạy sau reverse proxy tin cậy:
+                                     # khi đó giới hạn tần suất đăng nhập dùng X-Forwarded-For
+
+[telegram]
+enabled = false
+token_env = "TELEGRAM_BOT_TOKEN"
+allowed_user_ids = [123456789]
+rate_limit_per_minute = 20
+
+[[mcp_servers]]
+name = "example"
+command = "/usr/local/bin/some-mcp-server"
+args = []
+trust = false

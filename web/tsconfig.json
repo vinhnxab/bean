@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "useDefineForClassFields": true,
+
+    /* agents.md mục 0.9: TypeScript strict, không dùng `any` */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    /* alias @/* — cần cho shadcn CLI và cho import nội bộ (agents.md mục 3.2).
+       Lưu ý: TypeScript 7 đã BỎ `baseUrl`; `paths` được resolve tương đối với tsconfig. */
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": ["src", "vite.config.ts"]
+}

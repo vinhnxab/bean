@@ -1,0 +1,31 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# Web
+web/node_modules/
+web/dist/
+web/coverage/
+web/.vite/
+# Lưu ý: web/src/api/generated/ PHẢI được commit (make check-rust so `git diff --exit-code`
+# trên thư mục này để bắt kiểu TS lệch với Rust — agents.md mục 3.3, 11.3).
+
+# Dữ liệu chạy của agent (agents.md mục 4, 18)
+/workspace/*
+!/workspace/.gitkeep
+/data/
+BeanAgent.toml
+auth.toml
+
+# Secret / log / môi trường
+.env
+.env.*
+*.log
+*.jsonl
+
+# Trình soạn thảo / hệ điều hành
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json

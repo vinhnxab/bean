@@ -1,0 +1,10 @@
+# Cấu hình pnpm 11 cho thư mục web/ (agents.md mục 3.2, docs/decisions.md D3.13).
+#
+# pnpm 11 đã xoá `onlyBuiltDependencies` và thay bằng map `allowBuilds`.
+# `strictDepBuilds` mặc định `true`: dependency có build script mà chưa được duyệt
+# sẽ làm `pnpm install` BÁO LỖI (đây là hành vi an toàn, không phải lỗi cấu hình).
+#
+# Nếu install báo lỗi về một package chưa được duyệt: đọc tên package, tự đánh giá,
+# rồi thêm vào đây với `true` (cho phép) hoặc `false` (chặn có chủ ý) và ghi lý do.
+strictDepBuilds: true
+allowBuilds: {}

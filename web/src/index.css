@@ -1,0 +1,19 @@
+/* BeanAgent — Tailwind CSS v4 (agents.md mục 3.2).
+   v4 không cần tailwind.config.js: cấu hình nằm ngay trong CSS. */
+@import "tailwindcss";
+
+/* Font tự host, không dùng Google Fonts/CDN. Gói @fontsource-variable/inter
+   được import trong src/main.tsx. */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Giao diện tối/sáng theo hệ thống (agents.md mục 12.1). */
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-white text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+}

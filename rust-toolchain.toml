@@ -1,0 +1,6 @@
+# Toolchain ghim theo agents.md mục 3.1 (Rust stable).
+# MSRV của workspace là 1.88 (xem [workspace.package].rust-version).
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

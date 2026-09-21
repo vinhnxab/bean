@@ -1,0 +1,13 @@
+[package]
+name = "beanagent-security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Path jail (cap-std), sandbox shell, SSRF, policy/confirm, audit log"
+
+[lints]
+workspace = true
+
+[dependencies]
