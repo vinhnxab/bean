@@ -24,9 +24,11 @@ ui = ["dep:beanagent-web"]
 beanagent-llm.workspace = true
 beanagent-types.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 rustyline.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

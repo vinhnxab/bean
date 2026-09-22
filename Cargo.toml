@@ -70,12 +70,27 @@ tokio = { version = "1.53.1", features = [
   "fs",
   "io-util",
   "io-std",
+  "process",
 ] }
 toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 # Mock HTTP server cho test provider (M2).
 wiremock = "0.6.5"
+
+# --- M3: tools + agent loop (phiên bản đã xác nhận qua index.crates.io 2026-09-21) ---
+# JSON Schema cho tool: derive từ struct tham số; doc comment thành description (mục 7.1).
+schemars = "1.2.2"
+# CancellationToken cho huỷ run giữa chừng (mục 6).
+tokio-util = "0.7.19"
+# Glob matching cho tool `glob` (`**` hiểu đúng ranh giới `/`).
+globset = "0.4.20"
+# Duyệt cây thư mục cho `glob`/`grep`.
+walkdir = "2.5.0"
+# Pattern regex cho tool `grep`.
+regex = "1.13.1"
+# RFC3339 timestamps + "Current time" trong system prompt (mục 19). Cron ở M13 dùng crate khác.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 
 [profile.release]
 lto = "thin"

@@ -17,28 +17,32 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use beanagent_llm::{ChatRequest, FakeProvider, LlmProvider};
-use beanagent_types::Message;
+use beanagent_core::{Decision, RunIo, RunTurnArgs, run_turn};
+use beanagent_llm::{FakeProvider, LlmProvider};
+use beanagent_tools::{FsWorkspace, ToolRegistry};
 use beanagent_types::config::Config;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
-use tokio::io::AsyncBufReadExt;
+use tokio_util::sync::CancellationToken;
 
 use crate::cli::ChatArgs;
 
 const PROMPT: &str = "bạn> ";
-
-/// System prompt tối thiểu cho M2; bản đầy đủ theo agents.md mục 19 được dựng ở M3.
-const SYSTEM_PROMPT_MINIMAL: &str =
-    "You are BeanAgent, a personal AI assistant running on the user's own machine.";
 
 /// Chạy REPL.
 ///
 /// # Errors
 /// Lỗi khi nạp cấu hình/kịch bản/secret, hoặc khi không mở được terminal.
 pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
-    let config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
+    let mut config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
+    // `--workspace` ghi đè `[agent] workspace` (tiện cho demo/test).
+    if let Some(ws) = &args.workspace {
+        config.agent.workspace = ws.clone();
+    }
     let provider = build_provider(args, &config)?;
+    let registry = build_registry(&config)?;
+    let store = beanagent_core::store::MemoryStore::new();
+    let cancel = CancellationToken::new();
 
     println!(
         "BeanAgent chat — provider: {}. Gõ /exit hoặc Ctrl-D để thoát.",
@@ -47,10 +51,11 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     println!("workspace: {}", config.agent.workspace.display());
 
     if std::io::stdin().is_terminal() {
-        run_interactive(&config, &provider).await
+        run_interactive(&config, &provider, &registry, store, cancel.clone()).await?;
     } else {
-        run_piped(&config, &provider).await
+        run_piped(&config, &provider, &registry, store, cancel.clone()).await?;
     }
+    Ok(())
 }
 
 /// Chọn provider: kịch bản `--fake-llm` nếu có, ngược lại provider thật theo `[llm]`.
@@ -70,32 +75,28 @@ fn build_provider(args: &ChatArgs, config: &Config) -> Result<Arc<dyn LlmProvide
         .context("dựng provider LLM thất bại (kiểm tra [llm] trong BeanAgent.toml)")
 }
 
-/// Gửi đúng một lượt rồi in kết quả. Lỗi provider **không** làm hỏng phiên.
-async fn respond(
-    config: &Config,
-    provider: &Arc<dyn LlmProvider>,
-    messages: &mut Vec<Message>,
-    text: &str,
-) {
-    messages.push(Message::user(text));
-
-    let request = ChatRequest {
-        system: SYSTEM_PROMPT_MINIMAL,
-        messages,
-        tools: &[],
-        max_tokens: config.llm.max_tokens,
-    };
-
-    match provider.chat(request).await {
-        Ok(response) => {
-            if let Some(reply) = response.text.as_deref() {
-                println!("{reply}");
-            }
-            tracing::debug!(stop = ?response.stop, usage = ?response.usage, "lượt gọi xong");
-            messages.push(Message::from_response(&response));
+/// Xây registry tool từ cấu hình.
+///
+/// Tự tạo `agent.workspace` nếu chưa tồn tại (agents.md mục 4).
+fn build_registry(config: &Config) -> Result<ToolRegistry> {
+    std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
+        format!(
+            "không tạo được workspace {}",
+            config.agent.workspace.display()
+        )
+    })?;
+    let ws =
+        FsWorkspace::open(config.agent.workspace.clone()).context("không mở được workspace")?;
+    let ws: Arc<dyn beanagent_tools::WorkspaceFs> = Arc::new(ws);
+    let mut registry = ToolRegistry::with_workspace(ws);
+    if config.tools.enabled.iter().any(|g| g == "files") {
+        for tool in beanagent_tools::builtin::file_tools() {
+            registry
+                .register(tool)
+                .context("đăng ký tool file thất bại")?;
         }
-        Err(err) => eprintln!("lỗi provider: {err}"),
     }
+    Ok(registry)
 }
 
 /// `/exit` và `/quit` kết thúc phiên (M8 sẽ có bộ slash command đầy đủ ở lõi).
@@ -104,9 +105,16 @@ fn is_exit_command(text: &str) -> bool {
 }
 
 /// Vòng REPL tương tác (rustyline).
-async fn run_interactive(config: &Config, provider: &Arc<dyn LlmProvider>) -> Result<()> {
+async fn run_interactive(
+    config: &Config,
+    provider: &Arc<dyn LlmProvider>,
+    registry: &ToolRegistry,
+    store: beanagent_core::store::MemoryStore,
+    cancel: CancellationToken,
+) -> Result<()> {
+    let io = CliIo::interactive();
     let mut editor = DefaultEditor::new().context("không khởi tạo được terminal")?;
-    let mut messages: Vec<Message> = Vec::new();
+    let session = beanagent_types::SessionId::from(1i64);
 
     loop {
         let line = match editor.readline(PROMPT) {
@@ -132,18 +140,65 @@ async fn run_interactive(config: &Config, provider: &Arc<dyn LlmProvider>) -> Re
         // Lỗi lịch sử không làm hỏng phiên chat.
         let _ = editor.add_history_entry(&text);
 
-        respond(config, provider, &mut messages, &text).await;
+        let io_ref = &io;
+        let result = run_turn(RunTurnArgs {
+            store: &store,
+            registry,
+            llm: provider.as_ref(),
+            config,
+            session,
+            user_text: text,
+            io: io_ref,
+            cancel: cancel.clone(),
+        })
+        .await;
+
+        match result {
+            Ok(final_text) => {
+                if !final_text.is_empty() {
+                    println!("{final_text}");
+                }
+            }
+            Err(err) => {
+                eprintln!("lỗi agent: {err}");
+            }
+        }
     }
 
     Ok(())
 }
 
-/// Chế độ không có TTY: đọc từng dòng từ stdin cho tới EOF.
-async fn run_piped(config: &Config, provider: &Arc<dyn LlmProvider>) -> Result<()> {
-    let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
-    let mut messages: Vec<Message> = Vec::new();
+/// Chế độ không có TTY: đọc **toàn bộ** stdin trước vào hàng đợi dùng chung
+/// (REPL và `confirm` cùng lấy từ đó — xem `SharedLines`), chạy tới hết hoặc `/exit`.
+async fn run_piped(
+    config: &Config,
+    provider: &Arc<dyn LlmProvider>,
+    registry: &ToolRegistry,
+    store: beanagent_core::store::MemoryStore,
+    cancel: CancellationToken,
+) -> Result<()> {
+    use tokio::io::AsyncReadExt;
+    let mut buf = String::new();
+    tokio::io::stdin()
+        .read_to_string(&mut buf)
+        .await
+        .context("đọc stdin thất bại")?;
+    let queue: SharedLines = Arc::new(tokio::sync::Mutex::new(
+        buf.lines().map(str::to_string).collect(),
+    ));
+    let io = CliIo::piped(queue.clone());
+    let session = beanagent_types::SessionId::from(1i64);
 
-    while let Some(line) = lines.next_line().await.context("đọc stdin thất bại")? {
+    loop {
+        let line = {
+            // Guard của khoá phải được thả **trước khi** chạy run_turn: `confirm` của
+            // CliIo trong turn cũng lấy khoá này. Nếu giữ guard qua `.await` của thân
+            // vòng lặp (temporary của scrutinee `while let` sống hết thân) sẽ deadlock.
+            match queue.lock().await.pop_front() {
+                Some(l) => l,
+                None => break,
+            }
+        };
         let text = line.trim().to_string();
         if text.is_empty() {
             continue;
@@ -151,8 +206,108 @@ async fn run_piped(config: &Config, provider: &Arc<dyn LlmProvider>) -> Result<(
         if is_exit_command(&text) {
             break;
         }
-        respond(config, provider, &mut messages, &text).await;
+
+        let io_ref = &io;
+        let result = run_turn(RunTurnArgs {
+            store: &store,
+            registry,
+            llm: provider.as_ref(),
+            config,
+            session,
+            user_text: text,
+            io: io_ref,
+            cancel: cancel.clone(),
+        })
+        .await;
+
+        match result {
+            Ok(final_text) => {
+                if !final_text.is_empty() {
+                    println!("{final_text}");
+                }
+            }
+            Err(err) => {
+                eprintln!("lỗi agent: {err}");
+            }
+        }
     }
 
     Ok(())
+}
+
+/// Hàng đợi dòng stdin dùng chung cho REPL và `confirm` trong chế độ pipe.
+///
+/// `BufReader` của REPL đọc trước được nhiều dòng vào buffer nội bộ, khiến
+/// `confirm` đọc thẳng `stdin` thấy EOF và luôn từ chối (mục 22). Đọc toàn bộ
+/// stdin một lần rồi chia qua hàng đợi dùng chung để hai bên không giành nhau.
+type SharedLines = Arc<tokio::sync::Mutex<std::collections::VecDeque<String>>>;
+
+/// Implement `RunIo` cho CLI.
+struct CliIo {
+    /// `Some` khi chạy ở chế độ pipe: confirm lấy câu trả lời từ hàng đợi thay vì stdin.
+    piped: Option<SharedLines>,
+}
+
+impl CliIo {
+    fn interactive() -> Self {
+        Self { piped: None }
+    }
+
+    fn piped(lines: SharedLines) -> Self {
+        Self { piped: Some(lines) }
+    }
+}
+
+#[async_trait::async_trait]
+impl RunIo for CliIo {
+    fn on_text(&self, text: &str) {
+        print!("{text}");
+    }
+
+    fn on_tool_start(&self, tool: &str, summary: &str, args: &str) {
+        println!("[tool] {tool}: {summary} ({args})");
+    }
+
+    fn on_tool_end(&self, tool: &str, ok: bool, output: &str) {
+        if ok {
+            println!("[tool] {tool}: OK");
+            if !output.is_empty() {
+                println!("{output}");
+            }
+        } else {
+            eprintln!("[tool] {tool}: LỖI — {output}");
+        }
+    }
+
+    async fn confirm(
+        &self,
+        prompt: &str,
+        _allow_in_session: bool,
+        _timeout: std::time::Duration,
+    ) -> Option<Decision> {
+        println!("[xác nhận] {prompt}");
+        print!("Cho phép? (y/n/s): ");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+
+        let line = if let Some(queue) = &self.piped {
+            queue.lock().await.pop_front()
+        } else {
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).ok()?;
+            Some(input)
+        };
+        match line?.trim().to_lowercase().as_str() {
+            "y" | "yes" => Some(Decision::Allow),
+            "s" | "session" | "allow-in-session" => Some(Decision::AllowInSession),
+            _ => Some(Decision::Deny),
+        }
+    }
+
+    fn cancel_token(&self) -> &CancellationToken {
+        // CLI không có cancel token thực tế, dùng token không bao giờ bị huỷ
+        use std::sync::OnceLock;
+        static TOKEN: OnceLock<CancellationToken> = OnceLock::new();
+        TOKEN.get_or_init(CancellationToken::new)
+    }
 }

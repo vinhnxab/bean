@@ -11,3 +11,18 @@ description = "Trait Tool, registry, tool built-in, MCP client"
 workspace = true
 
 [dependencies]
+beanagent-types.workspace = true
+async-trait.workspace = true
+globset.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

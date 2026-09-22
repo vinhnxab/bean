@@ -1,0 +1,175 @@
+//! [`TypedTool<P>`] — bộ chuyển đổi từ một handler kiểu hoá sang [`Tool`](crate::Tool)
+//! (agents.md mục 7.1).
+//!
+//! Schema sinh bằng `schemars` từ struct tham số `P`:
+//! * doc comment của struct ⇒ `description` gửi cho model — hãy viết rõ *khi nào dùng*;
+//! * doc comment của từng field ⇒ `description` của tham số;
+//! * `#[serde(deny_unknown_fields)]` trên `P` ⇒ `additionalProperties: false` trong schema
+//!   **và** serde sẽ trả lỗi khi model gửi tham số thừa.
+//!
+//! Lưu ý khi viết handler: async block phải **không mượn `ctx`** (extract dữ liệu cần thiết
+//! trước), để future vẫn là kiểu `'static` khớp bound của `TypedTool`.
+
+#![allow(clippy::type_complexity)]
+
+use std::future::Future;
+use std::marker::PhantomData;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+
+use crate::ctx::ToolCtx;
+use crate::error::ToolError;
+use crate::tool::Tool;
+use beanagent_types::{Risk, ToolSpec};
+
+/// Sinh [`ToolSpec`] từ struct tham số `P: JsonSchema` (D6.10: schema giữ thô, provider
+/// chịu trách nhiệm chuẩn hoá `$defs`/`$ref` trước khi gửi API).
+///
+/// `description` lấy từ doc comment của struct `P` (schemars tự đưa vào trường
+/// `description` của schema); nếu thiếu thì rỗng — khi đó model chỉ đọc được tên tool.
+#[must_use]
+pub fn typed_spec<P: JsonSchema>(name: &str) -> ToolSpec {
+    let schema = schemars::schema_for!(P);
+    // Serialize của `Schema` (bọc `serde_json::Value`) không thể thất bại trong thực tế;
+    // vẫn dùng fallback để không vi phạm quy tắc "không unwrap" (mục 0.8).
+    let value = serde_json::to_value(&schema).unwrap_or_else(|_| serde_json::json!({}));
+    let description = value
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    ToolSpec::new(name, description, value)
+}
+
+/// Deserialize tham số từ JSON của model — **đầu vào không tin cậy** (mục 22.11).
+///
+/// Lỗi trả về kèm danh sách tham số hợp lệ (từ schema) để model tự sửa.
+///
+/// # Errors
+/// [`ToolError::InvalidArgs`] khi JSON sai schema (thiếu/thừa/sai kiểu).
+pub fn deserialize_params<P: DeserializeOwned>(
+    args: Value,
+    schema: &Value,
+) -> Result<P, ToolError> {
+    serde_json::from_value(args).map_err(|err| {
+        let valid = schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .map(|props| props.keys().cloned().collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        ToolError::InvalidArgs(format!("{err}. Tham số hợp lệ: {valid}"))
+    })
+}
+/// Tool kiểu hoá: handler nhận tham số đã deserialize thay vì JSON thô.
+///
+/// ```ignore
+/// let tool = TypedTool::<GreetParams, _, _>::new("greet", Risk::Safe, |_ctx, p| async move {
+///     Ok(format!("xin chào {}", p.name))
+/// });
+/// ```
+pub struct TypedTool<P, F, Fut> {
+    name: String,
+    spec: ToolSpec,
+    default_risk: Risk,
+    risk_fn: Option<Arc<dyn Fn(&Value) -> Risk + Send + Sync>>,
+    handler: F,
+    _phantom: PhantomData<fn(P) -> Fut>,
+}
+
+impl<P, F, Fut> TypedTool<P, F, Fut>
+where
+    P: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    F: for<'a> Fn(&'a ToolCtx, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<String, ToolError>> + Send + 'static,
+{
+    /// Tạo tool với mức rủi ro cố định.
+    #[must_use]
+    pub fn new(name: &str, risk: Risk, handler: F) -> Self {
+        Self::build(name, risk, None, handler)
+    }
+
+    /// Tạo tool với mức rủi ro **phụ thuộc tham số** (mục 7.1).
+    #[must_use]
+    pub fn with_risk_fn(
+        name: &str,
+        risk_fn: impl Fn(&Value) -> Risk + Send + Sync + 'static,
+        handler: F,
+    ) -> Self {
+        Self::build(name, Risk::Safe, Some(Arc::new(risk_fn)), handler)
+    }
+
+    fn build(
+        name: &str,
+        default_risk: Risk,
+        risk_fn: Option<Arc<dyn Fn(&Value) -> Risk + Send + Sync>>,
+        handler: F,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            spec: typed_spec::<P>(name),
+            default_risk,
+            risk_fn,
+            handler,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Tóm tắt mặc định cho `describe`: ghép `khoá=giá trị` (giá trị cắt 40 ký tự).
+    fn summary_from_args(&self, args: &Value) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(map) = args.as_object() {
+            for (key, value) in map {
+                let rendered = match value {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                let (cut, was_cut) = crate::text::truncate_chars(&rendered, 40)
+                    .map_or((rendered.as_str(), false), |(kept, _)| (kept, true));
+                let suffix = if was_cut { "…" } else { "" };
+                parts.push(format!("{key}={cut}{suffix}"));
+            }
+        }
+        let joined = parts.join("; ");
+        if let Some((kept, _)) = crate::text::truncate_chars(&joined, 120) {
+            format!("{kept}…")
+        } else {
+            joined
+        }
+    }
+}
+
+#[async_trait]
+impl<P, F, Fut> Tool for TypedTool<P, F, Fut>
+where
+    P: DeserializeOwned + JsonSchema + Send + Sync + 'static,
+    F: for<'a> Fn(&'a ToolCtx, P) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<String, ToolError>> + Send + 'static,
+{
+    fn spec(&self) -> ToolSpec {
+        self.spec.clone()
+    }
+
+    fn risk(&self, args: &Value) -> Risk {
+        match &self.risk_fn {
+            Some(f) => f(args),
+            None => self.default_risk,
+        }
+    }
+
+    fn describe(&self, args: &Value) -> String {
+        let summary = self.summary_from_args(args);
+        if summary.is_empty() {
+            return self.name.clone();
+        }
+        format!("{}: {summary}", self.name)
+    }
+
+    async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
+        let params: P = deserialize_params(args, &self.spec.parameters)?;
+        (self.handler)(ctx, params).await
+    }
+}

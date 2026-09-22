@@ -126,6 +126,8 @@ impl WebSearchProvider {
 pub struct AgentConfig {
     /// Thư mục làm việc của agent (mọi thao tác file bị jail trong đây).
     pub workspace: PathBuf,
+    /// Tên agent hiển thị trong prompt và log.
+    pub agent_name: String,
     /// Trần số bước của một run (agents.md mục 6).
     pub max_steps: u32,
     /// Ngân sách token cho context gửi model (mục 8.2, 8.3).
@@ -140,6 +142,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             workspace: PathBuf::from("./workspace"),
+            agent_name: "BeanAgent".to_string(),
             max_steps: 25,
             context_budget_tokens: 100_000,
             timezone: "Asia/Ho_Chi_Minh".to_string(),
@@ -285,6 +288,8 @@ impl Default for SandboxConfig {
 pub struct SecurityConfig {
     /// Ngân sách token mỗi ngày (mục 15.9).
     pub daily_token_budget: u64,
+    /// Trần thời gian cho mỗi tool call (giây, agents.md mục 6).
+    pub tool_timeout_seconds: u64,
     /// Cấu hình sandbox cho `run_shell`.
     pub sandbox: SandboxConfig,
 }
@@ -293,6 +298,7 @@ impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             daily_token_budget: 2_000_000,
+            tool_timeout_seconds: 60,
             sandbox: SandboxConfig::default(),
         }
     }

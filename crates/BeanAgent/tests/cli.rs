@@ -253,3 +253,59 @@ fn chat_rejects_unknown_config_file() {
     assert_ne!(code, 0, "cấu hình không tồn tại phải là lỗi");
     assert!(stderr.contains("cấu hình"), "stderr:\n{stderr}");
 }
+
+/// Regression M3: confirm (tool `Confirm`) ở chế độ pipe không được deadlock —
+/// `CliIo::confirm` dùng chung hàng đợi stdin với REPL; nếu vòng lặp REPL giữ
+/// MutexGuard xuyên suốt `run_turn` (lỗi mục 22.7) thì confirm chờ khoá vĩnh viễn.
+#[tokio::test]
+async fn chat_pipe_confirm_for_write_file_does_not_deadlock() {
+    use tokio::io::AsyncWriteExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("kichban.json");
+    std::fs::write(
+        &script,
+        concat!(
+            r#"{"responses":[{"tool_calls":[{"id":"c1","name":"write_file","#,
+            r#""args":{"path":"kiem-tra.txt","content":"nội dung 🦀"}}],"stop":"tool_use"},"#,
+            r#"{"text":"Đã ghi xong","stop":"end_turn"}]}"#
+        ),
+    )
+    .unwrap();
+
+    let mut child = tokio::process::Command::new(bin())
+        .args([
+            "chat",
+            "--fake-llm",
+            script.to_str().unwrap(),
+            "--workspace",
+            dir.path().join("ws").to_str().unwrap(),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Dòng 2 là câu trả lời "y" cho confirm của write_file.
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("tạo file\ny\n/exit\n".as_bytes())
+        .await
+        .unwrap();
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+        .await
+        .expect("DEADLOCK: chat không thoát trong 30s — confirm chờ khoá stdin vĩnh viễn")
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(output.status.success(), "stdout:\n{stdout}");
+    assert!(stdout.contains("[xác nhận]"), "stdout:\n{stdout}");
+    assert!(stdout.contains("Đã ghi xong"), "stdout:\n{stdout}");
+    assert!(
+        dir.path().join("ws/kiem-tra.txt").exists(),
+        "file phải được ghi sau khi cho phép: {stdout}"
+    );
+}

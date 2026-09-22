@@ -37,6 +37,10 @@ pub struct ChatArgs {
     /// Dùng kịch bản JSON làm provider giả thay vì gọi API thật.
     #[arg(long, value_name = "FILE")]
     pub fake_llm: Option<PathBuf>,
+
+    /// Ghi đè thư mục workspace (`[agent] workspace`) — tiện cho demo/test.
+    #[arg(long, value_name = "DIR")]
+    pub workspace: Option<PathBuf>,
 }
 
 /// Tham số của `serve`.

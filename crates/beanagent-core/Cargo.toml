@@ -11,3 +11,16 @@ description = "Agent loop, context, Router, trait Channel, scheduler, learning l
 workspace = true
 
 [dependencies]
+beanagent-types.workspace = true
+beanagent-llm.workspace = true
+beanagent-tools.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
