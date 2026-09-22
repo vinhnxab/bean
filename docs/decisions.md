@@ -163,3 +163,34 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   `schema::sanitize_tool_schema` trước khi gửi: inline `$ref` (trần độ sâu 16 chống đệ
   quy), xoá `$schema`/`$defs`/`$id`, bảo đảm root `"type":"object"` (Anthropic yêu cầu).
 
+
+---
+
+## 7. Quyết định riêng của M3 (tools + agent loop)
+
+* **D7.1** Path jail đặt sau trait `WorkspaceFs` (`beanagent_tools::workspace`): M3 dùng
+  `FsWorkspace` với kiểm tra đơn giản (chặn đường dẫn tuyệt đối, thành phần `..`, và
+  symlink thoát ra qua `canonicalize` + kiểm tra prefix). M4 thay bằng `cap-std::fs::Dir`
+  — chỉ cài lại trait này, tool và agent loop không đổi.
+* **D7.2** Chống lặp (mục 6): đếm thất bại theo cặp `(tool, hash tham số)`. Hai lần
+  thất bại giống nhau liên tiếp → chèn gợi ý `[Gợi ý] ... hãy thử cách khác.` vào chính
+  tool result (model đọc được). Lần thứ ba gọi lại đúng cặp đó → ghi tool result lỗi và
+  kết thúc run với `AgentError::RepeatFailure`. Gọi tool khác hoặc thành công thì reset.
+* **D7.3** Huỷ giữa chừng: `tokio::select!` (nhánh `biased` ưu tiên cancel) đua
+  `timeout(tool_timeout) · execute_tool` với `cancel.cancelled()`. Khi huỷ, tool result
+  `"[bị người dùng huỷ]"` vẫn được ghi sau khi select hoàn tất (cancel-safety, mục 22.10)
+  rồi run kết thúc bằng `AgentError::Cancelled`.
+* **D7.4** `ToolSpec::new(name, description, parameters)` — JSON schema thô từ schemars;
+  việc chuẩn hoá là trách nhiệm của provider (D6.10).
+* **D7.5** `MemoryStore` (`beanagent-core::store`): in-memory; `history(session, before,
+  limit)` trả message cũ → mới, tối đa `limit` message gần nhất (`before` = chỉ lấy
+  trước seq đó, `limit = 0` = không giới hạn). SQLite thay ở M5, giữ nguyên trait `Store`.
+* **D7.6** System prompt (M3) theo mẫu mục 19 nhưng mục Skills/Memory để trống —
+  `system_prompt(agent_cfg, skills_index, memory_md, user_md)`; M5/M6 chỉ truyền nội dung.
+* **D7.7** Confirm trên CLI: prompt `Cho phép? (y/n/s)` (`s` = cho phép trong phiên);
+  nhập khác/trống/EOF = từ chối. Timeout 300s hardcode ở M3 — Router (M8) sẽ quản lý
+  `confirm_id`/timeout thật.
+* **D7.8** Trạng thái demo model thật của M3: chưa chạy được trong môi trường build
+  (không có API key nào trong env, không có Ollama local). Đã xác minh thiếu key → lỗi
+  cấu hình rõ ràng, thoát sạch. Demo `--fake-llm` (kịch bản `tests/e2e/demo_hello.json`:
+  write_file → confirm → read_file) chạy đúng; người dùng cần tự chạy lại với key thật.
