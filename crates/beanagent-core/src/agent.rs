@@ -11,7 +11,7 @@ use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
 use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 use beanagent_security::untrusted::contains_untrusted_block;
 use beanagent_tools::{ToolCtx, ToolError};
-use beanagent_types::{Config, Message, Role, ToolCall, ToolSpec};
+use beanagent_types::{Config, Message, ToolCall, ToolSpec};
 use tokio::time::timeout;
 
 use crate::run_io::{Decision, RunIo};
@@ -63,7 +63,14 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
         audit: audit_log,
         channel,
     } = args;
-    store.append(session, Message::user(user_text)).await?;
+    // (M5/D8.10) System prompt chỉ đi qua `ChatRequest.system` — **không** nhân bản nó
+    // thành message `User` (M3 từng làm vậy: tốn token gấp đôi cho phần system và dễ
+    // bị model hiểu nhầm là câu lệnh của người dùng). Giữ `turn_input` để dựng lỡ
+    // trường hợp lịch sử rỗng.
+    let turn_input = user_text;
+    store
+        .append(session, Message::user(turn_input.clone()))
+        .await?;
     store.compact(session, llm, config).await?;
     let mut failure_counts: HashMap<RepeatKey, u32> = HashMap::new();
     let mut consecutive_same_failure: Option<RepeatKey> = None;
@@ -87,10 +94,12 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
         let workspace = registry.workspace_opt();
         let ctx = crate::context::build(store, config, session, workspace.as_deref()).await?;
         let system = ctx.system;
-        let messages: Vec<Message> = system_to_messages(&system)
-            .into_iter()
-            .chain(ctx.messages)
-            .collect();
+        let mut messages = ctx.messages;
+        if messages.is_empty() {
+            // Provider (Anthropic) từ chối `messages: []`. Sau `append` ở trên lịch sử
+            // không bao giờ rỗng — đây chỉ là lưới an toàn, không phải đường đi bình thường.
+            messages.push(Message::user(turn_input.clone()));
+        }
 
         let tool_specs: Vec<ToolSpec> = registry.specs();
         let req = beanagent_llm::ChatRequest {
@@ -324,16 +333,6 @@ fn record_audit(log: Option<&Arc<AuditLog>>, entry: &AuditEntry) {
     {
         tracing::warn!("ghi audit log thất bại: {err}");
     }
-}
-
-fn system_to_messages(system: &str) -> Vec<Message> {
-    vec![Message {
-        role: Role::User,
-        text: Some(system.to_string()),
-        tool_calls: Vec::new(),
-        tool_call_id: None,
-        is_error: false,
-    }]
 }
 
 async fn execute_tool(

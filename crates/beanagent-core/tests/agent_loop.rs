@@ -14,7 +14,7 @@ use beanagent_core::{RunTurnArgs, run_turn};
 use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
 use beanagent_security::CapWorkspace;
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
-use beanagent_types::{Config, LlmResponse, Risk, SessionId, ToolCall, ToolSpec};
+use beanagent_types::{Config, LlmResponse, Risk, Role, SessionId, ToolCall, ToolSpec};
 use tokio_util::sync::CancellationToken;
 
 /// Provider dựng sẵn: trả lần lượt danh sách response; hết thì lỗi (không panic).
@@ -567,4 +567,93 @@ async fn cancellation_persists_placeholder_results() {
             .unwrap_or_default()
             .contains("bị người dùng huỷ")
     );
+}
+
+// ---------------------------------------------------------------------------
+// M5/D8.10 — system prompt gửi đúng một lần
+// ---------------------------------------------------------------------------
+
+/// Một lượt gọi LLM đã ghi lại để kiểm tra system prompt.
+#[derive(Debug)]
+struct RecordedRequest {
+    system: String,
+    roles: Vec<Role>,
+    first_text: Option<String>,
+    /// System prompt có bị lặp thành message nào không.
+    system_leaked_into_messages: bool,
+}
+
+/// Provider ghi lại request rồi trả về text tĩnh (nên mỗi lượt chỉ chạy một vòng).
+#[derive(Debug)]
+struct RecordingProvider {
+    seen: Mutex<Vec<RecordedRequest>>,
+}
+
+#[async_trait]
+impl LlmProvider for RecordingProvider {
+    async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
+        self.seen.lock().unwrap().push(RecordedRequest {
+            system: req.system.to_string(),
+            roles: req.messages.iter().map(|message| message.role).collect(),
+            first_text: req
+                .messages
+                .first()
+                .and_then(|message| message.text.clone()),
+            system_leaked_into_messages: req.messages.iter().any(|message| {
+                message
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| text.starts_with("You are "))
+            }),
+        });
+        Ok(LlmResponse::text_only("xong"))
+    }
+
+    fn name(&self) -> &'static str {
+        "recording"
+    }
+}
+
+/// System prompt phải nằm ở `ChatRequest.system` và **không** bị nhân bản thành message
+/// `User` (M3 từng làm vậy — tốn token gấp đôi). Message đầu tiên phải là tin người dùng
+/// thật, đúng mục 8.2.
+#[tokio::test]
+async fn system_prompt_is_sent_once_via_system_field() {
+    let (_probe, _ws, reg) = probe(Risk::Safe, false);
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let provider = RecordingProvider {
+        seen: Mutex::new(Vec::new()),
+    };
+
+    let out = run_turn(RunTurnArgs {
+        store: &store,
+        registry: &reg,
+        llm: &provider,
+        config: &cfg(5),
+        session: SessionId::new(1),
+        user_text: "xin chào".into(),
+        io: &io,
+        cancel: io.cancel.clone(),
+        session_policy: None,
+        audit: None,
+        channel: "cli",
+    })
+    .await
+    .unwrap();
+    assert_eq!(out, "xong");
+
+    let seen = provider.seen.lock().unwrap();
+    assert_eq!(seen.len(), 1, "trả lời ngay ⇒ chỉ một lượt gọi LLM");
+    let first = seen.first().unwrap();
+    assert!(
+        first.system.contains("You are"),
+        "system prompt phải nằm ở ChatRequest.system"
+    );
+    assert!(
+        !first.system_leaked_into_messages,
+        "system prompt bị nhân bản thành message"
+    );
+    assert_eq!(first.roles.first().copied(), Some(Role::User));
+    assert_eq!(first.first_text.as_deref(), Some("xin chào"));
 }

@@ -237,7 +237,10 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   (không tự nối đường dẫn). Ngân sách ở điểm 3 của mục 8.2 tính **riêng** cho lịch sử
   (`context_budget_tokens`), không trừ system prompt; message mới nhất luôn được giữ, và
   điểm cắt lùi thêm (`safe_cut::extend_start_backwards`) nếu cần để không tách cặp tool.
-* **D8.10** Tồn đọng có chủ ý (không sửa ở M5 vì ngoài phạm vi): `agent::run_turn` vẫn
-  gửi system prompt **hai lần** (trường `system` của `ChatRequest` + một message `User` do
-  `system_to_messages` tạo từ M3). Token bị dùng thừa gấp đôi cho system prompt; cần một
-  quyết định riêng trước khi bỏ (có thể ảnh hưởng hành vi model ở provider thật).
+* **D8.10** System prompt chỉ đi qua `ChatRequest.system`; **không** nhân bản thành message
+  `User` nữa (`system_to_messages` từ M3 đã bỏ). Lý do: M3 gửi trùng nên tốn token gấp đôi
+  cho phần system — M5 lại nhồi thêm tới 8.000 ký tự `MEMORY.md`/`USER.md` vào đó — và model
+  dễ hiểu nhầm system prompt là câu lệnh của người dùng; mục 8.2 cũng chỉ yêu cầu system ở
+  đúng chỗ đó. Vì Anthropic từ chối `messages: []`, `run_turn` giữ một lưới an toàn: lịch sử
+  rỗng thì gửi lại tin người dùng của lượt đó. Test hồi quy:
+  `system_prompt_is_sent_once_via_system_field` trong `core/tests/agent_loop.rs`.
