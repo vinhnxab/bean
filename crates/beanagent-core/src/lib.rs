@@ -6,6 +6,8 @@
 //! * **M3**: `agent::run_turn` (`max_steps`, lỗi tool ⇒ `is_error`, timeout từng tool, cắt output
 //!   tại ranh giới UTF-8, chống lặp, `CancellationToken`), `trait RunIo` (do Router sở hữu —
 //!   `docs/decisions.md` D1.2), `trait Store` bản in-memory, `agent::prompt` theo mục 19.
+//! * **M5**: `context::build` dựng context theo mục 8.2 (system prompt + `MEMORY.md`/`USER.md`
+//!   + `sessions.summary` + lịch sử vừa ngân sách token, cắt ở ranh giới an toàn).
 //! * **M8**: `Router` (hàng đợi theo session, `submit`/`events`/`resolve_confirm`/`cancel`/`notify`,
 //!   `RunEvent`, `Outbound`) + slash command xử lý trong lõi, `allowed_users`.
 //! * **M13**: `scheduler` (tick 30 giây, `trait Clock`, croner + chrono-tz, outbox retry).
@@ -16,11 +18,13 @@
 #![forbid(unsafe_code)]
 
 pub mod agent;
+pub mod context;
 pub mod prompt;
 pub mod run_io;
 pub mod store;
 
 pub use agent::{RunTurnArgs, run_turn};
+pub use context::TurnContext;
 pub use prompt::system_prompt;
 pub use run_io::{Decision, RunIo};
-pub use store::{MemoryStore, Store};
+pub use store::{MemoryStore, SqliteStore, Store, memory_tools};

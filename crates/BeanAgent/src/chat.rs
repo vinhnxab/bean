@@ -6,6 +6,9 @@
 //!   cho demo và test end-to-end không cần mạng.
 //! * **M3**: thêm agent loop + tool; **M8**: chuyển sang đi qua `Router` như một `Channel`
 //!   (`channel = "cli"`, `chat_id = "local"`), Ctrl-C trở thành `cancel` của run đang chạy.
+//! * **M5**: lịch sử hội thoại lưu bền vững vào SQLite + FTS5 (`data.dir/beanagent.db`).
+//!   `/new` lưu trữ phiên cũ rồi mở phiên mới; tool `memory_save`/`memory_search` được
+//!   đăng ký khi nhóm tool `memory` bật.
 //!
 //! Hai chế độ vào:
 //! * có TTY → `rustyline` (lịch sử, sửa dòng);
@@ -17,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use beanagent_core::{Decision, RunIo, RunTurnArgs, run_turn};
+use beanagent_core::{Decision, RunIo, RunTurnArgs, SqliteStore, Store, memory_tools, run_turn};
 use beanagent_llm::{FakeProvider, LlmProvider};
 use beanagent_security::{AuditLog, CapWorkspace, Sandbox, SessionPolicy, run_shell};
 use beanagent_tools::ToolRegistry;
@@ -69,6 +72,11 @@ fn expand_tilde(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Đường dẫn đến SQLite database.
+fn store_path(config: &Config) -> PathBuf {
+    expand_tilde(&config.data.dir).join("beanagent.db")
+}
+
 /// Chạy REPL.
 ///
 /// # Errors
@@ -80,9 +88,12 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         config.agent.workspace = ws.clone();
     }
     let provider = build_provider(args, &config)?;
-    let registry = build_registry(&config)?;
+    let store = Arc::new(
+        SqliteStore::open(&store_path(&config))
+            .map_err(|e| anyhow::anyhow!("không mở được store: {e}"))?,
+    );
+    let registry = build_registry(&config, store.clone())?;
     let security = build_security(&config);
-    let store = beanagent_core::store::MemoryStore::new();
     let cancel = CancellationToken::new();
 
     println!(
@@ -135,7 +146,7 @@ fn build_provider(args: &ChatArgs, config: &Config) -> Result<Arc<dyn LlmProvide
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
 /// Path jail bằng `CapWorkspace` (cap-std — mục 15.1); `run_shell` gắn sandbox
 /// docker/host (mục 15.2).
-fn build_registry(config: &Config) -> Result<ToolRegistry> {
+fn build_registry(config: &Config, store: Arc<SqliteStore>) -> Result<ToolRegistry> {
     std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
         format!(
             "không tạo được workspace {}",
@@ -162,6 +173,13 @@ fn build_registry(config: &Config) -> Result<ToolRegistry> {
             .register(run_shell(sandbox))
             .context("đăng ký run_shell thất bại")?;
     }
+    if config.tools.enabled.iter().any(|g| g == "memory") {
+        for tool in memory_tools(store) {
+            registry
+                .register(tool)
+                .context("đăng ký tool memory thất bại")?;
+        }
+    }
     Ok(registry)
 }
 
@@ -175,13 +193,17 @@ async fn run_interactive(
     config: &Config,
     provider: &Arc<dyn LlmProvider>,
     registry: &ToolRegistry,
-    store: beanagent_core::store::MemoryStore,
+    store: Arc<SqliteStore>,
     cancel: CancellationToken,
     security: &CliSecurity,
 ) -> Result<()> {
     let io = CliIo::interactive();
     let mut editor = DefaultEditor::new().context("không khởi tạo được terminal")?;
-    let session = beanagent_types::SessionId::from(1i64);
+    let mut session = store
+        .ensure_session("cli", "local", "")
+        .await
+        .map_err(|e| anyhow::anyhow!("không tạo được session: {e}"))?;
+    let store_ref: &dyn Store = &*store as &dyn Store;
 
     loop {
         let line = match editor.readline(PROMPT) {
@@ -201,6 +223,17 @@ async fn run_interactive(
         if text.is_empty() {
             continue;
         }
+        if text == "/new" {
+            if session.get() > 0 {
+                let _ = store.archive_session(session).await;
+            }
+            session = store
+                .ensure_session("cli", "local", "")
+                .await
+                .map_err(|e| anyhow::anyhow!("không tạo session mới: {e}"))?;
+            println!("→ Phiên mới đã tạo.");
+            continue;
+        }
         if is_exit_command(&text) {
             break;
         }
@@ -209,7 +242,7 @@ async fn run_interactive(
 
         let io_ref = &io;
         let result = run_turn(RunTurnArgs {
-            store: &store,
+            store: store_ref,
             registry,
             llm: provider.as_ref(),
             config,
@@ -244,7 +277,7 @@ async fn run_piped(
     config: &Config,
     provider: &Arc<dyn LlmProvider>,
     registry: &ToolRegistry,
-    store: beanagent_core::store::MemoryStore,
+    store: Arc<SqliteStore>,
     cancel: CancellationToken,
     security: &CliSecurity,
 ) -> Result<()> {
@@ -258,7 +291,11 @@ async fn run_piped(
         buf.lines().map(str::to_string).collect(),
     ));
     let io = CliIo::piped(queue.clone());
-    let session = beanagent_types::SessionId::from(1i64);
+    let mut session = store
+        .ensure_session("cli", "local", "")
+        .await
+        .map_err(|e| anyhow::anyhow!("không tạo được session: {e}"))?;
+    let store_ref: &dyn Store = &*store as &dyn Store;
 
     loop {
         let line = {
@@ -274,13 +311,24 @@ async fn run_piped(
         if text.is_empty() {
             continue;
         }
+        if text == "/new" {
+            if session.get() > 0 {
+                let _ = store.archive_session(session).await;
+            }
+            session = store
+                .ensure_session("cli", "local", "")
+                .await
+                .map_err(|e| anyhow::anyhow!("không tạo session mới: {e}"))?;
+            println!("→ Phiên mới đã tạo.");
+            continue;
+        }
         if is_exit_command(&text) {
             break;
         }
 
         let io_ref = &io;
         let result = run_turn(RunTurnArgs {
-            store: &store,
+            store: store_ref,
             registry,
             llm: provider.as_ref(),
             config,

@@ -1,8 +1,28 @@
 //! # BeanAgent-memory
 //!
-//! Bộ nhớ bền vững: SQLite + FTS5, xây dựng context, compaction (agents.md mục 8).
+//! Bộ nhớ bền vững: SQLite + FTS5, an toàn khi cắt lịch sử, tool bộ nhớ (agents.md mục 8).
 //!
-//! * **M5**: `tokio-rusqlite 0.8` với feature `bundled` (FTS5 có sẵn trong `bundled`),
-//!   migration theo `user_version`, trait `Store` cho lịch sử, context builder theo ngân sách
-//!   token, compaction **không bao giờ** cắt giữa cặp `assistant(tool_calls)` và `tool` result.
+//! * [`SqliteStore`] — **một** connection duy nhất nằm ở worker thread riêng; `rusqlite` là
+//!   API blocking nên không bao giờ được gọi trực tiếp trong async runtime (mục 22.8).
+//! * [`MemoryStore`] — bản in-memory dùng cho test vòng lặp (giữ nguyên từ M3).
+//! * [`safe_cut`] — bất biến số một của tầng này: **không bao giờ** giữ một `tool` result mà
+//!   assistant gọi ra nó đã bị loại bỏ (mục 8.3, 22.1).
+//! * [`memory_tool`] — `memory_save`/`memory_search` (FTS5/BM25, chuẩn hoá điểm theo nguồn).
+//!
+//! FTS5 có sẵn trong `libsqlite3-sys` ở chế độ `bundled` (cờ `-DSQLITE_ENABLE_FTS5` trong
+//! `build.rs`) nên không cần biến môi trường đặc biệt khi build.
+//! Context builder theo mục 8.2 nằm ở `beanagent_core::context` vì nó cần `WorkspaceFs` để
+//! đọc `MEMORY.md`/`USER.md` qua path jail.
 #![forbid(unsafe_code)]
+
+pub mod memory_tool;
+pub mod safe_cut;
+pub mod store;
+
+pub use memory_tool::memory_tools;
+pub use safe_cut::{
+    check_no_orphan_result, extend_start_backwards, find_compaction_start, find_safe_start,
+};
+pub use store::{
+    MemorySearchHit, MemorySource, MemoryStore, SqliteStore, Store, StoreError, StoredMessage,
+};

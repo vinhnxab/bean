@@ -64,6 +64,7 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
         channel,
     } = args;
     store.append(session, Message::user(user_text)).await?;
+    store.compact(session, llm, config).await?;
     let mut failure_counts: HashMap<RepeatKey, u32> = HashMap::new();
     let mut consecutive_same_failure: Option<RepeatKey> = None;
     // (M4, mục 15.4) Cờ untrusted dùng chung cho MỌI tool trong lượt — khi một tool
@@ -81,11 +82,14 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
     let policy = Policy::new();
 
     for _step in 0..config.agent.max_steps {
-        let system = crate::prompt::system_prompt(&config.agent, "", "", "");
-        let history = store.history(session, None, 200).await?;
+        // (M5, mục 8.2) Dựng context: system prompt + MEMORY.md/USER.md + summary của phiên
+        // + lịch sử vừa ngân sách token, cắt ở ranh giới an toàn (không tách cặp tool).
+        let workspace = registry.workspace_opt();
+        let ctx = crate::context::build(store, config, session, workspace.as_deref()).await?;
+        let system = ctx.system;
         let messages: Vec<Message> = system_to_messages(&system)
             .into_iter()
-            .chain(history)
+            .chain(ctx.messages)
             .collect();
 
         let tool_specs: Vec<ToolSpec> = registry.specs();

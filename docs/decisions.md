@@ -194,3 +194,50 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   (không có API key nào trong env, không có Ollama local). Đã xác minh thiếu key → lỗi
   cấu hình rõ ràng, thoát sạch. Demo `--fake-llm` (kịch bản `tests/e2e/demo_hello.json`:
   write_file → confirm → read_file) chạy đúng; người dùng cần tự chạy lại với key thật.
+
+---
+
+## 8. Quyết định riêng của M5 (bộ nhớ: SQLite + FTS5)
+
+* **D8.1** FTS5 **không** phải feature của `rusqlite`: `libsqlite3-sys 0.38.2` đã bật
+  `-DSQLITE_ENABLE_FTS5` sẵn ở chế độ `bundled` (xác nhận trong
+  `libsqlite3-sys-0.38.2/build.rs`, dòng 157–160). Vì vậy **không** cần `SQLITE3_CFLAGS`
+  hay `LIBSQLITE3_FLAGS` trong Makefile/`.cargo/config.toml`; nếu bản build tương lai bỏ
+  cờ này thì migration báo lỗi rõ "thiếu FTS5 trong SQLite?".
+* **D8.2** **Một** thread riêng (`beanagent-memory-worker`) sở hữu `rusqlite::Connection`
+  duy nhất: `SqliteStore::open` tạo connection, chạy pragma + migration **đồng bộ**, rồi
+  spawn worker; mọi thao tác đi qua `std::sync::mpsc::Sender<DbCommand>` + `oneshot` trả
+  kết quả. Lý do: `rusqlite` blocking (mục 22.8) và SQLite ghi tốt nhất với một writer.
+  `Drop for SqliteInner` đóng kênh rồi `join()` để WAL được flush trước khi tiến trình
+  thoát (test `sqlite_persists_messages_across_restart` kiểm chứng).
+* **D8.3** `messages.seq` được cấp trong **chính** câu `INSERT`
+  (`SELECT COALESCE(MAX(seq),0)+1 …`) nên không có khe hở tranh chấp mà vẫn chỉ một câu
+  lệnh (atomic).
+* **D8.4** FTS5 dùng `tokenize = "unicode61 remove_diacritics 2"`: gõ `bao cao` vẫn tìm ra
+  `báo cáo` (tiếng Việt — mục 8.4). Query là đầu vào **không tin cậy** nên
+  `sanitize_fts_query` chỉ giữ chữ-số/`_`, bọc từng từ trong `"…"`, và trả rỗng khi không
+  còn từ khoá — cú pháp FTS không thể bị phá.
+* **D8.5** BM25 phụ thuộc **kích thước bảng** (bảng 1 dòng ⇒ IDF ≈ 0 ⇒ điểm rất nhỏ), nên
+  điểm được **chuẩn hoá theo từng nguồn** trước khi trộn `memories` + `messages`:
+  `1.0` = liên quan nhất của nguồn đó; bằng điểm thì ghi nhớ dài hạn đứng trước (sort ổn
+  định).
+* **D8.6** Compaction: kích hoạt khi `chars/4 > 70%` của `agent.context_budget_tokens`
+  (`sessions.summary` cũ được đưa vào prompt để bản mới gộp cả hai), cắt ở message `User`
+  đầu tiên trong `K = 20` message cuối (`safe_cut::find_compaction_start`) — thoả **cả hai**
+  yêu cầu của mục 8.3 (ranh giới `User` **và** không tách cặp tool). Không tìm được ranh
+  giới an toàn ⇒ giữ nguyên lịch sử.
+* **D8.7** Compaction là **best-effort**: lỗi gọi LLM để tóm tắt (mạng, quota, hết ngân
+  sách) chỉ ghi `tracing::warn` và bỏ qua — không bao giờ làm hỏng run đang chạy.
+* **D8.8** `MemoryStore` (in-memory) vẫn được giữ và **cùng** trait `Store` để test M3
+  không phải đổi: test vòng lặp ghi thẳng `SessionId::new(1)` nên `append` tự tạo phiên và
+  `history` trả rỗng cho phiên chưa biết (thay vì `NotFound`). `SqliteStore` là bản dùng
+  thật ở `BeanAgent chat`; CLI bọc nó trong `Arc` để chia sẻ với tool bộ nhớ.
+* **D8.9** Context builder (mục 8.2) đặt ở `beanagent-core::context::build(store, config,
+  session, workspace)` vì cần `WorkspaceFs` để đọc `MEMORY.md`/`USER.md` qua path jail
+  (không tự nối đường dẫn). Ngân sách ở điểm 3 của mục 8.2 tính **riêng** cho lịch sử
+  (`context_budget_tokens`), không trừ system prompt; message mới nhất luôn được giữ, và
+  điểm cắt lùi thêm (`safe_cut::extend_start_backwards`) nếu cần để không tách cặp tool.
+* **D8.10** Tồn đọng có chủ ý (không sửa ở M5 vì ngoài phạm vi): `agent::run_turn` vẫn
+  gửi system prompt **hai lần** (trường `system` của `ChatRequest` + một message `User` do
+  `system_to_messages` tạo từ M3). Token bị dùng thừa gấp đôi cho system prompt; cần một
+  quyết định riêng trước khi bỏ (có thể ảnh hưởng hành vi model ở provider thật).
