@@ -265,6 +265,8 @@ pub struct SandboxConfig {
     pub memory: String,
     /// Số CPU được dùng.
     pub cpus: f32,
+    /// Trần số tiến trình trong container (`docker --pids-limit`, chống fork bomb).
+    pub pids_limit: u32,
     /// Thời gian tối đa cho một lệnh shell (giây).
     pub timeout_seconds: u64,
 }
@@ -277,6 +279,7 @@ impl Default for SandboxConfig {
             network: false,
             memory: "512m".to_string(),
             cpus: 1.0,
+            pids_limit: 64,
             timeout_seconds: 60,
         }
     }

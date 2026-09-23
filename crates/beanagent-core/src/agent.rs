@@ -1,10 +1,15 @@
-//! Vòng lặp agent (agents.md mục 6).
+//! Vòng lặp agent (agents.md mục 6, 7.2, 15.3, 15.4, 15.8).
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::store::Store;
 use beanagent_llm::{LlmError, LlmProvider};
+use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
+use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
+use beanagent_security::untrusted::contains_untrusted_block;
 use beanagent_tools::{ToolCtx, ToolError};
 use beanagent_types::{Config, Message, Role, ToolCall, ToolSpec};
 use tokio::time::timeout;
@@ -13,6 +18,7 @@ use crate::run_io::{Decision, RunIo};
 
 const MAX_TOOL_OUTPUT_CHARS: usize = 20_000;
 const CANCELLED_MSG: &str = "[bị người dùng huỷ]";
+const CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 type RepeatKey = (String, String);
 
 /// Tham số cho [`run_turn`]: gộp lại thành struct để tránh quá nhiều tham số hàm
@@ -34,6 +40,13 @@ pub struct RunTurnArgs<'a> {
     pub io: &'a dyn RunIo,
     /// Token huỷ run đang chạy.
     pub cancel: tokio_util::sync::CancellationToken,
+    /// Trạng thái "cho phép tool này trong phiên" — truyền `Arc` dùng chung qua các
+    /// turn của cùng phiên; `None` ⇒ mỗi lượt lại hỏi (mục 7.2). — M4.
+    pub session_policy: Option<Arc<SessionPolicy>>,
+    /// Audit log JSONL (mục 15.8); `None` ⇒ không ghi (test/demo). — M4.
+    pub audit: Option<Arc<AuditLog>>,
+    /// Kênh của lượt, dùng cho audit (`"cli"` | `"web"` | `"telegram"` | `"scheduler"`).
+    pub channel: &'static str,
 }
 
 pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
@@ -46,10 +59,26 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
         user_text,
         io,
         cancel,
+        session_policy,
+        audit: audit_log,
+        channel,
     } = args;
     store.append(session, Message::user(user_text)).await?;
     let mut failure_counts: HashMap<RepeatKey, u32> = HashMap::new();
     let mut consecutive_same_failure: Option<RepeatKey> = None;
+    // (M4, mục 15.4) Cờ untrusted dùng chung cho MỌI tool trong lượt — khi một tool
+    // result chứa khối <untrusted_content>, mọi tool Confirm trở lên phải hỏi lại.
+    let untrusted_seen = Arc::new(AtomicBool::new(false));
+    // Session policy dùng chung; không truyền vào thì mỗi lượt hỏi lại (an toàn mặc định).
+    let local_session_policy;
+    let session_policy: &SessionPolicy = match &session_policy {
+        Some(p) => p.as_ref(),
+        None => {
+            local_session_policy = SessionPolicy::new();
+            &local_session_policy
+        }
+    };
+    let policy = Policy::new();
 
     for _step in 0..config.agent.max_steps {
         let system = crate::prompt::system_prompt(&config.agent, "", "", "");
@@ -98,7 +127,9 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
                 workspace,
                 session,
                 cancel: io.cancel_token().clone(),
-                untrusted_seen: Default::default(),
+                // (M4) Cờ dùng chung cho cả lượt — tool có thể bật khi trả về nội dung
+                // untrusted; các confirm SAU đó trong lượt phải hỏi lại (mục 15.4).
+                untrusted_seen: untrusted_seen.clone(),
             };
 
             let args_hash = hash_args(&call.args);
@@ -121,36 +152,75 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
 
             io.on_tool_start(&call.name, &call.name, &args_preview(&call.args));
 
-            // Xác nhận theo mức rủi ro (mục 7.2). Confirm/Dangerous phải được người dùng
-            // cho phép; từ chối biến thành tool result is_error để model tự điều chỉnh.
+            // Xác nhận theo policy (M4, mục 7.2 + 15.3 + 15.4):
+            // deny-list (lớp phụ) → untrusted_seen → allow-in-session → mức rủi ro.
             let risk = registry
                 .get(&call.name)
                 .map_or(beanagent_types::Risk::Safe, |t| t.risk(&call.args));
-            if risk != beanagent_types::Risk::Safe {
-                if cancel.is_cancelled() {
-                    store
-                        .append(session, Message::tool_error(&call.id, CANCELLED_MSG))
-                        .await?;
-                    io.on_tool_end(&call.name, false, CANCELLED_MSG);
-                    return Err(AgentError::Cancelled);
+            let untrusted = untrusted_seen.load(Ordering::SeqCst);
+            let decision = policy.decide(&call.name, risk, &call.args, untrusted, session_policy);
+
+            // Kết quả ghi audit cho lời gọi này (mục 15.8) — điền dần rồi ghi DUY NHẤT
+            // một lần ở cuối khối (trừ nhánh deny `continue` — ghi ngay trong nhánh).
+            let mut audit = entry_now(session.get(), channel, &call.name, &call.args);
+            match decision {
+                PolicyDecision::Allowed => {
+                    audit.decision = "allow";
+                    audit.decided_by = "policy";
                 }
-                let prompt = format!("{} {}", call.name, args_preview(&call.args));
-                match io
-                    .confirm(
-                        &prompt,
-                        risk == beanagent_types::Risk::Confirm,
-                        Duration::from_secs(300),
-                    )
-                    .await
-                {
-                    Some(Decision::Allow) | Some(Decision::AllowInSession) => {}
-                    _ => {
-                        let msg = "Người dùng đã từ chối hành động này.".to_string();
+                PolicyDecision::NeedsConfirm { allow_in_session } => {
+                    if cancel.is_cancelled() {
                         store
-                            .append(session, Message::tool_error(&call.id, msg.clone()))
+                            .append(session, Message::tool_error(&call.id, CANCELLED_MSG))
                             .await?;
-                        io.on_tool_end(&call.name, false, &msg);
-                        continue;
+                        io.on_tool_end(&call.name, false, CANCELLED_MSG);
+                        audit.decision = "deny";
+                        audit.decided_by = "cancelled";
+                        record_audit(audit_log.as_ref(), &audit);
+                        return Err(AgentError::Cancelled);
+                    }
+                    // Ghi chú deny-list (lớp phụ, mục 15.3) vào prompt xác nhận.
+                    let deny_note = deny_list_reason(&call.name, &call.args)
+                        .map(|r| format!("\n[cảnh báo deny-list] {}", r.label))
+                        .unwrap_or_default();
+                    let prompt = format!("{} {}{deny_note}", call.name, args_preview(&call.args));
+                    let replied = io.confirm(&prompt, allow_in_session, CONFIRM_TIMEOUT).await;
+                    match replied {
+                        Some(Decision::Allow) => {
+                            audit.decision = "allow";
+                            audit.decided_by = "user";
+                        }
+                        Some(Decision::AllowInSession) if allow_in_session => {
+                            // Chỉ "trong phiên" khi policy cho phép (Confirm, chưa untrusted,
+                            // không dính deny-list) — mục 7.2/15.3/15.4.
+                            session_policy.allow(&call.name);
+                            audit.decision = "allow_in_session";
+                            audit.decided_by = "user";
+                        }
+                        Some(Decision::AllowInSession) | Some(Decision::Deny) => {
+                            audit.decision = "deny";
+                            audit.decided_by = "user";
+                            record_audit(audit_log.as_ref(), &audit);
+                            let msg = "Người dùng đã từ chối hành động này.".to_string();
+                            store
+                                .append(session, Message::tool_error(&call.id, msg.clone()))
+                                .await?;
+                            io.on_tool_end(&call.name, false, &msg);
+                            continue;
+                        }
+                        None => {
+                            // Hết thời gian chờ xác nhận ⇒ DENY (mục 10).
+                            audit.decision = "deny";
+                            audit.decided_by = "timeout";
+                            record_audit(audit_log.as_ref(), &audit);
+                            let msg =
+                                "Hết thời gian chờ xác nhận — hành động bị từ chối.".to_string();
+                            store
+                                .append(session, Message::tool_error(&call.id, msg.clone()))
+                                .await?;
+                            io.on_tool_end(&call.name, false, &msg);
+                            continue;
+                        }
                     }
                 }
             }
@@ -194,6 +264,17 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
             };
 
             let output = truncate_output(&output);
+            // (M4, mục 15.4) Tool result chứa khối untrusted → bật cờ cho cả lượt:
+            // mọi confirm Confirm/Dangerous SAU đây sẽ hỏi lại, không "trong phiên".
+            if contains_untrusted_block(&output) {
+                untrusted_seen.store(true, Ordering::SeqCst);
+            }
+            // Audit kết quả thực thi (mục 15.8) — lỗi ghi chỉ là cảnh báo, không làm hỏng run.
+            audit.ok = Some(ok);
+            if !ok {
+                audit.error = Some(output.chars().take(300).collect());
+            }
+            record_audit(audit_log.as_ref(), &audit);
             let mut failed_twice = false;
             if !ok {
                 let count = failure_counts.entry(key.clone()).or_insert(0);
@@ -225,13 +306,20 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
             if cancelled {
                 return Err(AgentError::Cancelled);
             }
-            if cancelled {
-                return Err(AgentError::Cancelled);
-            }
         }
     }
 
     Ok("Đã đạt giới hạn số bước. Hãy nói tiếp nếu muốn tôi tiếp tục.".into())
+}
+
+/// Ghi một bản ghi audit — lỗi được log cảnh báo và **không** làm hỏng vòng lặp
+/// (audit là observability, không phải rào cản an ninh — mục 15.8).
+fn record_audit(log: Option<&Arc<AuditLog>>, entry: &AuditEntry) {
+    if let Some(log) = log
+        && let Err(err) = log.record(entry)
+    {
+        tracing::warn!("ghi audit log thất bại: {err}");
+    }
 }
 
 fn system_to_messages(system: &str) -> Vec<Message> {

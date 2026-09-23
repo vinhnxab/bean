@@ -13,13 +13,14 @@
 //!   test CLI và script end-to-end ở M16.
 
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use beanagent_core::{Decision, RunIo, RunTurnArgs, run_turn};
 use beanagent_llm::{FakeProvider, LlmProvider};
-use beanagent_tools::{FsWorkspace, ToolRegistry};
+use beanagent_security::{AuditLog, CapWorkspace, Sandbox, SessionPolicy, run_shell};
+use beanagent_tools::ToolRegistry;
 use beanagent_types::config::Config;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -28,6 +29,45 @@ use tokio_util::sync::CancellationToken;
 use crate::cli::ChatArgs;
 
 const PROMPT: &str = "bạn> ";
+
+/// Kết nối bảo-security của phiên CLI (M4): allow-in-session + audit log.
+struct CliSecurity {
+    session_policy: Arc<SessionPolicy>,
+    audit: Option<Arc<AuditLog>>,
+}
+
+/// Dựng security cho phiên CLI: session policy (cho phép "trong phiên" qua các turn)
+/// và audit log trong `<data.dir>/audit/audit.jsonl` (mục 15.8).
+fn build_security(config: &Config) -> CliSecurity {
+    let session_policy = Arc::new(SessionPolicy::new());
+    let audit_dir = expand_tilde(&config.data.dir).join("audit");
+    let audit = match AuditLog::open(&audit_dir) {
+        Ok(log) => Some(Arc::new(log)),
+        Err(err) => {
+            // Không có audit không được chặn phiên demo — chỉ cảnh báo rõ ràng.
+            eprintln!(
+                "cảnh báo: không mở được audit log ở {}: {err}",
+                audit_dir.display()
+            );
+            None
+        }
+    };
+    CliSecurity {
+        session_policy,
+        audit,
+    }
+}
+
+/// Mở rộng `~` trong đường dẫn cấu hình bằng biến môi trường `HOME`.
+fn expand_tilde(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    path.to_path_buf()
+}
 
 /// Chạy REPL.
 ///
@@ -41,6 +81,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     }
     let provider = build_provider(args, &config)?;
     let registry = build_registry(&config)?;
+    let security = build_security(&config);
     let store = beanagent_core::store::MemoryStore::new();
     let cancel = CancellationToken::new();
 
@@ -51,9 +92,25 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     println!("workspace: {}", config.agent.workspace.display());
 
     if std::io::stdin().is_terminal() {
-        run_interactive(&config, &provider, &registry, store, cancel.clone()).await?;
+        run_interactive(
+            &config,
+            &provider,
+            &registry,
+            store,
+            cancel.clone(),
+            &security,
+        )
+        .await?;
     } else {
-        run_piped(&config, &provider, &registry, store, cancel.clone()).await?;
+        run_piped(
+            &config,
+            &provider,
+            &registry,
+            store,
+            cancel.clone(),
+            &security,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -75,9 +132,9 @@ fn build_provider(args: &ChatArgs, config: &Config) -> Result<Arc<dyn LlmProvide
         .context("dựng provider LLM thất bại (kiểm tra [llm] trong BeanAgent.toml)")
 }
 
-/// Xây registry tool từ cấu hình.
-///
-/// Tự tạo `agent.workspace` nếu chưa tồn tại (agents.md mục 4).
+/// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
+/// Path jail bằng `CapWorkspace` (cap-std — mục 15.1); `run_shell` gắn sandbox
+/// docker/host (mục 15.2).
 fn build_registry(config: &Config) -> Result<ToolRegistry> {
     std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
         format!(
@@ -86,7 +143,7 @@ fn build_registry(config: &Config) -> Result<ToolRegistry> {
         )
     })?;
     let ws =
-        FsWorkspace::open(config.agent.workspace.clone()).context("không mở được workspace")?;
+        CapWorkspace::open(config.agent.workspace.clone()).context("không mở được workspace")?;
     let ws: Arc<dyn beanagent_tools::WorkspaceFs> = Arc::new(ws);
     let mut registry = ToolRegistry::with_workspace(ws);
     if config.tools.enabled.iter().any(|g| g == "files") {
@@ -95,6 +152,15 @@ fn build_registry(config: &Config) -> Result<ToolRegistry> {
                 .register(tool)
                 .context("đăng ký tool file thất bại")?;
         }
+    }
+    if config.tools.enabled.iter().any(|g| g == "shell") {
+        let sandbox = Arc::new(Sandbox::new(
+            config.security.sandbox.clone(),
+            config.agent.workspace.clone(),
+        ));
+        registry
+            .register(run_shell(sandbox))
+            .context("đăng ký run_shell thất bại")?;
     }
     Ok(registry)
 }
@@ -111,6 +177,7 @@ async fn run_interactive(
     registry: &ToolRegistry,
     store: beanagent_core::store::MemoryStore,
     cancel: CancellationToken,
+    security: &CliSecurity,
 ) -> Result<()> {
     let io = CliIo::interactive();
     let mut editor = DefaultEditor::new().context("không khởi tạo được terminal")?;
@@ -150,6 +217,9 @@ async fn run_interactive(
             user_text: text,
             io: io_ref,
             cancel: cancel.clone(),
+            session_policy: Some(security.session_policy.clone()),
+            audit: security.audit.clone(),
+            channel: "cli",
         })
         .await;
 
@@ -176,6 +246,7 @@ async fn run_piped(
     registry: &ToolRegistry,
     store: beanagent_core::store::MemoryStore,
     cancel: CancellationToken,
+    security: &CliSecurity,
 ) -> Result<()> {
     use tokio::io::AsyncReadExt;
     let mut buf = String::new();
@@ -217,6 +288,9 @@ async fn run_piped(
             user_text: text,
             io: io_ref,
             cancel: cancel.clone(),
+            session_policy: Some(security.session_policy.clone()),
+            audit: security.audit.clone(),
+            channel: "cli",
         })
         .await;
 
@@ -282,11 +356,16 @@ impl RunIo for CliIo {
     async fn confirm(
         &self,
         prompt: &str,
-        _allow_in_session: bool,
+        allow_in_session: bool,
         _timeout: std::time::Duration,
     ) -> Option<Decision> {
         println!("[xác nhận] {prompt}");
-        print!("Cho phép? (y/n/s): ");
+        // Chỉ hiện tuỳ chọn "s" khi policy cho phép (Confirm + chưa untrusted — mục 7.2).
+        if allow_in_session {
+            print!("Cho phép? (y/n/s): ");
+        } else {
+            print!("Cho phép? (y/n): ");
+        }
         use std::io::Write;
         let _ = std::io::stdout().flush();
 
@@ -299,6 +378,7 @@ impl RunIo for CliIo {
         };
         match line?.trim().to_lowercase().as_str() {
             "y" | "yes" => Some(Decision::Allow),
+            // "s" luôn trả AllowInSession — core chỉ persist khi policy cho phép.
             "s" | "session" | "allow-in-session" => Some(Decision::AllowInSession),
             _ => Some(Decision::Deny),
         }

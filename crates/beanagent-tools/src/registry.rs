@@ -13,7 +13,7 @@ use crate::workspace::WorkspaceFs;
 /// prompt/schema gửi model ổn định giữa các lượt (không nhảy thứ tự ngẫu nhiên).
 pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
-    /// Workspace dùng cho tool (M3: `FsWorkspace`; M4: cap-std).
+    /// Workspace dùng cho tool (M4: `CapWorkspace` trên cap-std — beanagent-security).
     workspace: Option<Arc<dyn WorkspaceFs>>,
 }
 

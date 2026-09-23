@@ -11,6 +11,7 @@ description = "Agent loop, context, Router, trait Channel, scheduler, learning l
 workspace = true
 
 [dependencies]
+beanagent-security.workspace = true
 beanagent-types.workspace = true
 beanagent-llm.workspace = true
 beanagent-tools.workspace = true

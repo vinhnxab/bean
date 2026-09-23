@@ -3,6 +3,8 @@
 //! Cắt chuỗi theo **số ký tự** (codepoint), không theo chỉ số byte — cắt theo byte tuỳ ý
 //! sẽ panic với tiếng Việt có dấu hoặc emoji.
 
+use crate::error::ToolError;
+
 /// Cắt chuỗi ở tối đa `max_chars` ký tự, luôn dừng ở **ranh giới ký tự** UTF-8.
 ///
 /// Trả về `None` nếu chuỗi không vượt quá `max_chars` (không cắt); ngược lại trả về
@@ -24,6 +26,16 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> Option<(&str, usize)> {
         }
     }
     None
+}
+
+/// Biên dịch regex cho tool `grep` — lỗi cú pháp trở thành [`ToolError::InvalidArgs`]
+/// (model có thể tự sửa tham số).
+///
+/// # Errors
+/// [`ToolError::InvalidArgs`] khi pattern không phải regex hợp lệ.
+pub fn compile_regex(pattern: &str) -> Result<regex::Regex, ToolError> {
+    regex::Regex::new(pattern)
+        .map_err(|e| ToolError::InvalidArgs(format!("regex không hợp lệ `{pattern}`: {e}")))
 }
 
 #[cfg(test)]

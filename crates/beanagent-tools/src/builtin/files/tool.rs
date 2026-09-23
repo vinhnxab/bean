@@ -1,8 +1,7 @@
 //! Implement tool cho nhóm file (agents.md mục 7.3).
-
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
+//!
+//! Mọi I/O đều đi qua [`crate::WorkspaceFs`] (M4: `CapWorkspace` trên cap-std) —
+//! không có thao tác `std::fs` trực tiếp nào trong đây.
 use std::sync::Arc;
 
 use beanagent_types::Risk;
@@ -39,37 +38,12 @@ async fn read_capped(
     let n = limit as usize;
     let ws2 = ws.clone();
     let rel_for_closure = rel.to_string();
-    let buf = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, ToolError> {
-        let path = ws2.resolve(&rel_for_closure)?;
-        let meta = std::fs::metadata(&path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                ToolError::NotFound(rel_for_closure.clone())
-            } else {
-                ToolError::Io(e.to_string())
-            }
-        })?;
-        if !meta.is_file() {
-            return Err(ToolError::Io(format!(
-                "`{rel_for_closure}` không phải file"
-            )));
-        }
-        let size = meta.len();
-        if offset >= size {
-            return Ok(Vec::new());
-        }
-        let mut file = std::fs::File::open(&path).map_err(|e| ToolError::Io(e.to_string()))?;
-        if offset > 0 {
-            file.seek(SeekFrom::Start(offset))
-                .map_err(|e| ToolError::Io(e.to_string()))?;
-        }
-        let mut v = Vec::with_capacity(n);
-        std::io::Read::take(&mut file, n as u64)
-            .read_to_end(&mut v)
-            .map_err(|e| ToolError::Io(e.to_string()))?;
-        Ok(v)
-    })
-    .await
-    .map_err(|e| ToolError::Internal(e.to_string()))??;
+    // Từ M4: đọc qua capability (`WorkspaceFs::read_range`) — không còn `std::fs`
+    // với đường dẫn tự nối, nên symlink thoát workspace cũng bị chặn (mục 15.1).
+    let buf =
+        tokio::task::spawn_blocking(move || ws2.read_range(&rel_for_closure, offset, n as u64))
+            .await
+            .map_err(|e| ToolError::Internal(e.to_string()))??;
     let text = String::from_utf8(buf).map_err(|_| ToolError::InvalidData(rel.to_string()))?;
     if crate::text::truncate_chars(&text, n).is_some() {
         Ok(format!("{text}[đã cắt — dùng offset để đọc tiếp]"))
@@ -168,43 +142,5 @@ pub fn edit_file() -> Arc<dyn Tool> {
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used)]
-    use super::*;
-    use crate::workspace::FsWorkspace;
-    use tempfile::tempdir;
-
-    #[tokio::test]
-    async fn read_write_and_grep_roundtrip() {
-        let dir = tempdir().unwrap();
-        let ws = Arc::new(FsWorkspace::open(dir.path().to_path_buf()).unwrap());
-        ws.write_text("hello.txt", "Xin chào 🦀\nDòng thứ hai ツ\n")
-            .unwrap();
-
-        let got = read_capped(ws.clone(), "hello.txt", 0, 100).await.unwrap();
-        assert!(got.contains("Xin chào"));
-        assert!(got.contains("🦀"));
-
-        let matches = ws.grep("chào", None, 10).unwrap();
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].path, "hello.txt");
-    }
-
-    #[tokio::test]
-    async fn read_offset_seeks_correctly() {
-        let dir = tempdir().unwrap();
-        let ws = Arc::new(FsWorkspace::open(dir.path().to_path_buf()).unwrap());
-        ws.write_text("t.txt", "ABCDEabcde").unwrap();
-        let part = read_capped(ws.clone(), "t.txt", 3, 5).await.unwrap();
-        assert_eq!(part, "DEabc");
-    }
-
-    #[tokio::test]
-    async fn read_missing_file_is_not_found() {
-        let dir = tempdir().unwrap();
-        let ws = Arc::new(FsWorkspace::open(dir.path().to_path_buf()).unwrap());
-        let err = read_capped(ws, "nope.txt", 0, 100).await.unwrap_err();
-        assert!(matches!(err, ToolError::NotFound(_)));
-    }
-}
+// Test đọc/ghi/offset/grep của nhóm file nằm ở `beanagent-security/tests/file_tools.rs`
+// (dùng `CapWorkspace` thật) — tool crate không thể phụ thuộc security (vòng phụ thuộc).

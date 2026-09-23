@@ -11,3 +11,17 @@
 //!   lọc IP **ngay lúc kết nối** để chống DNS rebinding; chặn private/loopback/link-local/
 //!   metadata `169.254.169.254` và IPv6 tương ứng; kiểm tra lại từng bước redirect).
 #![forbid(unsafe_code)]
+
+pub mod audit;
+pub mod paths;
+pub mod policy;
+pub mod sandbox;
+pub mod shell;
+pub mod untrusted;
+
+pub use audit::{AuditEntry, AuditLog, entry_now, redact_secrets};
+pub use paths::CapWorkspace;
+pub use policy::{DenyReason, Policy, PolicyDecision, SessionPolicy, deny_list_reason};
+pub use sandbox::{Sandbox, SandboxError, ShellOutcome};
+pub use shell::run_shell;
+pub use untrusted::{UntrustedFlag, wrap as wrap_untrusted};

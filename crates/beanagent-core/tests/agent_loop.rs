@@ -12,7 +12,8 @@ use beanagent_core::run_io::{Decision, RunIo};
 use beanagent_core::store::{MemoryStore, Store};
 use beanagent_core::{RunTurnArgs, run_turn};
 use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
-use beanagent_tools::{FsWorkspace, Tool, ToolCtx, ToolError, ToolRegistry};
+use beanagent_security::CapWorkspace;
+use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use beanagent_types::{Config, LlmResponse, Risk, SessionId, ToolCall, ToolSpec};
 use tokio_util::sync::CancellationToken;
 
@@ -106,10 +107,13 @@ impl std::fmt::Debug for ProbeTool {
 }
 
 /// `RunIo` ghi event vào buffer; `confirm` trả quyết định đặt sẵn (mặc định: không phản hồi).
+/// Kèm bộ đếm cho test policy M4: số lần `confirm` được gọi + `allow_in_session` từng lần.
 struct TestIo {
     cancel: CancellationToken,
     decision: Option<Decision>,
     events: Arc<Mutex<Vec<String>>>,
+    confirm_count: Arc<AtomicUsize>,
+    allow_in_session_flags: Arc<Mutex<Vec<bool>>>,
 }
 
 impl TestIo {
@@ -118,6 +122,8 @@ impl TestIo {
             cancel: CancellationToken::new(),
             decision,
             events: Arc::new(Mutex::new(Vec::new())),
+            confirm_count: Arc::new(AtomicUsize::new(0)),
+            allow_in_session_flags: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -154,9 +160,14 @@ impl RunIo for TestIo {
     async fn confirm(
         &self,
         _prompt: &str,
-        _allow_in_session: bool,
+        allow_in_session: bool,
         _timeout: Duration,
     ) -> Option<Decision> {
+        self.confirm_count.fetch_add(1, Ordering::SeqCst);
+        self.allow_in_session_flags
+            .lock()
+            .unwrap()
+            .push(allow_in_session);
         self.decision
     }
 
@@ -188,7 +199,7 @@ fn probe_call(id: &str) -> ToolCall {
 /// (khi `TempDir` bị drop, thư mục tạm bị xoá).
 fn registry_with(tool: Arc<dyn Tool>) -> (tempfile::TempDir, ToolRegistry) {
     let dir = tempfile::tempdir().unwrap();
-    let ws = Arc::new(FsWorkspace::open(dir.path().to_path_buf()).unwrap());
+    let ws = Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap());
     let mut reg = ToolRegistry::with_workspace(ws);
     reg.register(tool).unwrap();
     (dir, reg)
@@ -225,6 +236,11 @@ async fn turn(
         user_text: "bắt đầu".into(),
         io,
         cancel: io.cancel.clone(),
+        // (M4) Test mặc định: không persist allow-in-session giữa các call trong test
+        // khác — test policy riêng truyền Some(...) qua `turn_sec`.
+        session_policy: None,
+        audit: None,
+        channel: "cli",
     })
     .await
 }
@@ -297,7 +313,7 @@ async fn stops_at_max_steps() {
 
 fn files_registry() -> (tempfile::TempDir, ToolRegistry) {
     let dir = tempfile::tempdir().unwrap();
-    let ws = Arc::new(FsWorkspace::open(dir.path().to_path_buf()).unwrap());
+    let ws = Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap());
     let mut reg = ToolRegistry::with_workspace(ws);
     for t in beanagent_tools::builtin::file_tools() {
         reg.register(t).unwrap();

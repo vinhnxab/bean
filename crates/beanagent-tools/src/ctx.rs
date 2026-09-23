@@ -16,7 +16,7 @@ use beanagent_types::SessionId;
 /// Ngữ cảnh truyền cho tool khi thực thi.
 #[derive(Clone)]
 pub struct ToolCtx {
-    /// Truy cập file bị jail trong workspace (M3: `FsWorkspace`; M4: cap-std).
+    /// Truy cập file bị jail trong workspace (M4: `CapWorkspace` — cap-std).
     pub workspace: Arc<dyn WorkspaceFs>,
     /// Phiên hội thoại đang chạy (dùng cho log/audit từ M4).
     pub session: SessionId,

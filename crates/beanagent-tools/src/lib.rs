@@ -5,9 +5,9 @@
 //! * **M3**: `trait Tool` (`spec`, `risk`, `call`), `ToolCtx`, `TypedTool<P>` (schema sinh bằng
 //!   `schemars`, doc comment thành description, `deny_unknown_fields`), `ToolRegistry`, và nhóm
 //!   tool file: `read_file`, `list_dir`, `glob`, `grep` (Safe), `write_file`, `edit_file` (Confirm).
-//! * **M4**: `run_shell` (Confirm, chạy trong sandbox), policy + audit; path jail thật bằng
-//!   `cap-std` thay cho `FsWorkspace` — mọi tool chỉ gọi qua trait [`WorkspaceFs`] nên chỉ cần
-//!   thay một cài đặt duy nhất.
+//! * **M4**: path jail thật bằng cap-std — cài đặt duy nhất của [`WorkspaceFs`] nằm ở
+//!   `beanagent_security::paths::CapWorkspace` (mọi tool chỉ gọi qua trait này).
+//!   Tool `run_shell` + sandbox + policy/audit cũng nằm ở `beanagent-security`.
 //! * **M7**: `web_fetch`, `web_search` (chống SSRF, bọc `<untrusted_content>`).
 //! * **M14**: `mcp__<server>__<tool>` qua `rmcp`.
 //!
@@ -32,7 +32,7 @@ pub use beanagent_types::{Risk, ToolSpec};
 pub use ctx::ToolCtx;
 pub use error::ToolError;
 pub use registry::ToolRegistry;
-pub use text::truncate_chars;
+pub use text::{compile_regex, truncate_chars};
 pub use tool::Tool;
 pub use typed::{TypedTool, deserialize_params, typed_spec};
-pub use workspace::{DirEntryInfo, FsWorkspace, GrepMatch, WorkspaceFs};
+pub use workspace::{DirEntryInfo, GrepMatch, WorkspaceFs};

@@ -92,6 +92,15 @@ regex = "1.13.1"
 # RFC3339 timestamps + "Current time" trong system prompt (mục 19). Cron ở M13 dùng crate khác.
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 
+# --- M4: security (phiên bản đã xác nhận qua index.crates.io 2026-09-22) ---
+# Path jail (mục 15.1): cap-std dùng openat2 RESOLVE_BENEATH trên Linux (fallback đi từng
+# component với O_NOFOLLOW) — symlink trỏ ra ngoài Dir luôn là lỗi. Đã xác nhận từ README
+# và source cap-std 4.0.3: "cap-std supports symlinks as long as they remain within the sandbox",
+# "Accessing a symlink to an absolute path within a Dir is always an error".
+cap-std = "4.0.3"
+# Property-based test cho path jail (mục 15.1/20) — chỉ dev-dependency.
+proptest = "1.11.0"
+
 [profile.release]
 lto = "thin"
 strip = true
