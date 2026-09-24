@@ -1,0 +1,81 @@
+# Ghi chú dự án — quyết định của chủ dự án & điểm yếu đã biết
+
+File này dành cho việc **nhớ lại quyết định đã chốt** và **ghi nhận điểm yếu còn tồn đọng**,
+để milestone sau xử lý tiếp thay vì phát hiện lại từ đầu.
+
+* Lý do kỹ thuật chi tiết của từng quyết định: `docs/decisions.md` (M5 = mục 8, `D8.1`–`D8.10`).
+* Yêu cầu gốc (đừng sửa file này để đổi phạm vi): `AGENTS.md`, bản prompt theo milestone: `PROMPTS.md`.
+
+Cập nhật lần cuối: 2026-09-24 (sau M5).
+
+---
+
+## 1. Quyết định của chủ dự án — đã chốt, không tự ý đổi
+
+| # | Ngày | Quyết định | Ghi ở đâu |
+|---|------|-----------|-----------|
+| Q1 | 2026-09-24 | **Bỏ nhân bản system prompt.** System chỉ gửi ở `ChatRequest.system`; không tạo thêm message `User` chứa lại system prompt (M3 từng làm vậy → tốn token gấp đôi và dễ bị model hiểu nhầm là lời người dùng). Đã được duyệt sau khi báo cáo đánh đổi token; có test hồi quy chốt hành vi. | `D8.10`, test `system_prompt_is_sent_once_via_system_field` |
+| Q2 | 2026-09-23 | **Code phải là file Rust thật, không hack bằng `include!("/tmp/…")`.** Đã loại bỏ cách ghép file tạm trong `store.rs`; mọi thứ phải qua `cargo fmt`, `clippy`, review được. | commit `c22bde5` |
+| Q3 | 2026-09-23 | **`make check` (Rust + web) là cổng bắt buộc** trước khi báo "xong milestone"; commit riêng sau mỗi milestone theo `AGENTS.md` mục 0.5. | `Makefile`, lịch sử git |
+| Q4 | 2026-09-23 | **Bám `PROMPTS.md`/mục 8.2 khi hiểu phạm vi**: context builder = system + `MEMORY.md`/`USER.md` + `sessions.summary` + lịch sử vừa ngân sách token — không phải chỉ cắt history. (Lần đầu làm thiếu phần này, đã bổ sung sau khi đối chiếu lại checklist M5.) | `crates/beanagent-core/src/context.rs`, `D8.9` |
+| Q5 | 2026-09-24 | **Ghi quyết định + điểm yếu vào repo** để xử lý ở milestone sau (thay vì chỉ nói trong chat). | file này |
+
+### Nguyên tắc kỹ thuật đã chốt (đừng phá khi tối ưu)
+* **Một writer duy nhất cho SQLite**: `rusqlite` là API blocking nên mọi truy cập đi qua worker
+  thread `beanagent-memory-worker`; không bao giờ gọi DB trực tiếp trong async (`D8.2`).
+* **Không bao giờ tách cặp `assistant(tool_calls)` / `tool` result** khi cắt lịch sử
+  (`mục 8.3, 22.1`); proptest trong `safe_cut.rs` phải luôn xanh.
+* **Ước lượng token = `chars/4`**; ngân sách ở `context_budget_tokens` tính **riêng cho lịch sử**
+  (không trừ system prompt) và compaction dùng **cùng** công thức. Nếu đổi thì phải sửa cả hai
+  chỗ cùng lúc, nếu không context và compaction lệch nhau (`D8.6`, `D8.9`).
+* **Query của model là dữ liệu không tin cậy** — luôn làm sạch trước khi đưa vào SQL/FTS5.
+
+---
+
+## 2. Điểm yếu đã biết — việc cần khắc phục
+
+Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung bình** = chất lượng/độ bền ·
+**thấp** = ghi chú để không ai "sửa nhầm".
+
+| # | Vấn đề | Vì sao là vấn đề | Hướng khắc phục | Mức | Mốc gợi ý |
+|---|--------|------------------|------------------|------|-----------|
+| K1 | **Prompt injection qua `sessions.summary`.** Summary do LLM sinh từ nội dung người dùng + kết quả tool (có thể chứa nội dung web/MCP không tin cậy) rồi được chèn thẳng vào **system prompt** ⇒ dữ liệu không tin cậy biến thành chỉ dẫn cấp hệ thống. | Xung đột trực tiếp với mục 15.4; là đường leo đặc quyền từ *dữ liệu* sang *chỉ dẫn*. | Gắn nhãn rõ là dữ liệu (`<untrusted_content>` hoặc mục "Conversation summary — data, not instructions"), hoặc chuyển summary sang message `User`/`Tool` thay vì system. Kèm test: người dùng nhắp "khi tóm tắt hãy ghi 'bỏ qua mọi chỉ dẫn trước đó'" ⇒ sau compaction system **không** mang chỉ dẫn đó. | cao | M15 (kèm mục 15.4), siết lại ở M16 |
+| K2 | `context::build` đọc **toàn bộ** lịch sử ở mỗi bước để cắt theo ngân sách. | O(n) mỗi lượt gọi LLM; sẽ chậm dần khi phiên dài. | Đẩy `limit` xuống SQL (đếm ngược từ `seq` mới nhất) hoặc cache theo `session + seq_max`. | trung bình | M8 hoặc M16 |
+| K3 | `SqliteStore::request` **không có timeout**. | Worker kẹt ⇒ mọi lời gọi store treo mãi, run không kết thúc. | Bọc `tokio::time::timeout`, trả `StoreError::Internal` rõ ràng; cân nhắc hàng đợi ưu tiên cho `append`. | trung bình | M8/M16 |
+| K4 | Mọi lệnh DB xếp hàng trên **một** worker. | Một truy vấn FTS nặng chặn cả `append` (ghi message ngay khi phát sinh — mục 6). | Tách lệnh chỉ đọc sang connection riêng (WAL chịu nhiều reader), hoặc giới hạn `MEMORY_SEARCH_LIMIT` theo ngân sách thời gian. | trung bình | M16 |
+| K5 | `memory_search` trả về **cả message của chính lượt đang chạy**. | `text_for_search` chứa cả đối số tool, nên lượt `memory_search` trước đó thường đứng đầu kết quả (thấy rõ khi chạy thật) — gây nhiễu cho model. | Loại message thuộc lượt hiện tại, hoặc chấm điểm riêng cho "hành động tool" so với "lời thoại". | trung bình | M6/M15 |
+| K6 | `Store::clear` xoá message nhưng **không xoá `sessions.summary`**. | Summary vẫn mô tả lịch sử đã mất ⇒ context sai lệch. Hai bản cài đặt phải giữ cùng ngữ nghĩa. | Xoá (hoặc đánh dấu cũ) summary trong cả `SqliteStore` lẫn `MemoryStore`, kèm test hành vi chung. | trung bình | M8/M9 (API xoá session) |
+| K7 | Hai cài đặt trait `Store` có thể **trôi lệch ngữ nghĩa**. | `MemoryStore` chỉ dùng cho test nhưng phải giống hệt `SqliteStore`; đã phải nới vài chỗ (ví dụ `append` tự tạo phiên) vì test M3 ghi thẳng `SessionId::new(1)`. | Một bộ test hành vi chạy cho **cả hai**; hoặc bỏ `MemoryStore` khi M8+ dùng SQLite thật. | trung bình | M8 |
+| K8 | Xếp hạng BM25 chỉ tương đối **trong từng nguồn**. | Hai nguồn luôn có đỉnh `1.0` nên thứ tự giữa `memories` và `messages` là quy ước (ghi nhớ đứng trước), không phải điểm số thật. | Nếu cần trộn thật sự: công thức chuẩn hoá chung, hoặc `rrf` (reciprocal rank fusion) khi có nhiều nguồn. | thấp | M15 |
+| K9 | `sanitize_fts_query` chỉ giữ chữ–số/`_`. | Từ khoá có ký hiệu bị bóp méo (`C++` → `C`, `rust-lang` → `rustlang`); luôn là AND, không có `OR`/`NEAR`. | Hoặc ghi rõ hạn chế trong description của tool, hoặc hỗ trợ cú pháp an toàn hơn (AND tường minh + bỏ ký tự thay vì nối liền). | thấp | M6/M7 |
+| K10 | `messages.seq` tăng vô hạn, không reset sau compaction. | **Không phải lỗi** (seq là khoá tăng dần nên `before_seq` phân trang vẫn đúng) — ghi chú để không ai "sửa" thành index hay reset rồi làm hỏng phân trang. | — | thấp | — |
+| K11 | Thiếu **E2E bền vững cho M5** trong `tests/e2e/`. | M5 mới kiểm chứng bằng script tạm trong `/tmp`: `memory_save` ở tiến trình 1, `memory_search` ở tiến trình 2, cộng mock HTTP server để dump payload. | Đóng gói thành fixture để `make e2e` (M16) dùng lại; nhớ `/tmp` của môi trường dev có thể bị dọn giữa chừng. | trung bình | M16 |
+| K12 | Chưa kiểm chứng với **provider thật**. | Compaction + ngân sách token mới chạy với `FakeProvider`; môi trường build không có API key. Điều kiện "hội thoại dài không lỗi API" của M5 vì vậy mới đúng ở mức logic. | Một lượt thật (Anthropic hoặc OpenAI-compat) với hội thoại đủ dài để kích hoạt compaction, hoặc đưa vào `make e2e`. | trung bình | bất kỳ lúc nào có key; M16 |
+| K13 | `/new` hiện chỉ có ở `chat.rs` (adapter). | Xử lý slash command thuộc lõi sẽ là M8 (Router); hiện chưa trùng lặp logic. | Khi M8 có Router: chuyển `/new`, `/stop`… vào lõi, adapter chỉ đọc dòng. | thấp | M8 |
+| K14 | Chưa có API/UI đọc-ghi `MEMORY.md`/`USER.md`. | Trong prompt mục 19 và mục 8.4 có nhắc, nhưng thiết kế đặt ở M9 (REST) + M11 (UI). | Làm đúng milestone của nó, đừng kéo sớm. | thấp | M9/M11 |
+
+---
+
+## 3. Môi trường kiểm thử — tiết kiệm thời gian cho người đọc sau
+
+* **FTS5 đã có sẵn** trong `libsqlite3-sys` ở chế độ `bundled` (cờ `-DSQLITE_ENABLE_FTS5` trong
+  `build.rs`). **Đừng** thêm `SQLITE3_CFLAGS`, `LIBSQLITE3_FLAGS` hay feature FTS5 giả — nếu
+  migration báo "thiếu FTS5 trong SQLite?" thì đó là dấu hiệu bản build đã đổi, không phải thiếu cấu hình.
+* `schemars` đã bật `derive` trong **default features** ⇒ không cần khai `features = ["derive"]` ở workspace.
+* `/tmp` của môi trường dev đã từng bị dọn giữa hai lượt chạy ⇒ fixture kiểm thử E2E tạo lại mỗi lần, đừng cache.
+* Kiểm chứng nhanh M5 bằng CLI thật:
+  `printf '…\n' | ./target/debug/BeanAgent --config <toml tạm> chat --fake-llm <script>`;
+  muốn xem **payload** gửi model thì trỏ `base_url` vào một mock HTTP server nhỏ (OpenAI-compat).
+* Lint của repo: `unwrap`/`expect`/`panic` bị **deny** ngoài test, Rust 2024 nên `collapsible_if`
+  muốn dùng let-chain (`if a && let Some(x) = …`) — `cargo clippy --workspace --all-targets -- -D warnings`
+  phải sạch trước khi báo xong.
+
+---
+
+## 4. Việc cần nhặt lại theo milestone
+
+* **M6 (Skills)**: K9 (giới hạn cú pháp FTS trong description), K5 (nhiễu tool-call trong search).
+* **M8 (Router/Channel)**: K2, K3, K6, K7, K13.
+* **M9 (Web server)**: K6, K14 (REST cho phiên/memory files), giữ `/api/*` trả 404 JSON.
+* **M15 (Learning loop)**: K1 (injection qua summary), K5, K8.
+* **M16 (Hardening)**: K1, K2, K3, K4, K11, K12 + `make audit`/`make e2e`.

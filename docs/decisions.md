@@ -4,6 +4,9 @@ File này ghi lại các điểm mà `agents.md` còn mơ hồ, mâu thuẫn ho�
 đã chốt và lý do. Người dùng đã uỷ quyền cho coding agent tự chốt các điểm này (2026-09-21).
 Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sang trạng thái "đã vào spec".
 
+* Xem thêm `docs/known-issues.md`: **quyết định của chủ dự án** (đã chốt, không tự ý đổi),
+  **điểm yếu đã biết cần khắc phục** và mẹo kiểm thử môi trường.
+
 ---
 
 ## 1. Kiến trúc Router / Run / RunIo (agents.md mục 6, 10)
