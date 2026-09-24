@@ -116,6 +116,18 @@ struct TestIo {
     allow_in_session_flags: Arc<Mutex<Vec<bool>>>,
 }
 
+impl Clone for TestIo {
+    fn clone(&self) -> Self {
+        Self {
+            cancel: self.cancel.clone(),
+            decision: self.decision,
+            events: self.events.clone(),
+            confirm_count: self.confirm_count.clone(),
+            allow_in_session_flags: self.allow_in_session_flags.clone(),
+        }
+    }
+}
+
 impl TestIo {
     fn new(decision: Option<Decision>) -> Self {
         Self {
@@ -143,14 +155,14 @@ impl RunIo for TestIo {
         self.events.lock().unwrap().push(format!("text:{text}"));
     }
 
-    fn on_tool_start(&self, tool: &str, summary: &str, args: &str) {
+    fn on_tool_start(&self, _id: &str, tool: &str, _risk: Risk, summary: &str, args: &str) {
         self.events
             .lock()
             .unwrap()
             .push(format!("start:{tool}:{summary}:{args}"));
     }
 
-    fn on_tool_end(&self, tool: &str, ok: bool, output: &str) {
+    fn on_tool_end(&self, _id: &str, tool: &str, ok: bool, output: &str) {
         self.events
             .lock()
             .unwrap()
@@ -159,6 +171,9 @@ impl RunIo for TestIo {
 
     async fn confirm(
         &self,
+        _id: &str,
+        _tool: &str,
+        _risk: Risk,
         _prompt: &str,
         allow_in_session: bool,
         _timeout: Duration,
@@ -227,6 +242,7 @@ async fn turn(
         responses,
         cursor: AtomicUsize::new(0),
     };
+    let owned_io = Arc::new(io.clone());
     run_turn(RunTurnArgs {
         store,
         registry,
@@ -234,8 +250,8 @@ async fn turn(
         config: cfg,
         session: SessionId::new(1),
         user_text: "bắt đầu".into(),
-        io,
-        cancel: io.cancel.clone(),
+        io: owned_io.clone(),
+        cancel: owned_io.cancel.clone(),
         // (M4) Test mặc định: không persist allow-in-session giữa các call trong test
         // khác — test policy riêng truyền Some(...) qua `turn_sec`.
         session_policy: None,
@@ -627,6 +643,7 @@ async fn system_prompt_is_sent_once_via_system_field() {
         seen: Mutex::new(Vec::new()),
     };
 
+    let owned_io = Arc::new(io);
     let out = run_turn(RunTurnArgs {
         store: &store,
         registry: &reg,
@@ -634,8 +651,8 @@ async fn system_prompt_is_sent_once_via_system_field() {
         config: &cfg(5),
         session: SessionId::new(1),
         user_text: "xin chào".into(),
-        io: &io,
-        cancel: io.cancel.clone(),
+        io: owned_io.clone(),
+        cancel: owned_io.cancel.clone(),
         session_policy: None,
         audit: None,
         channel: "cli",

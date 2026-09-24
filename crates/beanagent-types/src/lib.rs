@@ -8,10 +8,12 @@ pub mod config;
 pub mod ids;
 pub mod llm;
 pub mod message;
+pub mod router;
 pub mod tool;
 
 pub use config::{Config, ConfigError, ResolvedSecrets};
 pub use ids::{ConfirmId, RunId, SessionId};
 pub use llm::{LlmResponse, StopReason, Usage};
 pub use message::{Message, Role, ToolCall};
+pub use router::{ConfirmOutcome, Outbound, OutboundKind, RunEvent};
 pub use tool::{Risk, ToolSpec};

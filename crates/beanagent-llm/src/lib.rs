@@ -72,6 +72,19 @@ pub trait LlmProvider: Send + Sync + fmt::Debug {
     /// (nó được biến thành message `Tool` với `is_error = true` trong agent loop).
     async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError>;
 
+    /// Chat bằng model override cho request này. Mặc định giữ provider hiện tại;
+    /// provider HTTP override để `/model` áp dụng cho run kế tiếp.
+    ///
+    /// # Errors
+    /// Giống [`LlmProvider::chat`].
+    async fn chat_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        _model: &str,
+    ) -> Result<LlmResponse, LlmError> {
+        self.chat(req).await
+    }
+
     /// Tên provider, dùng cho log và `/api/status`.
     fn name(&self) -> &'static str;
 }

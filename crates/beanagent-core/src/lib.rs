@@ -20,11 +20,13 @@
 pub mod agent;
 pub mod context;
 pub mod prompt;
+pub mod router;
 pub mod run_io;
 pub mod store;
 
-pub use agent::{RunTurnArgs, run_turn};
+pub use agent::{EndReason, RunOutcome, RunTurnArgs, run_turn, run_turn_outcome};
 pub use context::TurnContext;
 pub use prompt::system_prompt;
+pub use router::{Channel, Incoming, Router, RouterDeps, RouterError, RouterOptions};
 pub use run_io::{Decision, RunIo};
 pub use store::{MemoryStore, SqliteStore, Store, memory_tools};

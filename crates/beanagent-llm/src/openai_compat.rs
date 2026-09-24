@@ -93,7 +93,15 @@ fn endpoint_url(base_url: Option<&str>) -> String {
 #[async_trait]
 impl LlmProvider for OpenAiCompatProvider {
     async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let body = build_request_body(&req, &self.model)?;
+        self.chat_with_model(req, &self.model.clone()).await
+    }
+
+    async fn chat_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        model: &str,
+    ) -> Result<LlmResponse, LlmError> {
+        let body = build_request_body(&req, model)?;
         let endpoint = self.endpoint.clone();
         let client = self.client.clone();
         let api_key = self.api_key.clone();

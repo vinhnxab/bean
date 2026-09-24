@@ -44,8 +44,8 @@ pub struct AuditEntry {
     pub ok: Option<bool>,
     /// Quyết định (`allow` | `allow_in_session` | `deny` | `deny_denylist` | `n/a`).
     pub decision: &'static str,
-    /// Ai quyết định (`user` | `policy` | `user_denylist` | `timeout` | `cancelled`).
-    pub decided_by: &'static str,
+    /// Ai quyết định (`user` | `policy` | `user_denylist` | `timeout` | `cancelled` hoặc user id cụ thể).
+    pub decided_by: String,
     /// Tóm tắt lỗi (nếu có).
     pub error: Option<String>,
 }
@@ -109,7 +109,7 @@ pub fn entry_now(session: i64, channel: &str, tool: &str, args: &serde_json::Val
         args: redact_secrets(args),
         ok: None,
         decision: "n/a",
-        decided_by: "n/a",
+        decided_by: "n/a".into(),
         error: None,
     }
 }
@@ -184,7 +184,7 @@ mod tests {
             args: json!({"command": "ls"}),
             ok: Some(true),
             decision: "allow",
-            decided_by: "user",
+            decided_by: "cli:local".into(),
             error: None,
         };
         log.record(&entry).unwrap();

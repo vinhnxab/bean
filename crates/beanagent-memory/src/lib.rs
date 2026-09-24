@@ -24,5 +24,6 @@ pub use safe_cut::{
     check_no_orphan_result, extend_start_backwards, find_compaction_start, find_safe_start,
 };
 pub use store::{
-    MemorySearchHit, MemorySource, MemoryStore, SqliteStore, Store, StoreError, StoredMessage,
+    MemorySearchHit, MemorySource, MemoryStore, OutboxEntry, SessionInfo, SqliteStore, Store,
+    StoreError, StoredMessage,
 };

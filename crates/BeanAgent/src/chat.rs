@@ -15,20 +15,20 @@
 //! * không có TTY (pipe/file) → đọc từng dòng từ stdin, phục vụ `echo "…" | BeanAgent chat`,
 //!   test CLI và script end-to-end ở M16.
 
+use std::collections::VecDeque;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use beanagent_core::{Decision, RunIo, RunTurnArgs, SqliteStore, Store, memory_tools, run_turn};
+use beanagent_core::{Channel, Decision, Incoming, Router, RouterDeps, SqliteStore, memory_tools};
 use beanagent_llm::{FakeProvider, LlmProvider};
 use beanagent_security::{
-    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, SessionPolicy, run_shell, web_fetch,
-    web_search,
+    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell, web_fetch, web_search,
 };
 use beanagent_skills::{SkillCatalog, skill_tools};
 use beanagent_tools::ToolRegistry;
-use beanagent_types::config::Config;
+use beanagent_types::{Config, Outbound, RunEvent, RunId};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use secrecy::SecretString;
@@ -38,31 +38,18 @@ use crate::cli::ChatArgs;
 
 const PROMPT: &str = "bạn> ";
 
-/// Kết nối bảo-security của phiên CLI (M4): allow-in-session + audit log.
-struct CliSecurity {
-    session_policy: Arc<SessionPolicy>,
-    audit: Option<Arc<AuditLog>>,
-}
-
-/// Dựng security cho phiên CLI: session policy (cho phép "trong phiên" qua các turn)
-/// và audit log trong `<data.dir>/audit/audit.jsonl` (mục 15.8).
-fn build_security(config: &Config) -> CliSecurity {
-    let session_policy = Arc::new(SessionPolicy::new());
+/// Mở audit log cho Router; lỗi chỉ cảnh báo, không chặn chat.
+fn build_audit(config: &Config) -> Option<Arc<AuditLog>> {
     let audit_dir = expand_tilde(&config.data.dir).join("audit");
-    let audit = match AuditLog::open(&audit_dir) {
+    match AuditLog::open(&audit_dir) {
         Ok(log) => Some(Arc::new(log)),
-        Err(err) => {
-            // Không có audit không được chặn phiên demo — chỉ cảnh báo rõ ràng.
+        Err(error) => {
             eprintln!(
-                "cảnh báo: không mở được audit log ở {}: {err}",
+                "cảnh báo: không mở được audit log ở {}: {error}",
                 audit_dir.display()
             );
             None
         }
-    };
-    CliSecurity {
-        session_policy,
-        audit,
     }
 }
 
@@ -88,53 +75,63 @@ fn store_path(config: &Config) -> PathBuf {
 /// Lỗi khi nạp cấu hình/kịch bản/secret, hoặc khi không mở được terminal.
 pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     let mut config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
-    // `--workspace` ghi đè `[agent] workspace` (tiện cho demo/test).
-    if let Some(ws) = &args.workspace {
-        config.agent.workspace = ws.clone();
+    if let Some(workspace) = &args.workspace {
+        config.agent.workspace = workspace.clone();
     }
     let (provider, web_search_api_key) = build_provider(args, &config)?;
     let store = Arc::new(
         SqliteStore::open(&store_path(&config))
-            .map_err(|e| anyhow::anyhow!("không mở được store: {e}"))?,
+            .map_err(|error| anyhow::anyhow!("không mở được store: {error}"))?,
     );
-    let user_skills_root = config.data.dir.join("skills");
+    let user_skills_root = expand_tilde(&config.data.dir).join("skills");
     let skills = SkillCatalog::load_with_create_root(
         &[PathBuf::from("skills"), user_skills_root.clone()],
         user_skills_root,
     );
-    let registry = build_registry(&config, store.clone(), skills.clone(), web_search_api_key)?;
-    let security = build_security(&config);
-    let cancel = CancellationToken::new();
+    let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
+        skills.index()
+    } else {
+        String::new()
+    };
+    let registry = Arc::new(build_registry(
+        &config,
+        store.clone(),
+        skills,
+        web_search_api_key,
+    )?);
+    let audit = build_audit(&config);
+    let workspace = config.agent.workspace.display().to_string();
+    let router = Arc::new(Router::new(RouterDeps {
+        config,
+        store,
+        registry,
+        llm: provider.clone(),
+        audit,
+        skills_index,
+    }));
+    router
+        .start_outbox_worker()
+        .context("không khởi động được worker outbox")?;
+
+    let piped = if std::io::stdin().is_terminal() {
+        None
+    } else {
+        Some(read_piped_lines().await?)
+    };
+    let channel = Arc::new(CliChannel::new(piped));
+    router
+        .register_channel(channel.clone())
+        .context("đăng ký CLI channel thất bại")?;
 
     println!(
         "BeanAgent chat — provider: {}. Gõ /exit hoặc Ctrl-D để thoát.",
         provider.name()
     );
-    println!("workspace: {}", config.agent.workspace.display());
-
-    if std::io::stdin().is_terminal() {
-        run_interactive(
-            &config,
-            &provider,
-            &registry,
-            &skills,
-            store,
-            cancel.clone(),
-            &security,
-        )
-        .await?;
-    } else {
-        run_piped(
-            &config,
-            &provider,
-            &registry,
-            &skills,
-            store,
-            cancel.clone(),
-            &security,
-        )
-        .await?;
-    }
+    println!("workspace: {workspace}");
+    channel
+        .run(router, CancellationToken::new())
+        .await
+        .context("CLI channel dừng lỗi")?;
     Ok(())
 }
 
@@ -223,273 +220,322 @@ fn build_registry(
     Ok(registry)
 }
 
-/// `/exit` và `/quit` kết thúc phiên (M8 sẽ có bộ slash command đầy đủ ở lõi).
-fn is_exit_command(text: &str) -> bool {
-    matches!(text, "/exit" | "/quit")
-}
+/// Hàng đợi stdin cho chế độ pipe; confirm và lượt user dùng chung một nguồn.
+type SharedLines = Arc<tokio::sync::Mutex<VecDeque<String>>>;
 
-/// Vòng REPL tương tác (rustyline).
-async fn run_interactive(
-    config: &Config,
-    provider: &Arc<dyn LlmProvider>,
-    registry: &ToolRegistry,
-    skills: &SkillCatalog,
-    store: Arc<SqliteStore>,
-    cancel: CancellationToken,
-    security: &CliSecurity,
-) -> Result<()> {
-    let io = CliIo::interactive();
-    let mut editor = DefaultEditor::new().context("không khởi tạo được terminal")?;
-    let mut session = store
-        .ensure_session("cli", "local", "")
-        .await
-        .map_err(|e| anyhow::anyhow!("không tạo được session: {e}"))?;
-    let store_ref: &dyn Store = &*store as &dyn Store;
-
-    loop {
-        let line = match editor.readline(PROMPT) {
-            Ok(line) => line,
-            Err(ReadlineError::Interrupted) => {
-                println!("(Ctrl-C) kết thúc phiên");
-                break;
-            }
-            Err(ReadlineError::Eof) => break,
-            Err(err) => {
-                eprintln!("lỗi terminal: {err}");
-                break;
-            }
-        };
-
-        let text = line.trim().to_string();
-        if text.is_empty() {
-            continue;
-        }
-        if text == "/new" {
-            if session.get() > 0 {
-                let _ = store.archive_session(session).await;
-            }
-            session = store
-                .ensure_session("cli", "local", "")
-                .await
-                .map_err(|e| anyhow::anyhow!("không tạo session mới: {e}"))?;
-            println!("→ Phiên mới đã tạo.");
-            continue;
-        }
-        if is_exit_command(&text) {
-            break;
-        }
-        // Lỗi lịch sử không làm hỏng phiên chat.
-        let _ = editor.add_history_entry(&text);
-
-        let io_ref = &io;
-        let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
-            skills.index()
-        } else {
-            String::new()
-        };
-        let result = run_turn(RunTurnArgs {
-            store: store_ref,
-            registry,
-            llm: provider.as_ref(),
-            config,
-            session,
-            user_text: text,
-            io: io_ref,
-            cancel: cancel.clone(),
-            session_policy: Some(security.session_policy.clone()),
-            audit: security.audit.clone(),
-            channel: "cli",
-            skills_index: &skills_index,
-        })
-        .await;
-
-        match result {
-            Ok(final_text) => {
-                if !final_text.is_empty() {
-                    println!("{final_text}");
-                }
-            }
-            Err(err) => {
-                eprintln!("lỗi agent: {err}");
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Chế độ không có TTY: đọc **toàn bộ** stdin trước vào hàng đợi dùng chung
-/// (REPL và `confirm` cùng lấy từ đó — xem `SharedLines`), chạy tới hết hoặc `/exit`.
-async fn run_piped(
-    config: &Config,
-    provider: &Arc<dyn LlmProvider>,
-    registry: &ToolRegistry,
-    skills: &SkillCatalog,
-    store: Arc<SqliteStore>,
-    cancel: CancellationToken,
-    security: &CliSecurity,
-) -> Result<()> {
+async fn read_piped_lines() -> Result<SharedLines> {
     use tokio::io::AsyncReadExt;
-    let mut buf = String::new();
+    let mut input = String::new();
     tokio::io::stdin()
-        .read_to_string(&mut buf)
+        .read_to_string(&mut input)
         .await
         .context("đọc stdin thất bại")?;
-    let queue: SharedLines = Arc::new(tokio::sync::Mutex::new(
-        buf.lines().map(str::to_string).collect(),
-    ));
-    let io = CliIo::piped(queue.clone());
-    let mut session = store
-        .ensure_session("cli", "local", "")
-        .await
-        .map_err(|e| anyhow::anyhow!("không tạo được session: {e}"))?;
-    let store_ref: &dyn Store = &*store as &dyn Store;
-
-    loop {
-        let line = {
-            // Guard của khoá phải được thả **trước khi** chạy run_turn: `confirm` của
-            // CliIo trong turn cũng lấy khoá này. Nếu giữ guard qua `.await` của thân
-            // vòng lặp (temporary của scrutinee `while let` sống hết thân) sẽ deadlock.
-            match queue.lock().await.pop_front() {
-                Some(l) => l,
-                None => break,
-            }
-        };
-        let text = line.trim().to_string();
-        if text.is_empty() {
-            continue;
-        }
-        if text == "/new" {
-            if session.get() > 0 {
-                let _ = store.archive_session(session).await;
-            }
-            session = store
-                .ensure_session("cli", "local", "")
-                .await
-                .map_err(|e| anyhow::anyhow!("không tạo session mới: {e}"))?;
-            println!("→ Phiên mới đã tạo.");
-            continue;
-        }
-        if is_exit_command(&text) {
-            break;
-        }
-
-        let io_ref = &io;
-        let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
-            skills.index()
-        } else {
-            String::new()
-        };
-        let result = run_turn(RunTurnArgs {
-            store: store_ref,
-            registry,
-            llm: provider.as_ref(),
-            config,
-            session,
-            user_text: text,
-            io: io_ref,
-            cancel: cancel.clone(),
-            session_policy: Some(security.session_policy.clone()),
-            audit: security.audit.clone(),
-            channel: "cli",
-            skills_index: &skills_index,
-        })
-        .await;
-
-        match result {
-            Ok(final_text) => {
-                if !final_text.is_empty() {
-                    println!("{final_text}");
-                }
-            }
-            Err(err) => {
-                eprintln!("lỗi agent: {err}");
-            }
-        }
-    }
-
-    Ok(())
+    Ok(Arc::new(tokio::sync::Mutex::new(
+        input.lines().map(str::to_string).collect(),
+    )))
 }
 
-/// Hàng đợi dòng stdin dùng chung cho REPL và `confirm` trong chế độ pipe.
-///
-/// `BufReader` của REPL đọc trước được nhiều dòng vào buffer nội bộ, khiến
-/// `confirm` đọc thẳng `stdin` thấy EOF và luôn từ chối (mục 22). Đọc toàn bộ
-/// stdin một lần rồi chia qua hàng đợi dùng chung để hai bên không giành nhau.
-type SharedLines = Arc<tokio::sync::Mutex<std::collections::VecDeque<String>>>;
-
-/// Implement `RunIo` cho CLI.
-struct CliIo {
-    /// `Some` khi chạy ở chế độ pipe: confirm lấy câu trả lời từ hàng đợi thay vì stdin.
+struct CliChannel {
     piped: Option<SharedLines>,
 }
 
-impl CliIo {
-    fn interactive() -> Self {
-        Self { piped: None }
-    }
-
-    fn piped(lines: SharedLines) -> Self {
-        Self { piped: Some(lines) }
+impl CliChannel {
+    fn new(piped: Option<SharedLines>) -> Self {
+        Self { piped }
     }
 }
 
 #[async_trait::async_trait]
-impl RunIo for CliIo {
-    fn on_text(&self, text: &str) {
-        print!("{text}");
+impl Channel for CliChannel {
+    fn name(&self) -> &'static str {
+        "cli"
     }
 
-    fn on_tool_start(&self, tool: &str, summary: &str, args: &str) {
-        println!("[tool] {tool}: {summary} ({args})");
+    async fn run(&self, router: Arc<Router>, shutdown: CancellationToken) -> anyhow::Result<()> {
+        match &self.piped {
+            Some(lines) => run_piped(router, lines.clone(), shutdown).await,
+            None => run_interactive(router, shutdown).await,
+        }
     }
 
-    fn on_tool_end(&self, tool: &str, ok: bool, output: &str) {
-        if ok {
-            println!("[tool] {tool}: OK");
-            if !output.is_empty() {
-                println!("{output}");
+    async fn send(&self, _chat_id: &str, out: Outbound) -> anyhow::Result<()> {
+        println!("[thông báo] {}", out.text);
+        Ok(())
+    }
+}
+
+enum CliEventAction {
+    Confirm {
+        id: String,
+        prompt: String,
+        allow_session: bool,
+    },
+    Done,
+    Ignore,
+}
+
+fn event_run_id(event: &RunEvent) -> &RunId {
+    match event {
+        RunEvent::Queued { run_id, .. }
+        | RunEvent::Text { run_id, .. }
+        | RunEvent::ToolStart { run_id, .. }
+        | RunEvent::ToolEnd { run_id, .. }
+        | RunEvent::ConfirmRequest { run_id, .. }
+        | RunEvent::ConfirmResolved { run_id, .. }
+        | RunEvent::Final { run_id, .. }
+        | RunEvent::Error { run_id, .. } => run_id,
+    }
+}
+
+fn render_event(event: RunEvent, expected: &RunId) -> CliEventAction {
+    if event_run_id(&event) != expected {
+        return CliEventAction::Ignore;
+    }
+    match event {
+        RunEvent::Queued { position, .. } => {
+            println!("[queued] vị trí {position}");
+            CliEventAction::Ignore
+        }
+        RunEvent::Text { text, .. } => {
+            print!("{text}");
+            CliEventAction::Ignore
+        }
+        RunEvent::ToolStart {
+            tool,
+            summary,
+            args_preview,
+            ..
+        } => {
+            println!("[tool] {tool}: {summary} ({args_preview})");
+            CliEventAction::Ignore
+        }
+        RunEvent::ToolEnd {
+            tool,
+            ok,
+            output_preview,
+            ..
+        } => {
+            if ok {
+                println!("[tool] {tool}: OK");
+                if !output_preview.is_empty() {
+                    println!("{output_preview}");
+                }
+            } else {
+                eprintln!("[tool] {tool}: LỖI — {output_preview}");
             }
-        } else {
-            eprintln!("[tool] {tool}: LỖI — {output}");
+            CliEventAction::Ignore
+        }
+        RunEvent::ConfirmRequest {
+            confirm_id,
+            prompt,
+            allow_session_option,
+            ..
+        } => CliEventAction::Confirm {
+            id: confirm_id.to_string(),
+            prompt,
+            allow_session: allow_session_option,
+        },
+        RunEvent::ConfirmResolved { outcome, .. } => {
+            println!("[xác nhận] {outcome:?}");
+            CliEventAction::Ignore
+        }
+        RunEvent::Final { text, .. } => {
+            if !text.is_empty() {
+                println!("{text}");
+            }
+            CliEventAction::Done
+        }
+        RunEvent::Error { code, message, .. } => {
+            eprintln!("lỗi agent ({code}): {message}");
+            CliEventAction::Done
         }
     }
+}
 
-    async fn confirm(
-        &self,
-        prompt: &str,
-        allow_in_session: bool,
-        _timeout: std::time::Duration,
-    ) -> Option<Decision> {
-        println!("[xác nhận] {prompt}");
-        // Chỉ hiện tuỳ chọn "s" khi policy cho phép (Confirm + chưa untrusted — mục 7.2).
-        if allow_in_session {
-            print!("Cho phép? (y/n/s): ");
-        } else {
-            print!("Cho phép? (y/n): ");
+fn parse_decision(answer: &str, allow_session: bool) -> Decision {
+    match answer.trim().to_lowercase().as_str() {
+        "y" | "yes" => Decision::Allow,
+        "s" | "session" | "allow-in-session" if allow_session => Decision::AllowInSession,
+        _ => Decision::Deny,
+    }
+}
+
+/// Vòng REPL tương tác: Ctrl-C khi chờ run sẽ chỉ cancel run đang chạy.
+async fn run_interactive(router: Arc<Router>, shutdown: CancellationToken) -> Result<()> {
+    let mut editor = DefaultEditor::new().context("không khởi tạo được terminal")?;
+    let mut events = router.events();
+    let mut active: Option<RunId> = None;
+
+    'repl: loop {
+        if active.is_none() {
+            let line = match editor.readline(PROMPT) {
+                Ok(line) => line,
+                Err(ReadlineError::Interrupted) => {
+                    println!("(Ctrl-C) kết thúc phiên");
+                    break;
+                }
+                Err(ReadlineError::Eof) => break,
+                Err(error) => {
+                    eprintln!("lỗi terminal: {error}");
+                    break;
+                }
+            };
+            let text = line.trim();
+            if text.is_empty() {
+                continue;
+            }
+            if matches!(text, "/exit" | "/quit") {
+                break;
+            }
+            let _ = editor.add_history_entry(text);
+            let run = router
+                .submit(Incoming::new("cli", "local", "cli:local", text))
+                .await
+                .context("Router từ chối input CLI")?;
+            active = Some(run);
+            continue;
         }
-        use std::io::Write;
-        let _ = std::io::stdout().flush();
 
-        let line = if let Some(queue) = &self.piped {
-            queue.lock().await.pop_front()
-        } else {
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input).ok()?;
-            Some(input)
+        let Some(run) = active.as_ref() else {
+            continue;
         };
-        match line?.trim().to_lowercase().as_str() {
-            "y" | "yes" => Some(Decision::Allow),
-            // "s" luôn trả AllowInSession — core chỉ persist khi policy cho phép.
-            "s" | "session" | "allow-in-session" => Some(Decision::AllowInSession),
-            _ => Some(Decision::Deny),
+        let event = tokio::select! {
+            _ = shutdown.cancelled() => {
+                router.cancel("cli", "local").await;
+                break 'repl;
+            }
+            signal = tokio::signal::ctrl_c() => {
+                if signal.is_ok() {
+                    println!("(Ctrl-C) đang dừng run");
+                    router.cancel("cli", "local").await;
+                    continue;
+                }
+                eprintln!("không lắng nghe được Ctrl-C");
+                break 'repl;
+            }
+            event = router.recv_event(&mut events) => {
+                match event {
+                    Some(event) => event,
+                    None => break 'repl,
+                }
+            }
+        };
+        match render_event(event, run) {
+            CliEventAction::Ignore => {}
+            CliEventAction::Done => active = None,
+            CliEventAction::Confirm {
+                id,
+                prompt,
+                allow_session,
+            } => {
+                println!("[xác nhận] {prompt}");
+                let suffix = if allow_session { "y/n/s" } else { "y/n" };
+                match editor.readline(&format!("Cho phép? ({suffix}): ")) {
+                    Ok(answer) => {
+                        let decision = parse_decision(&answer, allow_session);
+                        if let Err(error) = router.resolve_confirm(&id, decision, "cli:local").await
+                        {
+                            eprintln!("không resolve confirm: {error}");
+                        }
+                    }
+                    Err(ReadlineError::Interrupted) => {
+                        router.cancel("cli", "local").await;
+                    }
+                    Err(ReadlineError::Eof) => {
+                        let _ = router
+                            .resolve_confirm(&id, Decision::Deny, "cli:local")
+                            .await;
+                    }
+                    Err(error) => {
+                        eprintln!("lỗi đọc xác nhận: {error}");
+                        let _ = router
+                            .resolve_confirm(&id, Decision::Deny, "cli:local")
+                            .await;
+                    }
+                }
+            }
         }
     }
+    router.cancel("cli", "local").await;
+    Ok(())
+}
 
-    fn cancel_token(&self) -> &CancellationToken {
-        // CLI không có cancel token thực tế, dùng token không bao giờ bị huỷ
-        use std::sync::OnceLock;
-        static TOKEN: OnceLock<CancellationToken> = OnceLock::new();
-        TOKEN.get_or_init(CancellationToken::new)
+/// Chế độ pipe: mỗi dòng là input; dòng kế tiếp sau ConfirmRequest là câu trả lời.
+async fn run_piped(
+    router: Arc<Router>,
+    lines: SharedLines,
+    shutdown: CancellationToken,
+) -> Result<()> {
+    let mut events = router.events();
+    let mut active: Option<RunId> = None;
+
+    loop {
+        if active.is_none() {
+            let line = tokio::select! {
+                _ = shutdown.cancelled() => None,
+                signal = tokio::signal::ctrl_c() => {
+                    if signal.is_err() {
+                        eprintln!("không lắng nghe được Ctrl-C");
+                    }
+                    None
+                }
+                line = async { lines.lock().await.pop_front() } => line,
+            };
+            let Some(line) = line else { break };
+            let text = line.trim();
+            if text.is_empty() {
+                continue;
+            }
+            if matches!(text, "/exit" | "/quit") {
+                break;
+            }
+            let run = router
+                .submit(Incoming::new("cli", "local", "cli:local", text))
+                .await
+                .context("Router từ chối input CLI")?;
+            active = Some(run);
+            continue;
+        }
+
+        let Some(run) = active.as_ref() else {
+            continue;
+        };
+        let event = tokio::select! {
+            _ = shutdown.cancelled() => {
+                router.cancel("cli", "local").await;
+                break;
+            }
+            signal = tokio::signal::ctrl_c() => {
+                if signal.is_ok() {
+                    router.cancel("cli", "local").await;
+                    continue;
+                }
+                break;
+            }
+            event = router.recv_event(&mut events) => {
+                match event {
+                    Some(event) => event,
+                    None => break,
+                }
+            }
+        };
+        match render_event(event, run) {
+            CliEventAction::Ignore => {}
+            CliEventAction::Done => active = None,
+            CliEventAction::Confirm {
+                id,
+                prompt,
+                allow_session,
+            } => {
+                println!("[xác nhận] {prompt}");
+                let answer = lines.lock().await.pop_front().unwrap_or_default();
+                let decision = parse_decision(&answer, allow_session);
+                if let Err(error) = router.resolve_confirm(&id, decision, "cli:local").await {
+                    eprintln!("không resolve confirm: {error}");
+                }
+            }
+        }
     }
+    router.cancel("cli", "local").await;
+    Ok(())
 }

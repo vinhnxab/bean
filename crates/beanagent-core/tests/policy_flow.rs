@@ -79,6 +79,16 @@ struct SpyIo {
     confirms: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
 }
 
+impl Clone for SpyIo {
+    fn clone(&self) -> Self {
+        Self {
+            cancel: self.cancel.clone(),
+            decision: self.decision,
+            confirms: self.confirms.clone(),
+        }
+    }
+}
+
 impl SpyIo {
     fn new(decision: Option<Decision>) -> Self {
         Self {
@@ -95,10 +105,13 @@ impl SpyIo {
 #[async_trait]
 impl RunIo for SpyIo {
     fn on_text(&self, _text: &str) {}
-    fn on_tool_start(&self, _tool: &str, _summary: &str, _args: &str) {}
-    fn on_tool_end(&self, _tool: &str, _ok: bool, _output: &str) {}
+    fn on_tool_start(&self, _id: &str, _tool: &str, _risk: Risk, _summary: &str, _args: &str) {}
+    fn on_tool_end(&self, _id: &str, _tool: &str, _ok: bool, _output: &str) {}
     async fn confirm(
         &self,
+        _id: &str,
+        _tool: &str,
+        _risk: Risk,
         prompt: &str,
         allow_in_session: bool,
         _timeout: Duration,
@@ -137,6 +150,7 @@ async fn turn_with(
     c.agent.max_steps = 10;
     c.security.tool_timeout_seconds = 5;
     let store = MemoryStore::new();
+    let owned_io = Arc::new(io.clone());
     run_turn(RunTurnArgs {
         store: &store,
         registry: reg,
@@ -144,8 +158,8 @@ async fn turn_with(
         config: &c,
         session: SessionId::new(1),
         user_text: "làm đi".into(),
-        io,
-        cancel: io.cancel.clone(),
+        io: owned_io.clone(),
+        cancel: owned_io.cancel.clone(),
         session_policy: Some(session_policy),
         audit: None,
         channel: "cli",

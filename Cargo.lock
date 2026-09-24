@@ -185,6 +185,7 @@ version = "0.1.0"
 name = "beanagent-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "beanagent-llm",
  "beanagent-memory",
@@ -193,6 +194,7 @@ dependencies = [
  "beanagent-tools",
  "beanagent-types",
  "chrono",
+ "getrandom 0.3.4",
  "serde_json",
  "tempfile",
  "thiserror",

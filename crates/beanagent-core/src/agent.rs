@@ -37,7 +37,7 @@ pub struct RunTurnArgs<'a> {
     /// Tin nhắn người dùng mở đầu lượt.
     pub user_text: String,
     /// Kênh I/O (hiển thị tiến trình, xin xác nhận).
-    pub io: &'a dyn RunIo,
+    pub io: Arc<dyn RunIo>,
     /// Token huỷ run đang chạy.
     pub cancel: tokio_util::sync::CancellationToken,
     /// Trạng thái "cho phép tool này trong phiên" — truyền `Arc` dùng chung qua các
@@ -46,12 +46,38 @@ pub struct RunTurnArgs<'a> {
     /// Audit log JSONL (mục 15.8); `None` ⇒ không ghi (test/demo). — M4.
     pub audit: Option<Arc<AuditLog>>,
     /// Kênh của lượt, dùng cho audit (`"cli"` | `"web"` | `"telegram"` | `"scheduler"`).
-    pub channel: &'static str,
+    pub channel: &'a str,
     /// Progressive-disclosure index `name: description` của các skill đang có.
     pub skills_index: &'a str,
 }
 
+/// Lý do run kết thúc bình thường.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndReason {
+    /// Provider trả lời cuối.
+    Final,
+    /// Đạt giới hạn bước.
+    MaxSteps,
+}
+
+/// Kết quả đầy đủ cho Router; wrapper [`run_turn`] chỉ trả text để tương thích M3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOutcome {
+    /// Text cuối để hiển thị.
+    pub text: String,
+    /// Message assistant cuối nếu có.
+    pub message_id: Option<i64>,
+    /// Lý do kết thúc.
+    pub ended: EndReason,
+}
+
+/// Chạy lượt và chỉ trả text (API tương thích M3–M7).
 pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
+    run_turn_outcome(args).await.map(|outcome| outcome.text)
+}
+
+/// Chạy lượt và trả outcome đầy đủ cho Router.
+pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, AgentError> {
     let RunTurnArgs {
         store,
         registry,
@@ -118,31 +144,55 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
             tools: &tool_specs,
             max_tokens: config.llm.max_tokens,
         };
-        let resp = llm.chat(req).await?;
+        let chat = llm.chat_with_model(req, &config.llm.model);
+        let resp = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(AgentError::Cancelled),
+            response = chat => response?,
+        };
 
-        store.append(session, Message::from_response(&resp)).await?;
+        let is_final = resp.tool_calls.is_empty();
+        let final_text = resp.text.clone().unwrap_or_default();
+        let message_id = store.append(session, Message::from_response(&resp)).await?;
 
-        if resp.tool_calls.is_empty() {
-            // Response cuối: trả về để kênh hiển thị (CLI/WS in một lần duy nhất,
-            // không phát `on_text` nữa để tránh nhân đôi).
-            return Ok(resp.text.unwrap_or_default());
+        if is_final {
+            return Ok(RunOutcome {
+                text: final_text,
+                message_id: Some(message_id),
+                ended: EndReason::Final,
+            });
         }
         // Text "suy nghĩ" của model khi vẫn còn gọi tool — phát cho kênh hiển thị.
         io.on_text(&resp.text.clone().unwrap_or_default());
 
+        let mut repeated_tool: Option<String> = None;
+
         for call in resp.tool_calls {
-            let workspace = registry.workspace().map_err(|e| {
-                let msg = format!("registry thiếu workspace: {e}");
-                // Ghi tool result lỗi để lịch sử không hỏng cặp, rồi dừng lượt này.
-                msg
-            });
-            let workspace = match workspace {
-                Ok(ws) => ws,
-                Err(msg) => {
+            let risk = registry
+                .get(&call.name)
+                .map_or(beanagent_types::Risk::Safe, |tool| tool.risk(&call.args));
+            let args_preview = args_preview(&call.args);
+            io.on_tool_start(&call.id, &call.name, risk, &call.name, &args_preview);
+
+            if cancel.is_cancelled() {
+                store
+                    .append(session, Message::tool_error(call.id.clone(), CANCELLED_MSG))
+                    .await?;
+                io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
+                continue;
+            }
+
+            let workspace = match registry.workspace() {
+                Ok(workspace) => workspace,
+                Err(error) => {
+                    let message = format!("registry thiếu workspace: {error}");
                     store
-                        .append(session, Message::tool_error(call.id, msg.clone()))
+                        .append(
+                            session,
+                            Message::tool_error(call.id.clone(), message.clone()),
+                        )
                         .await?;
-                    io.on_tool_end(&call.name, false, &msg);
+                    io.on_tool_end(&call.id, &call.name, false, &message);
                     continue;
                 }
             };
@@ -150,15 +200,11 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
                 workspace,
                 session,
                 cancel: io.cancel_token().clone(),
-                // (M4) Cờ dùng chung cho cả lượt — tool có thể bật khi trả về nội dung
-                // untrusted; các confirm SAU đó trong lượt phải hỏi lại (mục 15.4).
                 untrusted_seen: untrusted_seen.clone(),
             };
 
             let args_hash = hash_args(&call.args);
             let key = (call.name.clone(), args_hash);
-            // Chống lặp (mục 6): cùng tool + cùng tham số đã thất bại 2 lần liên tiếp →
-            // lần gọi thứ 3 bị chặn, dừng run để model không quay mãi vô hạn.
             if failure_counts.get(&key).copied().unwrap_or(0) >= 2
                 && consecutive_same_failure.as_ref() == Some(&key)
             {
@@ -167,19 +213,13 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
                     call.name
                 );
                 store
-                    .append(session, Message::tool_error(call.id, hint.clone()))
+                    .append(session, Message::tool_error(call.id.clone(), hint.clone()))
                     .await?;
-                io.on_tool_end(&call.name, false, &hint);
-                return Err(AgentError::RepeatFailure(call.name));
+                io.on_tool_end(&call.id, &call.name, false, &hint);
+                repeated_tool = Some(call.name);
+                continue;
             }
 
-            io.on_tool_start(&call.name, &call.name, &args_preview(&call.args));
-
-            // Xác nhận theo policy (M4, mục 7.2 + 15.3 + 15.4):
-            // deny-list (lớp phụ) → untrusted_seen → allow-in-session → mức rủi ro.
-            let risk = registry
-                .get(&call.name)
-                .map_or(beanagent_types::Risk::Safe, |t| t.risk(&call.args));
             let untrusted = untrusted_seen.load(Ordering::SeqCst);
             let decision = policy.decide(&call.name, risk, &call.args, untrusted, session_policy);
 
@@ -189,59 +229,75 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
             match decision {
                 PolicyDecision::Allowed => {
                     audit.decision = "allow";
-                    audit.decided_by = "policy";
+                    audit.decided_by = "policy".into();
                 }
                 PolicyDecision::NeedsConfirm { allow_in_session } => {
                     if cancel.is_cancelled() {
                         store
-                            .append(session, Message::tool_error(&call.id, CANCELLED_MSG))
+                            .append(session, Message::tool_error(call.id.clone(), CANCELLED_MSG))
                             .await?;
-                        io.on_tool_end(&call.name, false, CANCELLED_MSG);
+                        io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
                         audit.decision = "deny";
-                        audit.decided_by = "cancelled";
+                        audit.decided_by = "cancelled".into();
                         record_audit(audit_log.as_ref(), &audit);
-                        return Err(AgentError::Cancelled);
+                        continue;
                     }
-                    // Ghi chú deny-list (lớp phụ, mục 15.3) vào prompt xác nhận.
                     let deny_note = deny_list_reason(&call.name, &call.args)
-                        .map(|r| format!("\n[cảnh báo deny-list] {}", r.label))
+                        .map(|reason| format!("\n[cảnh báo deny-list] {}", reason.label))
                         .unwrap_or_default();
-                    let prompt = format!("{} {}{deny_note}", call.name, args_preview(&call.args));
-                    let replied = io.confirm(&prompt, allow_in_session, CONFIRM_TIMEOUT).await;
+                    let prompt = format!("{} {}{deny_note}", call.name, args_preview);
+                    let replied = io
+                        .confirm(
+                            &call.id,
+                            &call.name,
+                            risk,
+                            &prompt,
+                            allow_in_session,
+                            CONFIRM_TIMEOUT,
+                        )
+                        .await;
+                    let actor = io.decision_actor();
                     match replied {
                         Some(Decision::Allow) => {
                             audit.decision = "allow";
-                            audit.decided_by = "user";
+                            audit.decided_by = actor.unwrap_or_else(|| "user".into());
                         }
                         Some(Decision::AllowInSession) if allow_in_session => {
-                            // Chỉ "trong phiên" khi policy cho phép (Confirm, chưa untrusted,
-                            // không dính deny-list) — mục 7.2/15.3/15.4.
                             session_policy.allow(&call.name);
                             audit.decision = "allow_in_session";
-                            audit.decided_by = "user";
+                            audit.decided_by = actor.unwrap_or_else(|| "user".into());
                         }
                         Some(Decision::AllowInSession) | Some(Decision::Deny) => {
                             audit.decision = "deny";
-                            audit.decided_by = "user";
+                            audit.decided_by = actor.unwrap_or_else(|| "user".into());
                             record_audit(audit_log.as_ref(), &audit);
-                            let msg = "Người dùng đã từ chối hành động này.".to_string();
+                            let message = "Người dùng đã từ chối hành động này.".to_string();
                             store
-                                .append(session, Message::tool_error(&call.id, msg.clone()))
+                                .append(
+                                    session,
+                                    Message::tool_error(call.id.clone(), message.clone()),
+                                )
                                 .await?;
-                            io.on_tool_end(&call.name, false, &msg);
+                            io.on_tool_end(&call.id, &call.name, false, &message);
                             continue;
                         }
                         None => {
-                            // Hết thời gian chờ xác nhận ⇒ DENY (mục 10).
+                            let message = if cancel.is_cancelled() {
+                                audit.decided_by = "cancelled".into();
+                                CANCELLED_MSG.to_string()
+                            } else {
+                                audit.decided_by = "timeout".into();
+                                "Hết thời gian chờ xác nhận — hành động bị từ chối.".to_string()
+                            };
                             audit.decision = "deny";
-                            audit.decided_by = "timeout";
                             record_audit(audit_log.as_ref(), &audit);
-                            let msg =
-                                "Hết thời gian chờ xác nhận — hành động bị từ chối.".to_string();
                             store
-                                .append(session, Message::tool_error(&call.id, msg.clone()))
+                                .append(
+                                    session,
+                                    Message::tool_error(call.id.clone(), message.clone()),
+                                )
                                 .await?;
-                            io.on_tool_end(&call.name, false, &msg);
+                            io.on_tool_end(&call.id, &call.name, false, &message);
                             continue;
                         }
                     }
@@ -319,20 +375,31 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
                 .append(
                     session,
                     if ok {
-                        Message::tool(&call.id, output.clone())
+                        Message::tool(call.id.clone(), output.clone())
                     } else {
-                        Message::tool_error(&call.id, output.clone())
+                        Message::tool_error(call.id.clone(), output.clone())
                     },
                 )
                 .await?;
-            io.on_tool_end(&call.name, ok, &output);
+            io.on_tool_end(&call.id, &call.name, ok, &output);
             if cancelled {
-                return Err(AgentError::Cancelled);
+                continue;
             }
+        }
+        if cancel.is_cancelled() {
+            return Err(AgentError::Cancelled);
+        }
+        if let Some(tool) = repeated_tool.take() {
+            return Err(AgentError::RepeatFailure(tool));
         }
     }
 
-    Ok("Đã đạt giới hạn số bước. Hãy nói tiếp nếu muốn tôi tiếp tục.".into())
+    let text = "Đã đạt giới hạn số bước. Hãy nói tiếp nếu muốn tôi tiếp tục.";
+    Ok(RunOutcome {
+        text: text.into(),
+        message_id: None,
+        ended: EndReason::MaxSteps,
+    })
 }
 
 /// Ghi một bản ghi audit — lỗi được log cảnh báo và **không** làm hỏng vòng lặp

@@ -56,11 +56,22 @@ struct NoopIo {
 #[async_trait]
 impl RunIo for NoopIo {
     fn on_text(&self, _text: &str) {}
-    fn on_tool_start(&self, _tool: &str, _summary: &str, _args: &str) {}
-    fn on_tool_end(&self, _tool: &str, _ok: bool, _output: &str) {}
+    fn on_tool_start(
+        &self,
+        _id: &str,
+        _tool: &str,
+        _risk: beanagent_types::Risk,
+        _summary: &str,
+        _args: &str,
+    ) {
+    }
+    fn on_tool_end(&self, _id: &str, _tool: &str, _ok: bool, _output: &str) {}
 
     async fn confirm(
         &self,
+        _id: &str,
+        _tool: &str,
+        _risk: beanagent_types::Risk,
         _prompt: &str,
         _allow_in_session: bool,
         _timeout: Duration,
@@ -117,6 +128,7 @@ async fn fake_provider_loads_matching_skill_before_answering() {
     let store = MemoryStore::new();
     let config = Config::default();
     let skills_index = catalog.index();
+    let owned_io = Arc::new(io);
     let output = run_turn(RunTurnArgs {
         store: &store,
         registry: &registry,
@@ -124,8 +136,8 @@ async fn fake_provider_loads_matching_skill_before_answering() {
         config: &config,
         session: SessionId::new(1),
         user_text: "Hãy nghiên cứu chủ đề này.".to_string(),
-        io: &io,
-        cancel: io.cancel.clone(),
+        io: owned_io.clone(),
+        cancel: owned_io.cancel.clone(),
         session_policy: None,
         audit: None,
         channel: "test",

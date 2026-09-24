@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use beanagent_llm::{ChatRequest, LlmProvider};
-use beanagent_types::{Config, Message, Role, SessionId};
+use beanagent_types::{Config, Message, Outbound, Role, SessionId};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use tokio::sync::{RwLock, oneshot};
@@ -77,13 +77,50 @@ pub struct StoredMessage {
     pub message: Message,
 }
 
+/// Thông tin ownership của một session, dùng để Router chống IDOR khi
+/// `Incoming.session_id` được client cung cấp.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionInfo {
+    /// Session cần kiểm tra.
+    pub id: SessionId,
+    /// Channel sở hữu session.
+    pub channel: String,
+    /// Chat ID sở hữu session.
+    pub chat_id: String,
+    /// User ID đã tạo/được phép dùng session.
+    pub user_id: String,
+    /// Session đã bị archive hay chưa.
+    pub archived: bool,
+}
+
+/// Một bản ghi outbox đã tới hạn gửi lại.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutboxEntry {
+    /// Khoá chính.
+    pub id: u64,
+    /// Channel adapter cần gửi.
+    pub channel: String,
+    /// Chat ID đích.
+    pub chat_id: String,
+    /// Payload đã decode.
+    pub payload: Outbound,
+    /// Số lần thử đã thực hiện.
+    pub attempts: u32,
+    /// RFC3339 UTC của lần thử kế tiếp.
+    pub next_attempt_at: String,
+    /// Lỗi gần nhất, có thể rỗng.
+    pub last_error: String,
+    /// RFC3339 UTC lúc tạo.
+    pub created_at: String,
+}
+
 /// Giao diện lưu trữ lịch sử hội thoại, bộ nhớ dài hạn và compaction.
 ///
 /// Các hàm trả `Result<_, StoreError>` chứ **không** `panic` (agents.md mục 0.8).
 #[async_trait::async_trait]
 pub trait Store: Send + Sync {
-    /// Ghi một message vào phiên (`seq` do store tự cấp).
-    async fn append(&self, session: SessionId, msg: Message) -> Result<(), StoreError>;
+    /// Ghi một message vào phiên (`seq` và message id do store cấp).
+    async fn append(&self, session: SessionId, msg: Message) -> Result<i64, StoreError>;
 
     /// Lịch sử theo thứ tự cũ → mới.
     ///
@@ -102,11 +139,23 @@ pub trait Store: Send + Sync {
     /// Xoá **toàn bộ message** của phiên (giữ lại bản ghi phiên).
     async fn clear(&self, session: SessionId) -> Result<(), StoreError>;
 
+    /// Lấy ownership của một session để Router kiểm tra `Incoming.session_id`.
+    async fn session_info(&self, session: SessionId) -> Result<Option<SessionInfo>, StoreError>;
+
     /// Lấy id phiên đang hoạt động của `(channel, chat_id)`, tạo mới nếu chưa có.
     async fn ensure_session(
         &self,
         channel: &str,
         chat_id: &str,
+        title: &str,
+    ) -> Result<SessionId, StoreError>;
+
+    /// Như [`Store::ensure_session`], đồng thời gắn ownership `user_id`.
+    async fn ensure_session_for_user(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
         title: &str,
     ) -> Result<SessionId, StoreError>;
 
@@ -128,6 +177,29 @@ pub trait Store: Send + Sync {
     /// `MATCH` (agents.md mục 8.4): từ khoá có ký tự điều khiển FTS không được làm
     /// hỏng truy vấn.
     async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError>;
+
+    /// Lưu outbound để gửi lại; `next_attempt_at` là RFC3339 UTC cố định.
+    async fn enqueue_outbound(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        payload: &Outbound,
+        next_attempt_at: &str,
+    ) -> Result<u64, StoreError>;
+
+    /// Các bản ghi outbox đến hạn, cũ nhất trước, tối đa `limit` bản ghi.
+    async fn due_outbox(&self, now: &str, limit: usize) -> Result<Vec<OutboxEntry>, StoreError>;
+
+    /// Xoá bản ghi sau khi channel gửi thành công.
+    async fn complete_outbox(&self, id: u64) -> Result<(), StoreError>;
+
+    /// Cập nhật lần thử thất bại và lịch retry mới.
+    async fn retry_outbox(
+        &self,
+        id: u64,
+        next_attempt_at: &str,
+        last_error: &str,
+    ) -> Result<(), StoreError>;
 
     /// Danh sách message kèm `seq`, cũ → mới (dùng cho compaction).
     async fn list_messages(
@@ -162,6 +234,7 @@ struct MemorySession {
     id: SessionId,
     channel: String,
     chat_id: String,
+    user_id: String,
     title: String,
     archived: bool,
     summary: String,
@@ -177,12 +250,21 @@ struct MemoryEntry {
 
 /// Store **in-memory**: không I/O, không bền vững — dùng cho test vòng lặp agent
 /// (`beanagent-core/tests/agent_loop.rs`) và demo không cần đụng đĩa.
+/// Một bản ghi outbox trong bản in-memory.
+#[derive(Debug, Clone)]
+struct MemoryOutboxEntry {
+    entry: OutboxEntry,
+}
+
 #[derive(Debug)]
 pub struct MemoryStore {
     sessions: RwLock<Vec<MemorySession>>,
     memories: RwLock<Vec<MemoryEntry>>,
+    outbox: RwLock<Vec<MemoryOutboxEntry>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
+    next_message_id: RwLock<u64>,
+    next_outbox_id: RwLock<u64>,
 }
 
 impl Default for MemoryStore {
@@ -190,8 +272,11 @@ impl Default for MemoryStore {
         Self {
             sessions: RwLock::new(Vec::new()),
             memories: RwLock::new(Vec::new()),
+            outbox: RwLock::new(Vec::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
+            next_message_id: RwLock::new(1),
+            next_outbox_id: RwLock::new(1),
         }
     }
 }
@@ -206,7 +291,14 @@ impl MemoryStore {
 
 #[async_trait::async_trait]
 impl Store for MemoryStore {
-    async fn append(&self, session: SessionId, msg: Message) -> Result<(), StoreError> {
+    async fn append(&self, session: SessionId, msg: Message) -> Result<i64, StoreError> {
+        let message_id = {
+            let mut next = self.next_message_id.write().await;
+            let id = *next;
+            *next = next.saturating_add(1);
+            i64::try_from(id)
+                .map_err(|_| StoreError::Internal("message id vượt giới hạn".into()))?
+        };
         let mut sessions = self.sessions.write().await;
         match sessions.iter_mut().find(|s| s.id == session) {
             Some(s) => {
@@ -225,6 +317,7 @@ impl Store for MemoryStore {
                     id: session,
                     channel: String::new(),
                     chat_id: String::new(),
+                    user_id: String::new(),
                     title,
                     archived: false,
                     summary: String::new(),
@@ -232,7 +325,7 @@ impl Store for MemoryStore {
                 });
             }
         }
-        Ok(())
+        Ok(message_id)
     }
 
     async fn history(
@@ -267,6 +360,20 @@ impl Store for MemoryStore {
         Ok(())
     }
 
+    async fn session_info(&self, session: SessionId) -> Result<Option<SessionInfo>, StoreError> {
+        let sessions = self.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .find(|item| item.id == session)
+            .map(|item| SessionInfo {
+                id: item.id,
+                channel: item.channel.clone(),
+                chat_id: item.chat_id.clone(),
+                user_id: item.user_id.clone(),
+                archived: item.archived,
+            }))
+    }
+
     async fn ensure_session(
         &self,
         channel: &str,
@@ -276,6 +383,7 @@ impl Store for MemoryStore {
         let mut sessions = self.sessions.write().await;
         if let Some(s) = sessions
             .iter()
+            .rev()
             .find(|s| !s.archived && s.channel == channel && s.chat_id == chat_id)
         {
             return Ok(s.id);
@@ -287,6 +395,40 @@ impl Store for MemoryStore {
             id,
             channel: channel.to_string(),
             chat_id: chat_id.to_string(),
+            user_id: String::new(),
+            title: title.to_string(),
+            archived: false,
+            summary: String::new(),
+            messages: Vec::new(),
+        });
+        Ok(id)
+    }
+
+    async fn ensure_session_for_user(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
+        title: &str,
+    ) -> Result<SessionId, StoreError> {
+        let mut sessions = self.sessions.write().await;
+        if let Some(s) = sessions.iter_mut().rev().find(|s| {
+            !s.archived
+                && s.channel == channel
+                && s.chat_id == chat_id
+                && (s.user_id.is_empty() || s.user_id == user_id)
+        }) {
+            s.user_id = user_id.to_string();
+            return Ok(s.id);
+        }
+        let mut next = self.next_session_id.write().await;
+        let id = SessionId::new(*next);
+        *next += 1;
+        sessions.push(MemorySession {
+            id,
+            channel: channel.to_string(),
+            chat_id: chat_id.to_string(),
+            user_id: user_id.to_string(),
             title: title.to_string(),
             archived: false,
             summary: String::new(),
@@ -350,6 +492,72 @@ impl Store for MemoryStore {
                 source: MemorySource::Memories,
             })
             .collect())
+    }
+
+    async fn enqueue_outbound(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        payload: &Outbound,
+        next_attempt_at: &str,
+    ) -> Result<u64, StoreError> {
+        let id = {
+            let mut next = self.next_outbox_id.write().await;
+            let id = *next;
+            *next = next.saturating_add(1);
+            id
+        };
+        self.outbox.write().await.push(MemoryOutboxEntry {
+            entry: OutboxEntry {
+                id,
+                channel: channel.to_string(),
+                chat_id: chat_id.to_string(),
+                payload: payload.clone(),
+                attempts: 0,
+                next_attempt_at: next_attempt_at.to_string(),
+                last_error: String::new(),
+                created_at: now_rfc3339(),
+            },
+        });
+        Ok(id)
+    }
+
+    async fn due_outbox(&self, now: &str, limit: usize) -> Result<Vec<OutboxEntry>, StoreError> {
+        let outbox = self.outbox.read().await;
+        let mut entries: Vec<_> = outbox
+            .iter()
+            .map(|item| item.entry.clone())
+            .filter(|entry| entry.next_attempt_at.as_str() <= now)
+            .collect();
+        entries.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        if limit > 0 {
+            entries.truncate(limit);
+        }
+        Ok(entries)
+    }
+
+    async fn complete_outbox(&self, id: u64) -> Result<(), StoreError> {
+        self.outbox.write().await.retain(|item| item.entry.id != id);
+        Ok(())
+    }
+
+    async fn retry_outbox(
+        &self,
+        id: u64,
+        next_attempt_at: &str,
+        last_error: &str,
+    ) -> Result<(), StoreError> {
+        let mut outbox = self.outbox.write().await;
+        if let Some(item) = outbox.iter_mut().find(|item| item.entry.id == id) {
+            item.entry.attempts = item.entry.attempts.saturating_add(1);
+            item.entry.next_attempt_at = next_attempt_at.to_string();
+            item.entry.last_error = truncate_chars(last_error, 1_000);
+        }
+        Ok(())
     }
 
     async fn list_messages(
@@ -501,7 +709,7 @@ async fn summarize(
         max_tokens: config.llm.max_tokens.min(2048),
     };
     let response = llm
-        .chat(request)
+        .chat_with_model(request, &config.llm.model)
         .await
         .map_err(|err| StoreError::Internal(format!("gọi LLM để tóm tắt thất bại: {err}")))?;
     Ok(response.text.unwrap_or_default())
@@ -679,6 +887,7 @@ enum DbCommand {
     EnsureSession {
         channel: String,
         chat_id: String,
+        user_id: String,
         title: String,
         reply: Reply<SessionId>,
     },
@@ -689,7 +898,7 @@ enum DbCommand {
     Append {
         session: SessionId,
         message: Message,
-        reply: Reply<()>,
+        reply: Reply<i64>,
     },
     History {
         session: SessionId,
@@ -704,6 +913,10 @@ enum DbCommand {
     Clear {
         session: SessionId,
         reply: Reply<()>,
+    },
+    SessionInfo {
+        session: SessionId,
+        reply: Reply<Option<SessionInfo>>,
     },
     SaveSummary {
         session: SessionId,
@@ -722,6 +935,28 @@ enum DbCommand {
     MemorySearch {
         query: String,
         reply: Reply<Vec<MemorySearchHit>>,
+    },
+    Outbound {
+        channel: String,
+        chat_id: String,
+        payload: Outbound,
+        next_attempt_at: String,
+        reply: Reply<u64>,
+    },
+    DueOutbox {
+        now: String,
+        limit: usize,
+        reply: Reply<Vec<OutboxEntry>>,
+    },
+    CompleteOutbox {
+        id: u64,
+        reply: Reply<()>,
+    },
+    RetryOutbox {
+        id: u64,
+        next_attempt_at: String,
+        last_error: String,
+        reply: Reply<()>,
     },
     ListMessages {
         session: SessionId,
@@ -829,7 +1064,7 @@ impl SqliteStore {
 
 #[async_trait::async_trait]
 impl Store for SqliteStore {
-    async fn append(&self, session: SessionId, msg: Message) -> Result<(), StoreError> {
+    async fn append(&self, session: SessionId, msg: Message) -> Result<i64, StoreError> {
         self.request(move |reply| DbCommand::Append {
             session,
             message: msg,
@@ -863,6 +1098,11 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn session_info(&self, session: SessionId) -> Result<Option<SessionInfo>, StoreError> {
+        self.request(move |reply| DbCommand::SessionInfo { session, reply })
+            .await
+    }
+
     async fn ensure_session(
         &self,
         channel: &str,
@@ -875,6 +1115,28 @@ impl Store for SqliteStore {
         self.request(move |reply| DbCommand::EnsureSession {
             channel,
             chat_id,
+            user_id: String::new(),
+            title,
+            reply,
+        })
+        .await
+    }
+
+    async fn ensure_session_for_user(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
+        title: &str,
+    ) -> Result<SessionId, StoreError> {
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
+        let user_id = user_id.to_string();
+        let title = title.to_string();
+        self.request(move |reply| DbCommand::EnsureSession {
+            channel,
+            chat_id,
+            user_id,
             title,
             reply,
         })
@@ -912,6 +1174,55 @@ impl Store for SqliteStore {
         let query = query.to_string();
         self.request(move |reply| DbCommand::MemorySearch { query, reply })
             .await
+    }
+
+    async fn enqueue_outbound(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        payload: &Outbound,
+        next_attempt_at: &str,
+    ) -> Result<u64, StoreError> {
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
+        let payload = payload.clone();
+        let next_attempt_at = next_attempt_at.to_string();
+        self.request(move |reply| DbCommand::Outbound {
+            channel,
+            chat_id,
+            payload,
+            next_attempt_at,
+            reply,
+        })
+        .await
+    }
+
+    async fn due_outbox(&self, now: &str, limit: usize) -> Result<Vec<OutboxEntry>, StoreError> {
+        let now = now.to_string();
+        self.request(move |reply| DbCommand::DueOutbox { now, limit, reply })
+            .await
+    }
+
+    async fn complete_outbox(&self, id: u64) -> Result<(), StoreError> {
+        self.request(move |reply| DbCommand::CompleteOutbox { id, reply })
+            .await
+    }
+
+    async fn retry_outbox(
+        &self,
+        id: u64,
+        next_attempt_at: &str,
+        last_error: &str,
+    ) -> Result<(), StoreError> {
+        let next_attempt_at = next_attempt_at.to_string();
+        let last_error = last_error.to_string();
+        self.request(move |reply| DbCommand::RetryOutbox {
+            id,
+            next_attempt_at,
+            last_error,
+            reply,
+        })
+        .await
     }
 
     async fn list_messages(
@@ -966,10 +1277,11 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::EnsureSession {
             channel,
             chat_id,
+            user_id,
             title,
             reply,
         } => {
-            let _ = reply.send(ensure_session(conn, &channel, &chat_id, &title));
+            let _ = reply.send(ensure_session(conn, &channel, &chat_id, &user_id, &title));
         }
         DbCommand::ArchiveSession { session, reply } => {
             let _ = reply.send(archive_session(conn, session));
@@ -995,6 +1307,9 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::Clear { session, reply } => {
             let _ = reply.send(clear_messages(conn, session));
         }
+        DbCommand::SessionInfo { session, reply } => {
+            let _ = reply.send(load_session_info(conn, session));
+        }
         DbCommand::SaveSummary {
             session,
             summary,
@@ -1010,6 +1325,35 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         }
         DbCommand::MemorySearch { query, reply } => {
             let _ = reply.send(memory_search(conn, &query));
+        }
+        DbCommand::Outbound {
+            channel,
+            chat_id,
+            payload,
+            next_attempt_at,
+            reply,
+        } => {
+            let _ = reply.send(insert_outbound(
+                conn,
+                &channel,
+                &chat_id,
+                &payload,
+                &next_attempt_at,
+            ));
+        }
+        DbCommand::DueOutbox { now, limit, reply } => {
+            let _ = reply.send(load_due_outbox(conn, &now, limit));
+        }
+        DbCommand::CompleteOutbox { id, reply } => {
+            let _ = reply.send(delete_outbox(conn, id));
+        }
+        DbCommand::RetryOutbox {
+            id,
+            next_attempt_at,
+            last_error,
+            reply,
+        } => {
+            let _ = reply.send(update_outbox_retry(conn, id, &next_attempt_at, &last_error));
         }
         DbCommand::ListMessages {
             session,
@@ -1054,7 +1398,50 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         conn.pragma_update(None, "user_version", 1)
             .map_err(internal)?;
     }
+    if version < 2 {
+        add_column_if_missing(conn, "sessions", "user_id", "TEXT NOT NULL DEFAULT ''")?;
+        add_column_if_missing(
+            conn,
+            "outbox",
+            "next_attempt_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(conn, "outbox", "last_error", "TEXT NOT NULL DEFAULT ''")?;
+        conn.execute_batch(
+            "UPDATE outbox SET next_attempt_at = created_at WHERE next_attempt_at = '';
+             CREATE INDEX IF NOT EXISTS outbox_due ON outbox(next_attempt_at, id);",
+        )
+        .map_err(|err| StoreError::Internal(format!("migration v2 outbox thất bại: {err}")))?;
+        conn.pragma_update(None, "user_version", 2)
+            .map_err(internal)?;
+    }
     Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), StoreError> {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(internal)?;
+    let mut rows = statement.query([]).map_err(internal)?;
+    while let Some(row) = rows.next().map_err(internal)? {
+        let name: String = row.get(1).map_err(internal)?;
+        if name == column {
+            return Ok(());
+        }
+    }
+    conn.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+    ))
+    .map_err(|err| {
+        StoreError::Internal(format!(
+            "migration thêm cột {table}.{column} thất bại: {err}"
+        ))
+    })
 }
 
 /// Bọc lỗi SQLite; nội dung lỗi chỉ chứa mã/khai báo SQL, **không** chứa dữ liệu hội thoại.
@@ -1063,7 +1450,7 @@ fn internal(err: rusqlite::Error) -> StoreError {
 }
 
 fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339()
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
 
 fn decode_message(json: &str) -> Result<Message, StoreError> {
@@ -1071,29 +1458,60 @@ fn decode_message(json: &str) -> Result<Message, StoreError> {
         .map_err(|err| StoreError::Internal(format!("message trong DB không đọc được: {err}")))
 }
 
+fn load_session_info(
+    conn: &Connection,
+    session: SessionId,
+) -> Result<Option<SessionInfo>, StoreError> {
+    conn.query_row(
+        "SELECT channel, chat_id, user_id, archived FROM sessions WHERE id = ?1",
+        params![session.get()],
+        |row| {
+            Ok(SessionInfo {
+                id: session,
+                channel: row.get(0)?,
+                chat_id: row.get(1)?,
+                user_id: row.get(2)?,
+                archived: row.get::<_, i64>(3)? != 0,
+            })
+        },
+    )
+    .optional()
+    .map_err(internal)
+}
+
 fn ensure_session(
     conn: &Connection,
     channel: &str,
     chat_id: &str,
+    user_id: &str,
     title: &str,
 ) -> Result<SessionId, StoreError> {
     let found = conn
         .query_row(
             "SELECT id FROM sessions WHERE channel = ?1 AND chat_id = ?2 AND archived = 0 \
-             ORDER BY id DESC LIMIT 1",
-            params![channel, chat_id],
+             AND (?3 = '' OR user_id = '' OR user_id = ?3) ORDER BY id DESC LIMIT 1",
+            params![channel, chat_id, user_id],
             |row| row.get::<_, i64>(0),
         )
         .optional()
         .map_err(internal)?;
     if let Some(id) = found {
+        if !user_id.is_empty() {
+            conn.execute(
+                "UPDATE sessions SET user_id = ?2 \
+                 WHERE id = ?1 AND (user_id = '' OR user_id = ?2)",
+                params![id, user_id],
+            )
+            .map_err(internal)?;
+        }
         return Ok(SessionId::new(id));
     }
     let now = now_rfc3339();
     conn.execute(
-        "INSERT INTO sessions (channel, chat_id, title, archived, summary, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, 0, '', ?4, ?4)",
-        params![channel, chat_id, title, now],
+        "INSERT INTO sessions \
+           (channel, chat_id, user_id, title, archived, summary, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 0, '', ?5, ?5)",
+        params![channel, chat_id, user_id, title, now],
     )
     .map_err(internal)?;
     Ok(SessionId::new(conn.last_insert_rowid()))
@@ -1114,7 +1532,7 @@ fn append_message(
     conn: &Connection,
     session: SessionId,
     message: &Message,
-) -> Result<(), StoreError> {
+) -> Result<i64, StoreError> {
     let content = serde_json::to_string(message)
         .map_err(|err| StoreError::Internal(format!("serialize message thất bại: {err}")))?;
     let now = now_rfc3339();
@@ -1131,6 +1549,7 @@ fn append_message(
         ],
     )
     .map_err(internal)?;
+    let message_id = conn.last_insert_rowid();
     // Tiêu đề lấy từ tin đầu tiên của người dùng (mục 8.1); chỉ đặt khi còn rỗng.
     conn.execute(
         "UPDATE sessions SET updated_at = ?2, \
@@ -1139,7 +1558,7 @@ fn append_message(
         params![session.get(), now, title_from(message)],
     )
     .map_err(internal)?;
-    Ok(())
+    Ok(message_id)
 }
 
 fn count_messages(conn: &Connection, session: SessionId) -> Result<u64, StoreError> {
@@ -1190,6 +1609,106 @@ fn memory_save_row(conn: &Connection, text: &str, tags: &str) -> Result<u64, Sto
     )
     .map_err(internal)?;
     Ok(conn.last_insert_rowid().max(0) as u64)
+}
+
+fn insert_outbound(
+    conn: &Connection,
+    channel: &str,
+    chat_id: &str,
+    payload: &Outbound,
+    next_attempt_at: &str,
+) -> Result<u64, StoreError> {
+    let payload_json = serde_json::to_string(payload)
+        .map_err(|err| StoreError::Internal(format!("serialize outbound thất bại: {err}")))?;
+    conn.execute(
+        "INSERT INTO outbox \
+           (channel, chat_id, payload_json, attempts, created_at, next_attempt_at, last_error) \
+         VALUES (?1, ?2, ?3, 0, ?4, ?5, '')",
+        params![
+            channel,
+            chat_id,
+            payload_json,
+            now_rfc3339(),
+            next_attempt_at
+        ],
+    )
+    .map_err(internal)?;
+    Ok(conn.last_insert_rowid().max(0) as u64)
+}
+
+fn load_due_outbox(
+    conn: &Connection,
+    now: &str,
+    limit: usize,
+) -> Result<Vec<OutboxEntry>, StoreError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, channel, chat_id, payload_json, attempts, next_attempt_at, \
+                    last_error, created_at FROM outbox WHERE next_attempt_at <= ?1 \
+             ORDER BY created_at, id LIMIT ?2",
+        )
+        .map_err(internal)?;
+    let rows = stmt
+        .query_map(params![now, sql_limit(limit)], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        })
+        .map_err(internal)?;
+    let mut entries = Vec::new();
+    for row in rows {
+        let (id, channel, chat_id, payload, attempts, next_attempt_at, last_error, created_at) =
+            row.map_err(internal)?;
+        let id = u64::try_from(id)
+            .map_err(|_| StoreError::Internal("outbox.id âm tính trong SQLite".into()))?;
+        let attempts = u32::try_from(attempts)
+            .map_err(|_| StoreError::Internal("outbox.attempts âm tính trong SQLite".into()))?;
+        let payload = serde_json::from_str(&payload)
+            .map_err(|err| StoreError::Internal(format!("outbox payload hỏng: {err}")))?;
+        entries.push(OutboxEntry {
+            id,
+            channel,
+            chat_id,
+            payload,
+            attempts,
+            next_attempt_at,
+            last_error,
+            created_at,
+        });
+    }
+    Ok(entries)
+}
+
+fn delete_outbox(conn: &Connection, id: u64) -> Result<(), StoreError> {
+    let id = i64::try_from(id)
+        .map_err(|_| StoreError::Internal("outbox.id vượt giới hạn SQLite".into()))?;
+    conn.execute("DELETE FROM outbox WHERE id = ?1", params![id])
+        .map_err(internal)?;
+    Ok(())
+}
+
+fn update_outbox_retry(
+    conn: &Connection,
+    id: u64,
+    next_attempt_at: &str,
+    last_error: &str,
+) -> Result<(), StoreError> {
+    let id = i64::try_from(id)
+        .map_err(|_| StoreError::Internal("outbox.id vượt giới hạn SQLite".into()))?;
+    conn.execute(
+        "UPDATE outbox SET attempts = attempts + 1, next_attempt_at = ?2, last_error = ?3 \
+         WHERE id = ?1",
+        params![id, next_attempt_at, truncate_chars(last_error, 1_000)],
+    )
+    .map_err(internal)?;
+    Ok(())
 }
 
 fn load_history(
@@ -1398,10 +1917,14 @@ mod tests {
     use std::path::PathBuf;
 
     use beanagent_llm::{FakeProvider, LlmProvider};
-    use beanagent_types::{Config, LlmResponse, Message, Role, SessionId, ToolCall};
+    use beanagent_types::{
+        Config, LlmResponse, Message, Outbound, OutboundKind, Role, SessionId, ToolCall,
+    };
     use tempfile::TempDir;
 
-    use super::{MemorySearchHit, MemorySource, MemoryStore, SqliteStore, Store};
+    use super::{
+        MemorySearchHit, MemorySource, MemoryStore, SCHEMA_SQL, SqliteStore, Store, configure,
+    };
     use crate::safe_cut::check_no_orphan_result;
 
     fn db_path(dir: &TempDir) -> PathBuf {
@@ -1495,6 +2018,108 @@ mod tests {
         assert_eq!(store.count(next).await.unwrap(), 1);
         assert_eq!(store.count(first).await.unwrap(), 0);
         assert_eq!(store.count(other).await.unwrap(), 0);
+    }
+
+    /// Outbox bền vững: ghi lỗi, tăng attempts, đổi lịch rồi xoá khi gửi thành công.
+    #[tokio::test]
+    async fn sqlite_outbox_retry_lifecycle_survives_restart() {
+        let dir = TempDir::new().unwrap();
+        let payload = Outbound {
+            session_id: SessionId::new(7),
+            message_id: 42,
+            text: "tin chủ động 🦀".into(),
+            kind: OutboundKind::Notification,
+        };
+        let id = {
+            let store = open(&dir);
+            let id = store
+                .enqueue_outbound("telegram", "123", &payload, "2999-01-01T00:00:00.000000Z")
+                .await
+                .unwrap();
+            let due = store
+                .due_outbox("3000-01-01T00:00:00.000000Z", 10)
+                .await
+                .unwrap();
+            assert_eq!(due.len(), 1);
+            assert_eq!(due[0].payload, payload);
+            store
+                .retry_outbox(id, "2999-01-01T00:00:00.000000Z", "mạng lỗi: timeout")
+                .await
+                .unwrap();
+            id
+        };
+
+        let reopened = open(&dir);
+        let due = reopened
+            .due_outbox("3000-01-01T00:00:00.000000Z", 10)
+            .await
+            .unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, id);
+        assert_eq!(due[0].attempts, 1);
+        assert_eq!(due[0].last_error, "mạng lỗi: timeout");
+        reopened.complete_outbox(id).await.unwrap();
+        assert!(
+            reopened
+                .due_outbox("3000-01-01T00:00:00.000000Z", 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// `user_id` gắn ownership session; user khác không nhận lại session cũ.
+    #[tokio::test]
+    async fn ensure_session_for_user_enforces_ownership() {
+        let dir = TempDir::new().unwrap();
+        let store = open(&dir);
+        let first = store
+            .ensure_session_for_user("web", "chat-a", "web:admin", "")
+            .await
+            .unwrap();
+        let info = store.session_info(first).await.unwrap().unwrap();
+        assert_eq!(info.user_id, "web:admin");
+        assert!(!info.archived);
+        assert_eq!(
+            first,
+            store
+                .ensure_session_for_user("web", "chat-a", "web:admin", "")
+                .await
+                .unwrap()
+        );
+        let other = store
+            .ensure_session_for_user("web", "chat-a", "web:other", "")
+            .await
+            .unwrap();
+        assert_ne!(other, first);
+    }
+
+    /// Migration v2 chịu được DB bị dừng giữa chừng sau khi đã thêm một cột.
+    #[tokio::test]
+    async fn migration_v2_resumes_after_partial_schema_change() {
+        let dir = TempDir::new().unwrap();
+        {
+            let conn = rusqlite::Connection::open(db_path(&dir)).unwrap();
+            configure(&conn).unwrap();
+            conn.execute_batch(SCHEMA_SQL).unwrap();
+            conn.execute_batch("ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+                .unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+        }
+        let store = open(&dir);
+        let session = store
+            .ensure_session_for_user("cli", "local", "cli:local", "")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.session_info(session).await.unwrap().unwrap().user_id,
+            "cli:local"
+        );
+        let version: i64 = rusqlite::Connection::open(db_path(&dir))
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
     }
 
     /// Tiêu đề phiên lấy từ **dòng đầu** của tin đầu tiên do người dùng gửi (mục 8.1).

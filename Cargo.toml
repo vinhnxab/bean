@@ -89,6 +89,8 @@ schemars = "1.2.2"
 tokio-util = "0.7.19"
 # Glob matching cho tool `glob` (`**` hiểu đúng ranh giới `/`).
 globset = "0.4.20"
+# CSPRNG của OS cho RunId/ConfirmId; API `getrandom::fill` đã kiểm tra trong source 0.3.4.
+getrandom = "0.3.4"
 # Duyệt cây thư mục cho `glob`/`grep`.
 walkdir = "2.5.0"
 # Pattern regex cho tool `grep`.
