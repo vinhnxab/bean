@@ -30,6 +30,8 @@ enabled = ["files", "shell", "web", "memory", "skills", "schedule"]
 [tools.web_search]
 provider = "tavily"                  # tavily | brave | searxng
 api_key_env = "TAVILY_API_KEY"
+# Khi provider = "searxng", uncomment và sửa endpoint tự host:
+# base_url = "http://127.0.0.1:8080"
 
 [security]
 daily_token_budget = 2000000

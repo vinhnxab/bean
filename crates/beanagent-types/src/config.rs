@@ -530,6 +530,28 @@ impl Config {
             }
         }
 
+        let web_enabled = self.tools.enabled.iter().any(|group| group == "web");
+        let web_search = &self.tools.web_search;
+        if web_enabled
+            && web_search.provider.requires_api_key()
+            && web_search.api_key_env.trim().is_empty()
+        {
+            return Err(invalid(
+                "tools.web_search.api_key_env rỗng — cần TÊN biến môi trường chứa API key",
+            ));
+        }
+        if web_enabled && let Some(base_url) = web_search.base_url.as_deref() {
+            validate_http_url("tools.web_search.base_url", base_url)?;
+        }
+        if web_enabled
+            && web_search.provider == WebSearchProvider::Searxng
+            && web_search.base_url.is_none()
+        {
+            return Err(invalid(
+                "tools.web_search.provider = searxng cần tools.web_search.base_url",
+            ));
+        }
+
         if self.llm.model.trim().is_empty() {
             return Err(invalid("llm.model rỗng"));
         }
@@ -689,6 +711,27 @@ impl Config {
         self.resolve_secrets_with(|name| std::env::var(name).ok())
     }
 
+    /// Đọc optional API key cho `web_search` từ biến môi trường được cấu hình.
+    ///
+    /// Trả `None` khi nhóm `web` tắt, provider không cần key (SearXNG), hoặc biến chưa
+    /// được đặt. Việc thiếu key không chặn khởi động; `web_search` sẽ báo rõ khi được gọi.
+    #[must_use]
+    pub fn resolve_web_search_api_key(&self) -> Option<SecretString> {
+        self.resolve_web_search_api_key_with(&|name| std::env::var(name).ok())
+    }
+
+    fn resolve_web_search_api_key_with<P>(&self, get_env: &P) -> Option<SecretString>
+    where
+        P: Fn(&str) -> Option<String>,
+    {
+        let enabled = self.tools.enabled.iter().any(|group| group == "web");
+        if enabled && self.tools.web_search.provider.requires_api_key() {
+            read_optional(get_env, &self.tools.web_search.api_key_env)
+        } else {
+            None
+        }
+    }
+
     /// Như [`Config::resolve_secrets`] nhưng nhận hàm đọc biến môi trường tuỳ ý.
     ///
     /// Dùng cho test để không phải `set_var` (trong Rust 2024 `set_var` là `unsafe` và sẽ
@@ -720,7 +763,7 @@ impl Config {
         // cần Tavily (D6.4). Khi nhóm `web` bật mà thiếu key thì chỉ cảnh báo; M7 sẽ trả
         // lỗi rõ ràng ngay tại lúc tool `web_search` được gọi mà không có key.
         let web_tools_enabled = self.tools.enabled.iter().any(|group| group == "web");
-        let web_search_api_key = read_optional(&get_env, &self.tools.web_search.api_key_env);
+        let web_search_api_key = self.resolve_web_search_api_key_with(&get_env);
         if web_tools_enabled
             && self.tools.web_search.provider.requires_api_key()
             && web_search_api_key.is_none()

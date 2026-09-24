@@ -22,12 +22,16 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use beanagent_core::{Decision, RunIo, RunTurnArgs, SqliteStore, Store, memory_tools, run_turn};
 use beanagent_llm::{FakeProvider, LlmProvider};
-use beanagent_security::{AuditLog, CapWorkspace, Sandbox, SessionPolicy, run_shell};
+use beanagent_security::{
+    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, SessionPolicy, run_shell, web_fetch,
+    web_search,
+};
 use beanagent_skills::{SkillCatalog, skill_tools};
 use beanagent_tools::ToolRegistry;
 use beanagent_types::config::Config;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+use secrecy::SecretString;
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::ChatArgs;
@@ -88,7 +92,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     if let Some(ws) = &args.workspace {
         config.agent.workspace = ws.clone();
     }
-    let provider = build_provider(args, &config)?;
+    let (provider, web_search_api_key) = build_provider(args, &config)?;
     let store = Arc::new(
         SqliteStore::open(&store_path(&config))
             .map_err(|e| anyhow::anyhow!("không mở được store: {e}"))?,
@@ -98,7 +102,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         &[PathBuf::from("skills"), user_skills_root.clone()],
         user_skills_root,
     );
-    let registry = build_registry(&config, store.clone(), skills.clone())?;
+    let registry = build_registry(&config, store.clone(), skills.clone(), web_search_api_key)?;
     let security = build_security(&config);
     let cancel = CancellationToken::new();
 
@@ -138,17 +142,22 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
 ///
 /// Lỗi trả về luôn nêu rõ **nguyên nhân cấu hình** (thiếu biến môi trường, sai provider…)
 /// chứ không lộ giá trị secret.
-fn build_provider(args: &ChatArgs, config: &Config) -> Result<Arc<dyn LlmProvider>> {
+fn build_provider(
+    args: &ChatArgs,
+    config: &Config,
+) -> Result<(Arc<dyn LlmProvider>, Option<SecretString>)> {
     if let Some(path) = args.fake_llm.as_deref() {
         let provider =
             FakeProvider::from_json_path(path).context("nạp kịch bản --fake-llm thất bại")?;
-        return Ok(Arc::new(provider));
+        return Ok((Arc::new(provider), config.resolve_web_search_api_key()));
     }
     let secrets = config
         .resolve_secrets()
         .context("đọc secret từ biến môi trường thất bại")?;
-    beanagent_llm::build_provider(&config.llm, secrets.llm_api_key)
-        .context("dựng provider LLM thất bại (kiểm tra [llm] trong BeanAgent.toml)")
+    let web_search_api_key = secrets.web_search_api_key.clone();
+    let provider = beanagent_llm::build_provider(&config.llm, secrets.llm_api_key)
+        .context("dựng provider LLM thất bại (kiểm tra [llm] trong BeanAgent.toml)")?;
+    Ok((provider, web_search_api_key))
 }
 
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
@@ -158,6 +167,7 @@ fn build_registry(
     config: &Config,
     store: Arc<SqliteStore>,
     skills: SkillCatalog,
+    web_search_api_key: Option<SecretString>,
 ) -> Result<ToolRegistry> {
     std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
         format!(
@@ -184,6 +194,17 @@ fn build_registry(
         registry
             .register(run_shell(sandbox))
             .context("đăng ký run_shell thất bại")?;
+    }
+    if config.tools.enabled.iter().any(|g| g == "web") {
+        let client = Arc::new(
+            SafeHttpClient::new().context("không dựng được HTTP client an toàn cho web tools")?,
+        );
+        registry
+            .register(web_fetch(client))
+            .context("đăng ký web_fetch thất bại")?;
+        registry
+            .register(web_search(&config.tools.web_search, web_search_api_key)?)
+            .context("đăng ký web_search thất bại")?;
     }
     if config.tools.enabled.iter().any(|g| g == "memory") {
         for tool in memory_tools(store) {

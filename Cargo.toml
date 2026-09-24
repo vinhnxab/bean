@@ -58,6 +58,10 @@ rustyline = "18.0.1"
 reqwest = { version = "0.13.5", features = ["json"] }
 secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
+# HTML -> text sạch cho `web_fetch` (M7); API nguồn `html2text::from_read` 0.17.1.
+html2text = "0.17.1"
+url = "2.5.8"
+
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 thiserror = "2.0.20"

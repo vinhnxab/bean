@@ -27,6 +27,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 rustyline.workspace = true
+secrecy.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

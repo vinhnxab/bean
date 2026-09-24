@@ -89,6 +89,14 @@ fn invalid_semantic_values_are_rejected() {
             "[tools]\nenabled = [\"files\", \"telepathy\"]\n",
             "tools.enabled",
         ),
+        (
+            "[tools.web_search]\nprovider = \"searxng\"\n",
+            "tools.web_search.base_url",
+        ),
+        (
+            "[tools.web_search]\nbase_url = \"file:///tmp/search\"\n",
+            "tools.web_search.base_url",
+        ),
         ("[llm]\nmodel = \"\"\n", "llm.model"),
         ("[llm]\nmax_tokens = 0\n", "llm.max_tokens"),
         ("[llm]\nallowed_models = [\"khac\"]\n", "allowed_models"),
@@ -140,6 +148,23 @@ fn tilde_is_expanded_in_paths() {
     let loaded = Config::load(&path).unwrap();
     assert_eq!(loaded.data.dir, PathBuf::from(&home).join("beanagent-test"));
     assert_eq!(loaded.agent.workspace, PathBuf::from("/tmp/ws"));
+}
+
+#[test]
+fn searxng_requires_base_url_only_when_web_tools_are_enabled() {
+    let mut disabled = Config::default();
+    disabled.tools.enabled.retain(|group| group != "web");
+    disabled.tools.web_search.provider = WebSearchProvider::Searxng;
+    disabled.tools.web_search.base_url = None;
+    disabled
+        .validate()
+        .expect("SearXNG chưa bật thì không cần endpoint");
+
+    let mut enabled = Config::default();
+    enabled.tools.web_search.provider = WebSearchProvider::Searxng;
+    enabled.tools.web_search.base_url = None;
+    let error = enabled.validate().unwrap_err();
+    assert!(matches!(error, ConfigError::Invalid(ref message) if message.contains("base_url")));
 }
 
 #[test]
