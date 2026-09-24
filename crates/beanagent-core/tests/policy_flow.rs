@@ -149,6 +149,7 @@ async fn turn_with(
         session_policy: Some(session_policy),
         audit: None,
         channel: "cli",
+        skills_index: "",
     })
     .await
 }

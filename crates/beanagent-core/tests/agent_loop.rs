@@ -241,6 +241,7 @@ async fn turn(
         session_policy: None,
         audit: None,
         channel: "cli",
+        skills_index: "",
     })
     .await
 }
@@ -638,6 +639,7 @@ async fn system_prompt_is_sent_once_via_system_field() {
         session_policy: None,
         audit: None,
         channel: "cli",
+        skills_index: "",
     })
     .await
     .unwrap();

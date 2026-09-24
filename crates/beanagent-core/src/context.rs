@@ -47,11 +47,23 @@ pub async fn build(
     session: SessionId,
     workspace: Option<&dyn WorkspaceFs>,
 ) -> Result<TurnContext, StoreError> {
+    build_with_skills(store, config, session, workspace, "").await
+}
+
+/// Dựng context có kèm index skill cho progressive disclosure.
+pub async fn build_with_skills(
+    store: &dyn Store,
+    config: &Config,
+    session: SessionId,
+    workspace: Option<&dyn WorkspaceFs>,
+    skills_index: &str,
+) -> Result<TurnContext, StoreError> {
     let memory_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, MEMORY_FILE));
     let user_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, USER_FILE));
     let summary = store.summary(session).await?.unwrap_or_default();
 
-    let mut system = crate::prompt::system_prompt(&config.agent, "", &memory_md, &user_md);
+    let mut system =
+        crate::prompt::system_prompt(&config.agent, skills_index, &memory_md, &user_md);
     if !summary.trim().is_empty() {
         system.push_str("\n\n# Conversation summary\n");
         system.push_str(summary.trim());

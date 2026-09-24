@@ -23,6 +23,7 @@ use anyhow::{Context, Result};
 use beanagent_core::{Decision, RunIo, RunTurnArgs, SqliteStore, Store, memory_tools, run_turn};
 use beanagent_llm::{FakeProvider, LlmProvider};
 use beanagent_security::{AuditLog, CapWorkspace, Sandbox, SessionPolicy, run_shell};
+use beanagent_skills::{SkillCatalog, skill_tools};
 use beanagent_tools::ToolRegistry;
 use beanagent_types::config::Config;
 use rustyline::DefaultEditor;
@@ -92,7 +93,12 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         SqliteStore::open(&store_path(&config))
             .map_err(|e| anyhow::anyhow!("không mở được store: {e}"))?,
     );
-    let registry = build_registry(&config, store.clone())?;
+    let user_skills_root = config.data.dir.join("skills");
+    let skills = SkillCatalog::load_with_create_root(
+        &[PathBuf::from("skills"), user_skills_root.clone()],
+        user_skills_root,
+    );
+    let registry = build_registry(&config, store.clone(), skills.clone())?;
     let security = build_security(&config);
     let cancel = CancellationToken::new();
 
@@ -107,6 +113,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
             &config,
             &provider,
             &registry,
+            &skills,
             store,
             cancel.clone(),
             &security,
@@ -117,6 +124,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
             &config,
             &provider,
             &registry,
+            &skills,
             store,
             cancel.clone(),
             &security,
@@ -146,7 +154,11 @@ fn build_provider(args: &ChatArgs, config: &Config) -> Result<Arc<dyn LlmProvide
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
 /// Path jail bằng `CapWorkspace` (cap-std — mục 15.1); `run_shell` gắn sandbox
 /// docker/host (mục 15.2).
-fn build_registry(config: &Config, store: Arc<SqliteStore>) -> Result<ToolRegistry> {
+fn build_registry(
+    config: &Config,
+    store: Arc<SqliteStore>,
+    skills: SkillCatalog,
+) -> Result<ToolRegistry> {
     std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
         format!(
             "không tạo được workspace {}",
@@ -180,6 +192,13 @@ fn build_registry(config: &Config, store: Arc<SqliteStore>) -> Result<ToolRegist
                 .context("đăng ký tool memory thất bại")?;
         }
     }
+    if config.tools.enabled.iter().any(|g| g == "skills") {
+        for tool in skill_tools(skills) {
+            registry
+                .register(tool)
+                .context("đăng ký tool skill thất bại")?;
+        }
+    }
     Ok(registry)
 }
 
@@ -193,6 +212,7 @@ async fn run_interactive(
     config: &Config,
     provider: &Arc<dyn LlmProvider>,
     registry: &ToolRegistry,
+    skills: &SkillCatalog,
     store: Arc<SqliteStore>,
     cancel: CancellationToken,
     security: &CliSecurity,
@@ -241,6 +261,11 @@ async fn run_interactive(
         let _ = editor.add_history_entry(&text);
 
         let io_ref = &io;
+        let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
+            skills.index()
+        } else {
+            String::new()
+        };
         let result = run_turn(RunTurnArgs {
             store: store_ref,
             registry,
@@ -253,6 +278,7 @@ async fn run_interactive(
             session_policy: Some(security.session_policy.clone()),
             audit: security.audit.clone(),
             channel: "cli",
+            skills_index: &skills_index,
         })
         .await;
 
@@ -277,6 +303,7 @@ async fn run_piped(
     config: &Config,
     provider: &Arc<dyn LlmProvider>,
     registry: &ToolRegistry,
+    skills: &SkillCatalog,
     store: Arc<SqliteStore>,
     cancel: CancellationToken,
     security: &CliSecurity,
@@ -327,6 +354,11 @@ async fn run_piped(
         }
 
         let io_ref = &io;
+        let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
+            skills.index()
+        } else {
+            String::new()
+        };
         let result = run_turn(RunTurnArgs {
             store: store_ref,
             registry,
@@ -339,6 +371,7 @@ async fn run_piped(
             session_policy: Some(security.session_policy.clone()),
             audit: security.audit.clone(),
             channel: "cli",
+            skills_index: &skills_index,
         })
         .await;
 

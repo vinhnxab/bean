@@ -47,6 +47,8 @@ pub struct RunTurnArgs<'a> {
     pub audit: Option<Arc<AuditLog>>,
     /// Kênh của lượt, dùng cho audit (`"cli"` | `"web"` | `"telegram"` | `"scheduler"`).
     pub channel: &'static str,
+    /// Progressive-disclosure index `name: description` của các skill đang có.
+    pub skills_index: &'a str,
 }
 
 pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
@@ -62,6 +64,7 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
         session_policy,
         audit: audit_log,
         channel,
+        skills_index,
     } = args;
     // (M5/D8.10) System prompt chỉ đi qua `ChatRequest.system` — **không** nhân bản nó
     // thành message `User` (M3 từng làm vậy: tốn token gấp đôi cho phần system và dễ
@@ -92,7 +95,14 @@ pub async fn run_turn(args: RunTurnArgs<'_>) -> Result<String, AgentError> {
         // (M5, mục 8.2) Dựng context: system prompt + MEMORY.md/USER.md + summary của phiên
         // + lịch sử vừa ngân sách token, cắt ở ranh giới an toàn (không tách cặp tool).
         let workspace = registry.workspace_opt();
-        let ctx = crate::context::build(store, config, session, workspace.as_deref()).await?;
+        let ctx = crate::context::build_with_skills(
+            store,
+            config,
+            session,
+            workspace.as_deref(),
+            skills_index,
+        )
+        .await?;
         let system = ctx.system;
         let mut messages = ctx.messages;
         if messages.is_empty() {

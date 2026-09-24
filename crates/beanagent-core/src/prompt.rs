@@ -1,7 +1,8 @@
 //! System prompt theo mẫu mục 19 của agents.md.
 //!
 //! Viết bằng tiếng Anh để model tuân thủ tốt; model vẫn trả lời theo ngôn ngữ người dùng.
-//! Skills và memory để trỗng ở M3 (sẽ có từ M6/M5).
+//! Skills được nạp theo progressive disclosure: system prompt chỉ có index
+//! `name: description`; nội dung đầy đủ chỉ mở khi model gọi `load_skill`.
 
 use beanagent_types::config::AgentConfig;
 
@@ -10,10 +11,10 @@ use beanagent_types::config::AgentConfig;
 /// # Tham số
 ///
 /// * `config` — cấu hình agent (workspace, timezone...).
-/// * `skills_index` — danh sách skill: `"Kỹ năng A: mô tả\nKỹ năng B: mô tả"`. Để trỗng nếu
+/// * `skills_index` — danh sách skill: `"Kỹ năng A: mô tả\nKỹ năng B: mô tả"`. Để trống nếu
 ///   chưa có skill nào.
-/// * `memory_md` — nội dung file `MEMORY.md` (workspace). Để trỗng nếu chưa có.
-/// * `user_md` — nội dung file `USER.md` (workspace). Để trỗng nếu chưa có.
+/// * `memory_md` — nội dung file `MEMORY.md` (workspace). Để trống nếu chưa có.
+/// * `user_md` — nội dung file `USER.md` (workspace). Để trống nếu chưa có.
 pub fn system_prompt(
     config: &AgentConfig,
     skills_index: &str,

@@ -188,6 +188,7 @@ dependencies = [
  "beanagent-llm",
  "beanagent-memory",
  "beanagent-security",
+ "beanagent-skills",
  "beanagent-tools",
  "beanagent-types",
  "chrono",
@@ -261,6 +262,19 @@ dependencies = [
 [[package]]
 name = "beanagent-skills"
 version = "0.1.0"
+dependencies = [
+ "beanagent-security",
+ "beanagent-tools",
+ "beanagent-types",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "beanagent-tools"
