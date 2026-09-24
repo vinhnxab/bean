@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Chat(args) => chat::run(&args, config_path.as_deref()).await,
         Command::Serve(args) => serve::run(&args, config_path.as_deref()).await,
-        Command::Auth(args) => auth::run(&args),
+        Command::Auth(args) => auth::run(&args, config_path.as_deref()).await,
     }
 }
 

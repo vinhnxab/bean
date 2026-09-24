@@ -127,6 +127,27 @@ pub enum RouterError {
     Random(String),
 }
 
+impl RouterError {
+    /// Mã lỗi ổn định cho adapter, không chứa nội dung bí mật.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Forbidden(_) | Self::InvalidIdentity { .. } => "forbidden",
+            Self::Store(_) => "store",
+            Self::InvalidSession => "invalid_session",
+            Self::SessionBusy => "session_busy",
+            Self::UnknownCommand(_) => "unknown_command",
+            Self::ModelNotAllowed(_) => "model_not_allowed",
+            Self::ConfirmNotFound => "confirm_not_found",
+            Self::ConfirmForbidden => "confirm_forbidden",
+            Self::DuplicateChannel(_) => "duplicate_channel",
+            Self::NoRuntime => "no_runtime",
+            Self::StatePoisoned => "router_state",
+            Self::Random(_) => "random_unavailable",
+        }
+    }
+}
+
 /// Tùy chọn runtime, test có thể rút ngắn timeout/backoff.
 #[derive(Debug, Clone)]
 pub struct RouterOptions {
@@ -170,6 +191,42 @@ pub struct RouterDeps {
     pub skills_index: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunningInfo {
+    /// ID run.
+    pub run_id: RunId,
+    /// Session của run.
+    pub session_id: SessionId,
+}
+
+/// Confirm đang chờ, dùng để đồng bộ sau reconnect.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingConfirmInfo {
+    /// ID confirm.
+    pub confirm_id: ConfirmId,
+    /// Session của run.
+    pub session_id: SessionId,
+    /// ID run.
+    pub run_id: RunId,
+    /// Nội dung hành động.
+    pub prompt: String,
+    /// Mức rủi ro.
+    pub risk: Risk,
+    /// Có cho phép allow-in-session hay không.
+    pub allow_session_option: bool,
+    /// Timeout còn lại/được yêu cầu, tính bằng giây.
+    pub timeout_seconds: u32,
+}
+
+/// Snapshot atomically đọc từ Router state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouterSnapshot {
+    /// Các run đang active.
+    pub running: Vec<RunningInfo>,
+    /// Các confirm đang chờ.
+    pub pending_confirms: Vec<PendingConfirmInfo>,
+}
+
 #[derive(Debug)]
 struct SessionQueue {
     active: Option<RunId>,
@@ -196,6 +253,10 @@ struct PendingConfirm {
     run_id: RunId,
     session_id: SessionId,
     actor: String,
+    prompt: String,
+    risk: Risk,
+    allow_session_option: bool,
+    timeout_seconds: u32,
     sender: oneshot::Sender<Confirmation>,
 }
 
@@ -549,6 +610,50 @@ impl Router {
 }
 
 impl Router {
+    /// Đọc snapshot run/confirm hiện tại cho WebSocket `Sync`.
+    pub fn snapshot(&self) -> RouterSnapshot {
+        let state = match lock(&self.inner.state) {
+            Ok(state) => state,
+            Err(_) => {
+                return RouterSnapshot {
+                    running: Vec::new(),
+                    pending_confirms: Vec::new(),
+                };
+            }
+        };
+        let running = state
+            .active
+            .keys()
+            .map(|run_id| RunningInfo {
+                run_id: run_id.clone(),
+                session_id: state
+                    .queues
+                    .iter()
+                    .find_map(|(session, queue)| {
+                        (queue.active.as_ref() == Some(run_id)).then_some(*session)
+                    })
+                    .unwrap_or_else(|| SessionId::new(0)),
+            })
+            .collect();
+        let pending_confirms = state
+            .confirms
+            .iter()
+            .map(|(id, pending)| PendingConfirmInfo {
+                confirm_id: id.clone(),
+                session_id: pending.session_id,
+                run_id: pending.run_id.clone(),
+                prompt: pending.prompt.clone(),
+                risk: pending.risk,
+                allow_session_option: pending.allow_session_option,
+                timeout_seconds: pending.timeout_seconds,
+            })
+            .collect();
+        RouterSnapshot {
+            running,
+            pending_confirms,
+        }
+    }
+
     /// Huỷ active run của channel/chat; queued run không bị huỷ.
     pub async fn cancel(&self, channel: &str, chat_id: &str) {
         let token = lock(&self.inner.state).ok().and_then(|state| {
@@ -557,6 +662,30 @@ impl Router {
                 .iter()
                 .find(|(_, active)| active.channel == channel && active.chat_id == chat_id)
                 .map(|(_, active)| active.cancel.clone())
+        });
+        if let Some(token) = token {
+            token.cancel();
+        }
+    }
+
+    /// Huỷ đúng run đang active của một session.
+    ///
+    /// WebSocket gửi `session_id`, nên adapter không được dùng `cancel(channel,
+    /// chat_id)` vì nhiều session của cùng user có thể bị huỷ nhầm.
+    pub async fn cancel_session(&self, session: SessionId) {
+        let run_id = lock(&self.inner.state).ok().and_then(|state| {
+            state
+                .queues
+                .get(&session)
+                .and_then(|queue| queue.active.clone())
+        });
+        let token = run_id.and_then(|run_id| {
+            lock(&self.inner.state).ok().and_then(|state| {
+                state
+                    .active
+                    .get(&run_id)
+                    .map(|active| active.cancel.clone())
+            })
         });
         if let Some(token) = token {
             token.cancel();
@@ -725,6 +854,10 @@ impl Router {
                 state.confirms.insert(id.clone(), pending);
                 return Err(RouterError::ConfirmForbidden);
             }
+            if matches!(decision, Decision::AllowInSession) && !pending.allow_session_option {
+                state.confirms.insert(id.clone(), pending);
+                return Err(RouterError::ConfirmForbidden);
+            }
             (pending.session_id, pending.run_id, pending.sender)
         };
         sender
@@ -758,17 +891,21 @@ impl Router {
     ) -> Result<(ConfirmId, oneshot::Receiver<Confirmation>), RouterError> {
         let confirm_id = new_confirm_id()?;
         let (sender, receiver) = oneshot::channel();
+        let timeout = requested_timeout.min(self.inner.options.confirm_timeout);
+        let timeout_seconds = u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX);
         lock(&self.inner.state)?.confirms.insert(
             confirm_id.clone(),
             PendingConfirm {
                 run_id: run_id.clone(),
                 session_id,
                 actor: actor.to_string(),
+                prompt: prompt.to_string(),
+                risk,
+                allow_session_option: allow_session,
+                timeout_seconds,
                 sender,
             },
         );
-        let timeout = requested_timeout.min(self.inner.options.confirm_timeout);
-        let timeout_seconds = u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX);
         self.emit(RunEvent::ConfirmRequest {
             session_id,
             run_id: run_id.clone(),

@@ -39,7 +39,7 @@ use crate::cli::ChatArgs;
 const PROMPT: &str = "bạn> ";
 
 /// Mở audit log cho Router; lỗi chỉ cảnh báo, không chặn chat.
-fn build_audit(config: &Config) -> Option<Arc<AuditLog>> {
+pub(crate) fn build_audit(config: &Config) -> Option<Arc<AuditLog>> {
     let audit_dir = expand_tilde(&config.data.dir).join("audit");
     match AuditLog::open(&audit_dir) {
         Ok(log) => Some(Arc::new(log)),
@@ -54,7 +54,7 @@ fn build_audit(config: &Config) -> Option<Arc<AuditLog>> {
 }
 
 /// Mở rộng `~` trong đường dẫn cấu hình bằng biến môi trường `HOME`.
-fn expand_tilde(path: &Path) -> PathBuf {
+pub(crate) fn expand_tilde(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
     if let Some(rest) = s.strip_prefix("~/")
         && let Ok(home) = std::env::var("HOME")
@@ -65,7 +65,7 @@ fn expand_tilde(path: &Path) -> PathBuf {
 }
 
 /// Đường dẫn đến SQLite database.
-fn store_path(config: &Config) -> PathBuf {
+pub(crate) fn store_path(config: &Config) -> PathBuf {
     expand_tilde(&config.data.dir).join("beanagent.db")
 }
 
@@ -139,7 +139,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
 ///
 /// Lỗi trả về luôn nêu rõ **nguyên nhân cấu hình** (thiếu biến môi trường, sai provider…)
 /// chứ không lộ giá trị secret.
-fn build_provider(
+pub(crate) fn build_provider(
     args: &ChatArgs,
     config: &Config,
 ) -> Result<(Arc<dyn LlmProvider>, Option<SecretString>)> {
@@ -160,7 +160,7 @@ fn build_provider(
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
 /// Path jail bằng `CapWorkspace` (cap-std — mục 15.1); `run_shell` gắn sandbox
 /// docker/host (mục 15.2).
-fn build_registry(
+pub(crate) fn build_registry(
     config: &Config,
     store: Arc<SqliteStore>,
     skills: SkillCatalog,

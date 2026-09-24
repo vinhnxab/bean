@@ -18,15 +18,17 @@ path = "src/main.rs"
 default = ["ui"]
 # `ui`: nhúng giao diện React đã build (rust-embed) — bật ở M9.
 # `cargo build --no-default-features` cho bản headless không cần Node (agents.md mục 2).
-ui = ["dep:beanagent-web"]
+ui = ["beanagent-web/ui"]
 
 [dependencies]
 beanagent-llm.workspace = true
 beanagent-types.workspace = true
 anyhow.workspace = true
+axum.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 rustyline.workspace = true
+rpassword.workspace = true
 secrecy.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -34,7 +36,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 # Web server (axum) — chỉ có khi feature `ui`. M1: crate còn rỗng.
-beanagent-web = { workspace = true, optional = true }
+beanagent-web = { workspace = true }
 
 # Các crate dưới đây sẽ được dùng ở các milestone sau (agents.md mục 21);
 # khai báo sẵn để `serve` ghép được toàn bộ hệ thống mà không phải sửa Cargo.toml.

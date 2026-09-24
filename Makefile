@@ -16,14 +16,15 @@ help: ## In danh sách target
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-types: ## Sinh kiểu TypeScript từ Rust (ts-rs)
-	@echo "==> make types: ts-rs được bật ở M9; hiện chưa có kiểu API nào để sinh"
+types: ## Sinh và kiểm tra kiểu TypeScript từ Rust (ts-rs)
 	$(CARGO) test --workspace export_bindings
+	git diff --exit-code -- web/src/api/generated
 
-check-rust: ## cargo fmt + clippy + test toàn workspace
+check-rust: ## cargo fmt + clippy + test toàn workspace + kiểm tra kiểu sinh
 	$(CARGO) fmt --all --check
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 	$(CARGO) test --workspace
+	$(MAKE) types
 
 check-web: ## Biome + tsc + vitest + build production
 	cd $(WEB_DIR) && $(PNPM) exec biome check .

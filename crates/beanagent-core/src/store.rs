@@ -6,6 +6,6 @@
 
 pub use beanagent_memory::memory_tools;
 pub use beanagent_memory::store::{
-    self, MemorySearchHit, MemorySource, MemoryStore, OutboxEntry, SessionInfo, SqliteStore, Store,
-    StoreError, StoredMessage,
+    self, MemoryRecord, MemorySearchHit, MemorySource, MemoryStore, MessageRecord, OutboxEntry,
+    SessionInfo, SessionSummary, SqliteStore, Store, StoreError, StoredMessage, WebSessionInfo,
 };

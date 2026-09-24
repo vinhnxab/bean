@@ -115,6 +115,15 @@ impl SkillCatalog {
             .join("\n")
     }
 
+    /// Liệt kê snapshot skill để REST/API và UI dùng cùng một catalog.
+    #[must_use]
+    pub fn list(&self) -> Vec<Skill> {
+        self.skills
+            .read()
+            .map(|skills| skills.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Lấy một skill theo tên.
     pub fn get(&self, name: &str) -> Result<Skill, SkillError> {
         validate_name(name)?;

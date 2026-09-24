@@ -151,6 +151,12 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             response = chat => response?,
         };
 
+        store
+            .add_usage(
+                &chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                resp.usage,
+            )
+            .await?;
         let is_final = resp.tool_calls.is_empty();
         let final_text = resp.text.clone().unwrap_or_default();
         let message_id = store.append(session, Message::from_response(&resp)).await?;

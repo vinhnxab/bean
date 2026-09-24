@@ -12,3 +12,14 @@
 //! * Phục vụ asset: `rust-embed` sau feature `ui`, `#[allow_missing]` để build không cần
 //!   `web/dist`; SPA fallback **không** được che lỗi 404 của `/api/*`.
 #![forbid(unsafe_code)]
+
+pub mod api_types;
+pub mod auth;
+pub mod server;
+
+pub use api_types::*;
+pub use auth::{
+    AuthError, AuthService, LoginSession, auth_file_path, set_password,
+    set_password_and_revoke_sessions,
+};
+pub use server::{ApiFailure, WebBuildError, WebChannel, WebState, build_router};

@@ -10,12 +10,13 @@
 //! Bất biến (agents.md mục 8.3, 22.1): không thao tác nào được tách một cặp
 //! `assistant(tool_calls)` khỏi các `tool` result của nó — API sẽ trả 400.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use beanagent_llm::{ChatRequest, LlmProvider};
-use beanagent_types::{Config, Message, Outbound, Role, SessionId};
+use beanagent_types::{Config, Message, Outbound, Role, SessionId, Usage};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use tokio::sync::{RwLock, oneshot};
@@ -93,6 +94,66 @@ pub struct SessionInfo {
     pub archived: bool,
 }
 
+/// Metadata session đầy đủ cho REST API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SessionSummary {
+    /// ID session.
+    pub id: SessionId,
+    /// Channel sở hữu session.
+    pub channel: String,
+    /// Chat ID.
+    pub chat_id: String,
+    /// User ID sở hữu session.
+    pub user_id: String,
+    /// Tiêu đề hiển thị.
+    pub title: String,
+    /// Đã archive hay chưa.
+    pub archived: bool,
+    /// Thời điểm tạo RFC3339.
+    pub created_at: String,
+    /// Thời điểm cập nhật RFC3339.
+    pub updated_at: String,
+}
+
+/// Message đầy đủ lấy theo ID cho REST API.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageRecord {
+    /// ID message trong SQLite.
+    pub id: i64,
+    /// Session chứa message.
+    pub session_id: SessionId,
+    /// Thứ tự trong session.
+    pub seq: u64,
+    /// Nội dung message.
+    pub message: Message,
+    /// Thời điểm ghi.
+    pub created_at: String,
+}
+
+/// Một ghi nhớ dài hạn cho REST API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MemoryRecord {
+    /// ID ghi nhớ.
+    pub id: u64,
+    /// Nội dung.
+    pub text: String,
+    /// Tag.
+    pub tags: String,
+    /// Thời điểm tạo.
+    pub created_at: String,
+}
+
+/// Thông tin phiên đăng nhập sau khi token đã được xác thực.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebSessionInfo {
+    /// User ID của phiên.
+    pub user_id: String,
+    /// Thời điểm tạo.
+    pub created_at: String,
+    /// Thời điểm hết hạn.
+    pub expires_at: String,
+}
+
 /// Một bản ghi outbox đã tới hạn gửi lại.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutboxEntry {
@@ -164,6 +225,94 @@ pub trait Store: Send + Sync {
 
     /// Ghi đè phần tóm tắt của phiên (dùng cho compaction).
     async fn save_summary(&self, session: SessionId, summary: &str) -> Result<(), StoreError>;
+
+    /// Tạo một session mới, không tái sử dụng session đang active.
+    async fn create_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
+        title: &str,
+    ) -> Result<SessionId, StoreError>;
+
+    /// Tải metadata session đầy đủ cho response web.
+    async fn session_summary(
+        &self,
+        session: SessionId,
+    ) -> Result<Option<SessionSummary>, StoreError>;
+
+    /// Cập nhật metadata của session sau khi đã kiểm tra ownership.
+    async fn update_session(
+        &self,
+        session: SessionId,
+        user_id: &str,
+        title: Option<&str>,
+        archived: Option<bool>,
+    ) -> Result<bool, StoreError>;
+
+    /// Xoá session sau khi đã kiểm tra ownership.
+    async fn delete_session(&self, session: SessionId, user_id: &str) -> Result<bool, StoreError>;
+
+    /// Liệt kê session của user, lọc theo q/title và archived.
+    async fn list_sessions(
+        &self,
+        user_id: &str,
+        query: Option<&str>,
+        archived: Option<bool>,
+        limit: usize,
+    ) -> Result<Vec<SessionSummary>, StoreError>;
+
+    /// Lấy message đầy đủ theo id.
+    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError>;
+
+    /// Liệt kê message kèm id DB cho REST.
+    async fn list_message_records(
+        &self,
+        session: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>, StoreError>;
+
+    /// Liệt kê ghi nhớ dài hạn.
+    async fn list_memories(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<MemoryRecord>, StoreError>;
+
+    /// Xoá một ghi nhớ dài hạn.
+    async fn delete_memory(&self, id: u64) -> Result<bool, StoreError>;
+
+    /// Cộng usage của một lượt gọi LLM vào ngày UTC.
+    async fn add_usage(&self, day: &str, usage: Usage) -> Result<(), StoreError>;
+
+    /// Đọc usage theo ngày UTC.
+    async fn usage(&self, day: &str) -> Result<Usage, StoreError>;
+
+    /// Tạo bản ghi phiên đăng nhập chỉ lưu hash token.
+    async fn create_web_session(
+        &self,
+        token_hash: Vec<u8>,
+        user_id: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Kiểm tra hash token còn hợp lệ theo thời điểm UTC.
+    async fn get_web_session(
+        &self,
+        token_hash: &[u8],
+        now: &str,
+    ) -> Result<Option<WebSessionInfo>, StoreError>;
+
+    /// Cập nhật last_seen của phiên đăng nhập.
+    async fn touch_web_session(&self, token_hash: &[u8], now: &str) -> Result<bool, StoreError>;
+
+    /// Xoá một phiên đăng nhập.
+    async fn delete_web_session(&self, token_hash: &[u8]) -> Result<bool, StoreError>;
+
+    /// Xoá toàn bộ phiên đăng nhập (khi đổi mật khẩu).
+    async fn delete_all_web_sessions(&self) -> Result<(), StoreError>;
 
     /// Đọc phần tóm tắt của phiên (`None` khi chưa có).
     async fn summary(&self, session: SessionId) -> Result<Option<String>, StoreError>;
@@ -239,13 +388,16 @@ struct MemorySession {
     archived: bool,
     summary: String,
     messages: Vec<Message>,
+    message_ids: Vec<i64>,
 }
 
 /// Một ghi nhớ dài hạn trong bản in-memory.
 #[derive(Debug, Clone)]
 struct MemoryEntry {
+    id: u64,
     text: String,
     tags: String,
+    created_at: String,
 }
 
 /// Store **in-memory**: không I/O, không bền vững — dùng cho test vòng lặp agent
@@ -261,6 +413,8 @@ pub struct MemoryStore {
     sessions: RwLock<Vec<MemorySession>>,
     memories: RwLock<Vec<MemoryEntry>>,
     outbox: RwLock<Vec<MemoryOutboxEntry>>,
+    usage: RwLock<BTreeMap<String, Usage>>,
+    web_sessions: RwLock<Vec<(Vec<u8>, WebSessionInfo)>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
     next_message_id: RwLock<u64>,
@@ -273,6 +427,8 @@ impl Default for MemoryStore {
             sessions: RwLock::new(Vec::new()),
             memories: RwLock::new(Vec::new()),
             outbox: RwLock::new(Vec::new()),
+            usage: RwLock::new(BTreeMap::new()),
+            web_sessions: RwLock::new(Vec::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
             next_message_id: RwLock::new(1),
@@ -308,6 +464,7 @@ impl Store for MemoryStore {
                     s.title = title;
                 }
                 s.messages.push(msg);
+                s.message_ids.push(message_id);
             }
             None => {
                 // Tự tạo phiên: test M3 ghi thẳng vào `SessionId::new(1)` không qua
@@ -322,6 +479,7 @@ impl Store for MemoryStore {
                     archived: false,
                     summary: String::new(),
                     messages: vec![msg],
+                    message_ids: vec![message_id],
                 });
             }
         }
@@ -356,6 +514,7 @@ impl Store for MemoryStore {
         let mut sessions = self.sessions.write().await;
         if let Some(s) = sessions.iter_mut().find(|s| s.id == session) {
             s.messages.clear();
+            s.message_ids.clear();
         }
         Ok(())
     }
@@ -400,6 +559,7 @@ impl Store for MemoryStore {
             archived: false,
             summary: String::new(),
             messages: Vec::new(),
+            message_ids: Vec::new(),
         });
         Ok(id)
     }
@@ -433,6 +593,7 @@ impl Store for MemoryStore {
             archived: false,
             summary: String::new(),
             messages: Vec::new(),
+            message_ids: Vec::new(),
         });
         Ok(id)
     }
@@ -462,14 +623,272 @@ impl Store for MemoryStore {
             .filter(|text| !text.is_empty()))
     }
 
+    async fn create_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
+        title: &str,
+    ) -> Result<SessionId, StoreError> {
+        let mut sessions = self.sessions.write().await;
+        let mut next = self.next_session_id.write().await;
+        let id = SessionId::new(*next);
+        *next += 1;
+        sessions.push(MemorySession {
+            id,
+            channel: channel.to_string(),
+            chat_id: chat_id.to_string(),
+            user_id: user_id.to_string(),
+            title: title.to_string(),
+            archived: false,
+            summary: String::new(),
+            messages: Vec::new(),
+            message_ids: Vec::new(),
+        });
+        Ok(id)
+    }
+
+    async fn session_summary(
+        &self,
+        session: SessionId,
+    ) -> Result<Option<SessionSummary>, StoreError> {
+        let sessions = self.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .find(|item| item.id == session)
+            .map(|item| SessionSummary {
+                id: item.id,
+                channel: item.channel.clone(),
+                chat_id: item.chat_id.clone(),
+                user_id: item.user_id.clone(),
+                title: item.title.clone(),
+                archived: item.archived,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }))
+    }
+
+    async fn update_session(
+        &self,
+        session: SessionId,
+        user_id: &str,
+        title: Option<&str>,
+        archived: Option<bool>,
+    ) -> Result<bool, StoreError> {
+        let mut sessions = self.sessions.write().await;
+        let Some(item) = sessions
+            .iter_mut()
+            .find(|s| s.id == session && s.user_id == user_id)
+        else {
+            return Ok(false);
+        };
+        if let Some(value) = title {
+            item.title = value.to_string();
+        }
+        if let Some(value) = archived {
+            item.archived = value;
+        }
+        Ok(true)
+    }
+
+    async fn delete_session(&self, session: SessionId, user_id: &str) -> Result<bool, StoreError> {
+        let mut sessions = self.sessions.write().await;
+        let before = sessions.len();
+        sessions.retain(|s| !(s.id == session && s.user_id == user_id));
+        Ok(sessions.len() != before)
+    }
+
+    async fn list_sessions(
+        &self,
+        user_id: &str,
+        query: Option<&str>,
+        archived: Option<bool>,
+        limit: usize,
+    ) -> Result<Vec<SessionSummary>, StoreError> {
+        let needle = query.unwrap_or_default().trim().to_lowercase();
+        let sessions = self.sessions.read().await;
+        let mut result: Vec<_> = sessions
+            .iter()
+            .filter(|s| s.user_id == user_id)
+            .filter(|s| archived.is_none_or(|value| s.archived == value))
+            .filter(|s| needle.is_empty() || s.title.to_lowercase().contains(&needle))
+            .map(|s| SessionSummary {
+                id: s.id,
+                channel: s.channel.clone(),
+                chat_id: s.chat_id.clone(),
+                user_id: s.user_id.clone(),
+                title: s.title.clone(),
+                archived: s.archived,
+                created_at: String::new(),
+                updated_at: String::new(),
+            })
+            .collect();
+        if limit > 0 {
+            result.truncate(limit);
+        }
+        Ok(result)
+    }
+
+    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError> {
+        let sessions = self.sessions.read().await;
+        for session in sessions.iter() {
+            for (index, message) in session.messages.iter().enumerate() {
+                if session.message_ids.get(index).copied() == Some(id) {
+                    return Ok(Some(MessageRecord {
+                        id,
+                        session_id: session.id,
+                        seq: index as u64 + 1,
+                        message: message.clone(),
+                        created_at: String::new(),
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn list_message_records(
+        &self,
+        session_id: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>, StoreError> {
+        let sessions = self.sessions.read().await;
+        let Some(session) = sessions.iter().find(|item| item.id == session_id) else {
+            return Ok(Vec::new());
+        };
+        let upper = seq_to_index(before_seq, session.messages.len());
+        let start = slice_start(upper, limit);
+        Ok(session
+            .messages
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(upper.saturating_sub(start))
+            .map(|(index, message)| MessageRecord {
+                id: session.message_ids.get(index).copied().unwrap_or_default(),
+                session_id,
+                seq: index as u64 + 1,
+                message: message.clone(),
+                created_at: String::new(),
+            })
+            .collect())
+    }
+
+    async fn list_memories(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<MemoryRecord>, StoreError> {
+        let needle = query.unwrap_or_default().trim().to_lowercase();
+        let memories = self.memories.read().await;
+        let mut result: Vec<_> = memories
+            .iter()
+            .filter(|item| {
+                needle.is_empty()
+                    || item.text.to_lowercase().contains(&needle)
+                    || item.tags.to_lowercase().contains(&needle)
+            })
+            .map(|item| MemoryRecord {
+                id: item.id,
+                text: item.text.clone(),
+                tags: item.tags.clone(),
+                created_at: item.created_at.clone(),
+            })
+            .collect();
+        if limit > 0 {
+            result.truncate(limit);
+        }
+        Ok(result)
+    }
+
+    async fn delete_memory(&self, id: u64) -> Result<bool, StoreError> {
+        let mut memories = self.memories.write().await;
+        let index = memories
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or(StoreError::NotFound(SessionId::new(0)))?;
+        memories.remove(index);
+        Ok(true)
+    }
+
+    async fn add_usage(&self, day: &str, usage: Usage) -> Result<(), StoreError> {
+        let mut values = self.usage.write().await;
+        let current = values.entry(day.to_string()).or_default();
+        current.input_tokens = current.input_tokens.saturating_add(usage.input_tokens);
+        current.output_tokens = current.output_tokens.saturating_add(usage.output_tokens);
+        Ok(())
+    }
+
+    async fn usage(&self, day: &str) -> Result<Usage, StoreError> {
+        Ok(self
+            .usage
+            .read()
+            .await
+            .get(day)
+            .copied()
+            .unwrap_or_default())
+    }
+
+    async fn create_web_session(
+        &self,
+        token_hash: Vec<u8>,
+        user_id: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError> {
+        self.web_sessions.write().await.push((
+            token_hash,
+            WebSessionInfo {
+                user_id: user_id.to_string(),
+                created_at: created_at.to_string(),
+                expires_at: expires_at.to_string(),
+            },
+        ));
+        Ok(())
+    }
+
+    async fn get_web_session(
+        &self,
+        token_hash: &[u8],
+        now: &str,
+    ) -> Result<Option<WebSessionInfo>, StoreError> {
+        Ok(self
+            .web_sessions
+            .read()
+            .await
+            .iter()
+            .find(|(hash, info)| hash == token_hash && info.expires_at.as_str() > now)
+            .map(|(_, info)| info.clone()))
+    }
+
+    async fn touch_web_session(&self, token_hash: &[u8], _now: &str) -> Result<bool, StoreError> {
+        let sessions = self.web_sessions.read().await;
+        Ok(sessions.iter().any(|(hash, _)| hash == token_hash))
+    }
+
+    async fn delete_web_session(&self, token_hash: &[u8]) -> Result<bool, StoreError> {
+        let mut sessions = self.web_sessions.write().await;
+        let before = sessions.len();
+        sessions.retain(|(hash, _)| hash != token_hash);
+        Ok(sessions.len() != before)
+    }
+
+    async fn delete_all_web_sessions(&self) -> Result<(), StoreError> {
+        self.web_sessions.write().await.clear();
+        Ok(())
+    }
+
     async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
         let mut memories = self.memories.write().await;
         let mut next = self.next_memory_id.write().await;
         let id = *next;
         *next += 1;
         memories.push(MemoryEntry {
+            id,
             text: text.to_string(),
             tags: tags.to_string(),
+            created_at: now_rfc3339(),
         });
         Ok(id)
     }
@@ -587,6 +1006,8 @@ impl Store for MemoryStore {
         if let Some(s) = sessions.iter_mut().find(|s| s.id == session) {
             let keep_from = (before_seq.saturating_sub(1) as usize).min(s.messages.len());
             s.messages.drain(0..keep_from);
+            let remove_ids = keep_from.min(s.message_ids.len());
+            s.message_ids.drain(0..remove_ids);
         }
         Ok(())
     }
@@ -864,10 +1285,17 @@ CREATE TABLE IF NOT EXISTS outbox (
 
 CREATE TABLE IF NOT EXISTS web_sessions (
   token_hash BLOB PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'web:admin',
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   last_seen TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS usage (
+  day TEXT PRIMARY KEY,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS web_sessions_expiry ON web_sessions(expires_at);
 ";
 
 /// Pragma bắt buộc (agents.md mục 8.1): WAL cho đọc/ghi song song, khoá ngoại bật.
@@ -885,6 +1313,13 @@ type Reply<T> = oneshot::Sender<Result<T, StoreError>>;
 /// `rusqlite` là API blocking nên không được gọi trực tiếp trong async.
 enum DbCommand {
     EnsureSession {
+        channel: String,
+        chat_id: String,
+        user_id: String,
+        title: String,
+        reply: Reply<SessionId>,
+    },
+    CreateSession {
         channel: String,
         chat_id: String,
         user_id: String,
@@ -926,6 +1361,81 @@ enum DbCommand {
     Summary {
         session: SessionId,
         reply: Reply<Option<String>>,
+    },
+    SessionSummary {
+        session: SessionId,
+        reply: Reply<Option<SessionSummary>>,
+    },
+    UpdateSession {
+        session: SessionId,
+        user_id: String,
+        title: Option<String>,
+        archived: Option<bool>,
+        reply: Reply<bool>,
+    },
+    DeleteSession {
+        session: SessionId,
+        user_id: String,
+        reply: Reply<bool>,
+    },
+    ListSessions {
+        user_id: String,
+        query: Option<String>,
+        archived: Option<bool>,
+        limit: usize,
+        reply: Reply<Vec<SessionSummary>>,
+    },
+    MessageById {
+        id: i64,
+        reply: Reply<Option<MessageRecord>>,
+    },
+    ListMessageRecords {
+        session: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+        reply: Reply<Vec<MessageRecord>>,
+    },
+    ListMemories {
+        query: Option<String>,
+        limit: usize,
+        reply: Reply<Vec<MemoryRecord>>,
+    },
+    DeleteMemory {
+        id: u64,
+        reply: Reply<bool>,
+    },
+    AddUsage {
+        day: String,
+        usage: Usage,
+        reply: Reply<()>,
+    },
+    Usage {
+        day: String,
+        reply: Reply<Usage>,
+    },
+    CreateWebSession {
+        token_hash: Vec<u8>,
+        user_id: String,
+        created_at: String,
+        expires_at: String,
+        reply: Reply<()>,
+    },
+    GetWebSession {
+        token_hash: Vec<u8>,
+        now: String,
+        reply: Reply<Option<WebSessionInfo>>,
+    },
+    TouchWebSession {
+        token_hash: Vec<u8>,
+        now: String,
+        reply: Reply<bool>,
+    },
+    DeleteWebSession {
+        token_hash: Vec<u8>,
+        reply: Reply<bool>,
+    },
+    DeleteAllWebSessions {
+        reply: Reply<()>,
     },
     MemorySave {
         text: String,
@@ -1163,6 +1673,191 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn create_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
+        title: &str,
+    ) -> Result<SessionId, StoreError> {
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
+        let user_id = user_id.to_string();
+        let title = title.to_string();
+        self.request(move |reply| DbCommand::CreateSession {
+            channel,
+            chat_id,
+            user_id,
+            title,
+            reply,
+        })
+        .await
+    }
+
+    async fn session_summary(
+        &self,
+        session: SessionId,
+    ) -> Result<Option<SessionSummary>, StoreError> {
+        self.request(move |reply| DbCommand::SessionSummary { session, reply })
+            .await
+    }
+
+    async fn update_session(
+        &self,
+        session: SessionId,
+        user_id: &str,
+        title: Option<&str>,
+        archived: Option<bool>,
+    ) -> Result<bool, StoreError> {
+        let user_id = user_id.to_string();
+        let title = title.map(str::to_string);
+        self.request(move |reply| DbCommand::UpdateSession {
+            session,
+            user_id,
+            title,
+            archived,
+            reply,
+        })
+        .await
+    }
+
+    async fn delete_session(&self, session: SessionId, user_id: &str) -> Result<bool, StoreError> {
+        let user_id = user_id.to_string();
+        self.request(move |reply| DbCommand::DeleteSession {
+            session,
+            user_id,
+            reply,
+        })
+        .await
+    }
+
+    async fn list_sessions(
+        &self,
+        user_id: &str,
+        query: Option<&str>,
+        archived: Option<bool>,
+        limit: usize,
+    ) -> Result<Vec<SessionSummary>, StoreError> {
+        let user_id = user_id.to_string();
+        let query = query.map(str::to_string);
+        self.request(move |reply| DbCommand::ListSessions {
+            user_id,
+            query,
+            archived,
+            limit,
+            reply,
+        })
+        .await
+    }
+
+    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError> {
+        self.request(move |reply| DbCommand::MessageById { id, reply })
+            .await
+    }
+
+    async fn list_message_records(
+        &self,
+        session: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>, StoreError> {
+        self.request(move |reply| DbCommand::ListMessageRecords {
+            session,
+            before_seq,
+            limit,
+            reply,
+        })
+        .await
+    }
+
+    async fn list_memories(
+        &self,
+        query: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<MemoryRecord>, StoreError> {
+        let query = query.map(str::to_string);
+        self.request(move |reply| DbCommand::ListMemories {
+            query,
+            limit,
+            reply,
+        })
+        .await
+    }
+
+    async fn delete_memory(&self, id: u64) -> Result<bool, StoreError> {
+        self.request(move |reply| DbCommand::DeleteMemory { id, reply })
+            .await
+    }
+
+    async fn add_usage(&self, day: &str, usage: Usage) -> Result<(), StoreError> {
+        let day = day.to_string();
+        self.request(move |reply| DbCommand::AddUsage { day, usage, reply })
+            .await
+    }
+
+    async fn usage(&self, day: &str) -> Result<Usage, StoreError> {
+        let day = day.to_string();
+        self.request(move |reply| DbCommand::Usage { day, reply })
+            .await
+    }
+
+    async fn create_web_session(
+        &self,
+        token_hash: Vec<u8>,
+        user_id: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError> {
+        let user_id = user_id.to_string();
+        let created_at = created_at.to_string();
+        let expires_at = expires_at.to_string();
+        self.request(move |reply| DbCommand::CreateWebSession {
+            token_hash,
+            user_id,
+            created_at,
+            expires_at,
+            reply,
+        })
+        .await
+    }
+
+    async fn get_web_session(
+        &self,
+        token_hash: &[u8],
+        now: &str,
+    ) -> Result<Option<WebSessionInfo>, StoreError> {
+        let token_hash = token_hash.to_vec();
+        let now = now.to_string();
+        self.request(move |reply| DbCommand::GetWebSession {
+            token_hash,
+            now,
+            reply,
+        })
+        .await
+    }
+
+    async fn touch_web_session(&self, token_hash: &[u8], now: &str) -> Result<bool, StoreError> {
+        let token_hash = token_hash.to_vec();
+        let now = now.to_string();
+        self.request(move |reply| DbCommand::TouchWebSession {
+            token_hash,
+            now,
+            reply,
+        })
+        .await
+    }
+
+    async fn delete_web_session(&self, token_hash: &[u8]) -> Result<bool, StoreError> {
+        let token_hash = token_hash.to_vec();
+        self.request(move |reply| DbCommand::DeleteWebSession { token_hash, reply })
+            .await
+    }
+
+    async fn delete_all_web_sessions(&self) -> Result<(), StoreError> {
+        self.request(|reply| DbCommand::DeleteAllWebSessions { reply })
+            .await
+    }
+
     async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
         let text = text.to_string();
         let tags = tags.to_string();
@@ -1283,6 +1978,17 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         } => {
             let _ = reply.send(ensure_session(conn, &channel, &chat_id, &user_id, &title));
         }
+        DbCommand::CreateSession {
+            channel,
+            chat_id,
+            user_id,
+            title,
+            reply,
+        } => {
+            let _ = reply.send(create_session_row(
+                conn, &channel, &chat_id, &user_id, &title,
+            ));
+        }
         DbCommand::ArchiveSession { session, reply } => {
             let _ = reply.send(archive_session(conn, session));
         }
@@ -1319,6 +2025,108 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         }
         DbCommand::Summary { session, reply } => {
             let _ = reply.send(load_summary(conn, session));
+        }
+        DbCommand::SessionSummary { session, reply } => {
+            let _ = reply.send(load_session_summary(conn, session));
+        }
+        DbCommand::UpdateSession {
+            session,
+            user_id,
+            title,
+            archived,
+            reply,
+        } => {
+            let _ = reply.send(update_session(
+                conn,
+                session,
+                &user_id,
+                title.as_deref(),
+                archived,
+            ));
+        }
+        DbCommand::DeleteSession {
+            session,
+            user_id,
+            reply,
+        } => {
+            let _ = reply.send(delete_session(conn, session, &user_id));
+        }
+        DbCommand::ListSessions {
+            user_id,
+            query,
+            archived,
+            limit,
+            reply,
+        } => {
+            let _ = reply.send(list_sessions(
+                conn,
+                &user_id,
+                query.as_deref(),
+                archived,
+                limit,
+            ));
+        }
+        DbCommand::MessageById { id, reply } => {
+            let _ = reply.send(message_by_id(conn, id));
+        }
+        DbCommand::ListMessageRecords {
+            session,
+            before_seq,
+            limit,
+            reply,
+        } => {
+            let _ = reply.send(list_message_records(conn, session, before_seq, limit));
+        }
+        DbCommand::ListMemories {
+            query,
+            limit,
+            reply,
+        } => {
+            let _ = reply.send(list_memories(conn, query.as_deref(), limit));
+        }
+        DbCommand::DeleteMemory { id, reply } => {
+            let _ = reply.send(delete_memory(conn, id));
+        }
+        DbCommand::AddUsage { day, usage, reply } => {
+            let _ = reply.send(add_usage(conn, &day, usage));
+        }
+        DbCommand::Usage { day, reply } => {
+            let _ = reply.send(read_usage(conn, &day));
+        }
+        DbCommand::CreateWebSession {
+            token_hash,
+            user_id,
+            created_at,
+            expires_at,
+            reply,
+        } => {
+            let _ = reply.send(create_web_session(
+                conn,
+                &token_hash,
+                &user_id,
+                &created_at,
+                &expires_at,
+            ));
+        }
+        DbCommand::GetWebSession {
+            token_hash,
+            now,
+            reply,
+        } => {
+            let _ = reply.send(get_web_session(conn, &token_hash, &now));
+        }
+        DbCommand::TouchWebSession {
+            token_hash,
+            now,
+            reply,
+        } => {
+            let _ = reply.send(touch_web_session(conn, &token_hash, &now));
+        }
+        DbCommand::DeleteWebSession { token_hash, reply } => {
+            let _ = reply.send(delete_web_session(conn, &token_hash));
+        }
+        DbCommand::DeleteAllWebSessions { reply } => {
+            let _ = reply.send(delete_all_web_sessions(conn));
         }
         DbCommand::MemorySave { text, tags, reply } => {
             let _ = reply.send(memory_save_row(conn, &text, &tags));
@@ -1415,6 +2223,25 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         conn.pragma_update(None, "user_version", 2)
             .map_err(internal)?;
     }
+    if version < 3 {
+        add_column_if_missing(
+            conn,
+            "web_sessions",
+            "user_id",
+            "TEXT NOT NULL DEFAULT 'web:admin'",
+        )?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS usage (
+               day TEXT PRIMARY KEY,
+               input_tokens INTEGER NOT NULL DEFAULT 0,
+               output_tokens INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX IF NOT EXISTS web_sessions_expiry ON web_sessions(expires_at);",
+        )
+        .map_err(|err| StoreError::Internal(format!("migration v3 web/usage thất bại: {err}")))?;
+        conn.pragma_update(None, "user_version", 3)
+            .map_err(internal)?;
+    }
     Ok(())
 }
 
@@ -1477,6 +2304,315 @@ fn load_session_info(
     )
     .optional()
     .map_err(internal)
+}
+
+fn load_session_summary(
+    conn: &Connection,
+    session: SessionId,
+) -> Result<Option<SessionSummary>, StoreError> {
+    conn.query_row(
+        "SELECT id, channel, chat_id, user_id, title, archived, created_at, updated_at \
+         FROM sessions WHERE id = ?1",
+        params![session.get()],
+        |row| {
+            Ok(SessionSummary {
+                id: SessionId::new(row.get(0)?),
+                channel: row.get(1)?,
+                chat_id: row.get(2)?,
+                user_id: row.get(3)?,
+                title: row.get(4)?,
+                archived: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(internal)
+}
+
+fn update_session(
+    conn: &Connection,
+    session: SessionId,
+    user_id: &str,
+    title: Option<&str>,
+    archived: Option<bool>,
+) -> Result<bool, StoreError> {
+    let now = now_rfc3339();
+    let changed = conn.execute(
+        "UPDATE sessions SET title = COALESCE(?2, title), archived = COALESCE(?3, archived), updated_at = ?4 \
+         WHERE id = ?1 AND user_id = ?5",
+        params![session.get(), title, archived.map(i64::from), now, user_id],
+    ).map_err(internal)?;
+    Ok(changed > 0)
+}
+
+fn delete_session(
+    conn: &Connection,
+    session: SessionId,
+    user_id: &str,
+) -> Result<bool, StoreError> {
+    let changed = conn
+        .execute(
+            "DELETE FROM sessions WHERE id = ?1 AND user_id = ?2",
+            params![session.get(), user_id],
+        )
+        .map_err(internal)?;
+    Ok(changed > 0)
+}
+
+fn list_sessions(
+    conn: &Connection,
+    user_id: &str,
+    query: Option<&str>,
+    archived: Option<bool>,
+    limit: usize,
+) -> Result<Vec<SessionSummary>, StoreError> {
+    let query = query.unwrap_or_default();
+    let pattern = format!("%{query}%");
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, channel, chat_id, user_id, title, archived, created_at, updated_at \
+         FROM sessions WHERE user_id = ?1 AND (?2 IS NULL OR archived = ?2) \
+         AND (?3 = '' OR title LIKE ?4) ORDER BY updated_at DESC LIMIT ?5",
+        )
+        .map_err(internal)?;
+    let rows = stmt
+        .query_map(
+            params![
+                user_id,
+                archived.map(i64::from),
+                query,
+                pattern,
+                sql_limit(limit)
+            ],
+            |row| {
+                Ok(SessionSummary {
+                    id: SessionId::new(row.get(0)?),
+                    channel: row.get(1)?,
+                    chat_id: row.get(2)?,
+                    user_id: row.get(3)?,
+                    title: row.get(4)?,
+                    archived: row.get::<_, i64>(5)? != 0,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            },
+        )
+        .map_err(internal)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(internal)
+}
+
+fn message_by_id(conn: &Connection, id: i64) -> Result<Option<MessageRecord>, StoreError> {
+    conn.query_row(
+        "SELECT session_id, seq, content_json, created_at FROM messages WHERE id = ?1",
+        params![id],
+        |row| {
+            let session_id: i64 = row.get(0)?;
+            let seq: i64 = row.get(1)?;
+            let content: String = row.get(2)?;
+            Ok((session_id, seq, content, row.get::<_, String>(3)?))
+        },
+    )
+    .optional()
+    .map_err(internal)?
+    .map(|(session_id, seq, content, created_at)| {
+        Ok(MessageRecord {
+            id,
+            session_id: SessionId::new(session_id),
+            seq: u64::try_from(seq).map_err(|_| StoreError::Internal("seq âm".into()))?,
+            message: decode_message(&content)?,
+            created_at,
+        })
+    })
+    .transpose()
+}
+
+fn list_message_records(
+    conn: &Connection,
+    session: SessionId,
+    before_seq: Option<u64>,
+    limit: usize,
+) -> Result<Vec<MessageRecord>, StoreError> {
+    let before = before_seq.map(|seq| seq as i64);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, session_id, seq, content_json, created_at FROM (\
+           SELECT id, session_id, seq, content_json, created_at FROM messages \
+           WHERE session_id = ?1 AND (?2 IS NULL OR seq < ?2) \
+           ORDER BY seq DESC LIMIT ?3\
+         ) ORDER BY seq ASC",
+        )
+        .map_err(internal)?;
+    let rows = stmt
+        .query_map(params![session.get(), before, sql_limit(limit)], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(internal)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, session_id, seq, content, created_at) = row.map_err(internal)?;
+        out.push(MessageRecord {
+            id,
+            session_id: SessionId::new(session_id),
+            seq: u64::try_from(seq).map_err(|_| StoreError::Internal("seq âm".into()))?,
+            message: decode_message(&content)?,
+            created_at,
+        });
+    }
+    Ok(out)
+}
+
+fn list_memories(
+    conn: &Connection,
+    query: Option<&str>,
+    limit: usize,
+) -> Result<Vec<MemoryRecord>, StoreError> {
+    let query = query.unwrap_or_default();
+    let pattern = format!("%{query}%");
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, text, tags, created_at FROM memories \
+         WHERE ?1 = '' OR text LIKE ?2 OR tags LIKE ?2 ORDER BY id DESC LIMIT ?3",
+        )
+        .map_err(internal)?;
+    let rows = stmt
+        .query_map(params![query, pattern, sql_limit(limit)], |row| {
+            let id: i64 = row.get(0)?;
+            let id = u64::try_from(id).map_err(|_| {
+                rusqlite::Error::InvalidColumnType(0, "id".into(), rusqlite::types::Type::Integer)
+            })?;
+            Ok(MemoryRecord {
+                id,
+                text: row.get(1)?,
+                tags: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })
+        .map_err(internal)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(internal)
+}
+
+fn delete_memory(conn: &Connection, id: u64) -> Result<bool, StoreError> {
+    let id =
+        i64::try_from(id).map_err(|_| StoreError::Internal("memory id vượt giới hạn".into()))?;
+    Ok(conn
+        .execute("DELETE FROM memories WHERE id = ?1", params![id])
+        .map_err(internal)?
+        > 0)
+}
+
+fn add_usage(conn: &Connection, day: &str, usage: Usage) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO usage(day, input_tokens, output_tokens) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(day) DO UPDATE SET input_tokens = input_tokens + excluded.input_tokens, \
+         output_tokens = output_tokens + excluded.output_tokens",
+        params![day, usage.input_tokens, usage.output_tokens],
+    )
+    .map_err(internal)?;
+    Ok(())
+}
+
+fn read_usage(conn: &Connection, day: &str) -> Result<Usage, StoreError> {
+    conn.query_row(
+        "SELECT input_tokens, output_tokens FROM usage WHERE day = ?1",
+        params![day],
+        |row| {
+            Ok(Usage {
+                input_tokens: row.get(0)?,
+                output_tokens: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(internal)?
+    .map_or(Ok(Usage::default()), Ok)
+}
+
+fn create_web_session(
+    conn: &Connection,
+    token_hash: &[u8],
+    user_id: &str,
+    created_at: &str,
+    expires_at: &str,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO web_sessions(token_hash, user_id, created_at, expires_at, last_seen) \
+         VALUES (?1, ?2, ?3, ?4, ?3)",
+        params![token_hash, user_id, created_at, expires_at],
+    )
+    .map_err(internal)?;
+    Ok(())
+}
+
+fn get_web_session(
+    conn: &Connection,
+    token_hash: &[u8],
+    now: &str,
+) -> Result<Option<WebSessionInfo>, StoreError> {
+    conn.query_row(
+        "SELECT user_id, created_at, expires_at FROM web_sessions \
+         WHERE token_hash = ?1 AND expires_at > ?2",
+        params![token_hash, now],
+        |row| {
+            Ok(WebSessionInfo {
+                user_id: row.get(0)?,
+                created_at: row.get(1)?,
+                expires_at: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(internal)
+}
+
+fn touch_web_session(conn: &Connection, token_hash: &[u8], now: &str) -> Result<bool, StoreError> {
+    Ok(conn
+        .execute(
+            "UPDATE web_sessions SET last_seen = ?2 WHERE token_hash = ?1",
+            params![token_hash, now],
+        )
+        .map_err(internal)?
+        > 0)
+}
+
+fn delete_web_session(conn: &Connection, token_hash: &[u8]) -> Result<bool, StoreError> {
+    Ok(conn
+        .execute(
+            "DELETE FROM web_sessions WHERE token_hash = ?1",
+            params![token_hash],
+        )
+        .map_err(internal)?
+        > 0)
+}
+
+fn delete_all_web_sessions(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute("DELETE FROM web_sessions", [])
+        .map_err(internal)?;
+    Ok(())
+}
+
+fn create_session_row(
+    conn: &Connection,
+    channel: &str,
+    chat_id: &str,
+    user_id: &str,
+    title: &str,
+) -> Result<SessionId, StoreError> {
+    let now = now_rfc3339();
+    conn.execute(
+        "INSERT INTO sessions (channel, chat_id, user_id, title, archived, summary, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 0, '', ?5, ?5)",
+        params![channel, chat_id, user_id, title, now],
+    )
+    .map_err(internal)?;
+    Ok(SessionId::new(conn.last_insert_rowid()))
 }
 
 fn ensure_session(
@@ -2119,7 +3255,7 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     /// Tiêu đề phiên lấy từ **dòng đầu** của tin đầu tiên do người dùng gửi (mục 8.1).

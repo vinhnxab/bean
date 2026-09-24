@@ -36,17 +36,17 @@ pub struct AuditEntry {
     pub session: i64,
     /// Kênh (`cli`, `web`, `telegram`, `scheduler`...).
     pub channel: String,
-    /// Tên tool.
+    /// Tên tool hoặc loại sự kiện.
     pub tool: String,
     /// Tham số đã redact secret.
     pub args: serde_json::Value,
-    /// Tool chạy thành công không (`None` = chưa chạy, ví dụ bị từ chối/huỷ).
+    /// Tool chạy thành công không (`None` = chưa chạy).
     pub ok: Option<bool>,
-    /// Quyết định (`allow` | `allow_in_session` | `deny` | `deny_denylist` | `n/a`).
+    /// Quyết định.
     pub decision: &'static str,
-    /// Ai quyết định (`user` | `policy` | `user_denylist` | `timeout` | `cancelled` hoặc user id cụ thể).
+    /// Ai quyết định.
     pub decided_by: String,
-    /// Tóm tắt lỗi (nếu có).
+    /// Tóm tắt lỗi nếu có.
     pub error: Option<String>,
 }
 
@@ -95,6 +95,24 @@ impl AuditLog {
         file.write_all(line.as_bytes())?;
         file.flush()?;
         Ok(())
+    }
+
+    /// Đọc tối đa `limit` dòng gần nhất, theo thứ tự mới trước.
+    #[must_use]
+    pub fn read_recent(&self, before: Option<u64>, limit: usize) -> Vec<serde_json::Value> {
+        let content = fs::read_to_string(&self.path).unwrap_or_default();
+        let mut lines: Vec<_> = content.lines().rev().collect();
+        if let Some(before) = before {
+            let start = usize::try_from(before).unwrap_or(lines.len());
+            lines = lines.split_off(start.min(lines.len()));
+        }
+        if limit > 0 {
+            lines.truncate(limit);
+        }
+        lines
+            .into_iter()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
     }
 }
 

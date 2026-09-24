@@ -27,6 +27,9 @@ pub mod store;
 pub use agent::{EndReason, RunOutcome, RunTurnArgs, run_turn, run_turn_outcome};
 pub use context::TurnContext;
 pub use prompt::system_prompt;
-pub use router::{Channel, Incoming, Router, RouterDeps, RouterError, RouterOptions};
+pub use router::{
+    Channel, Incoming, PendingConfirmInfo, Router, RouterDeps, RouterError, RouterOptions,
+    RouterSnapshot, RunningInfo,
+};
 pub use run_io::{Decision, RunIo};
 pub use store::{MemoryStore, SqliteStore, Store, memory_tools};

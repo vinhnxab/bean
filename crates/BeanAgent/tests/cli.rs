@@ -70,19 +70,28 @@ fn version_flag_works() {
 }
 
 #[test]
-fn serve_and_auth_are_not_implemented_yet() {
-    for args in [vec!["serve"], vec!["auth", "set-password"]] {
-        let output = Command::new(bin())
-            .args(&args)
-            .output()
-            .expect("chạy lệnh thất bại");
-        assert!(!output.status.success(), "{args:?} phải thoát khác 0 ở M1");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("chưa được cài đặt"),
-            "{args:?} stderr:\n{stderr}"
-        );
-    }
+fn serve_without_auth_fails_closed_and_auth_requires_tty() {
+    let serve = Command::new(bin())
+        .arg("serve")
+        .output()
+        .expect("chạy serve thất bại");
+    assert!(!serve.status.success());
+    let serve_stderr = String::from_utf8_lossy(&serve.stderr);
+    assert!(
+        serve_stderr.contains("auth.toml") || serve_stderr.contains("auth set-password"),
+        "serve phải từ chối khi thiếu auth: {serve_stderr}"
+    );
+
+    let auth = Command::new(bin())
+        .args(["auth", "set-password"])
+        .output()
+        .expect("chạy auth thất bại");
+    assert!(!auth.status.success());
+    let auth_stderr = String::from_utf8_lossy(&auth.stderr);
+    assert!(
+        auth_stderr.contains("TTY"),
+        "auth set-password phải từ chối khi không có TTY: {auth_stderr}"
+    );
 }
 
 #[test]
