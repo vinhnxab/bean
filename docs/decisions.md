@@ -63,8 +63,12 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   `PasswordHash::new(&phc)`; feature mặc định đã gồm `password-hash` + `getrandom`.
 * **D3.3** `teloxide 0.17`: **tắt default features** (`native-tls`) và bật
   `["rustls", "rustls-native-roots", "macros", "throttle"]` để không kéo OpenSSL.
-* **D3.4** `rmcp 3.4` (`client` + `transport-child-process`), MSRV 1.88; lưu ý có migration guide
-  2.x→3.x khi làm M14.
+* **D3.4** **M14:** `rmcp 3.4.1` (Cargo range `3.4.0`, lockfile chốt 3.4.1), chỉ bật
+  `default-features = false` + `["client", "transport-child-process"]`. API đã đối chiếu source
+  crate đã tải: `TokioChildProcess::new`, `ServiceExt::serve`, `Peer::list_all_tools`,
+  `RunningService::call_tool_once`, `CallToolRequestParams`; không dùng server/macros/HTTP của
+  `rmcp`. `TokioChildProcess` tự kill/reap khi drop; BeanAgent vẫn gọi `close_with_timeout`
+  tường minh khi `chat`/`serve` thoát.
 * **D3.5** `tower-http 0.7` (+ `csrf` layer làm lớp phụ cho mục 15.7, và `services::fs::Backend`
   để phục vụ asset nhúng ở M9).
 * **D3.6** DB: `tokio-rusqlite 0.8` (forward feature `bundled` sang `rusqlite 0.40`).

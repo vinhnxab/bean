@@ -87,13 +87,11 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     } else {
         String::new()
     };
-    let registry = Arc::new(chat::build_registry(
-        &config,
-        store.clone(),
-        skills.clone(),
-        web_search_api_key,
-    )?);
-    let workspace = registry.workspace_opt();
+    let built =
+        chat::build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
+    let mcp = built.mcp;
+    let workspace = built.registry.workspace_opt();
+    let registry = Arc::new(built.registry);
     let audit = chat::build_audit(&config);
     let router = Arc::new(Router::new(RouterDeps {
         config: config.clone(),
@@ -218,5 +216,6 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     }
     router.shutdown();
     let _ = scheduler_task.await;
+    mcp.close().await;
     result
 }

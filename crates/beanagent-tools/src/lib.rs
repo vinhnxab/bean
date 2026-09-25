@@ -22,10 +22,12 @@
 pub mod builtin;
 pub mod ctx;
 pub mod error;
+pub mod mcp;
 pub mod registry;
 pub mod text;
 pub mod tool;
 pub mod typed;
+pub mod untrusted;
 pub mod workspace;
 
 pub use beanagent_types::{Risk, ToolSpec};
@@ -35,4 +37,8 @@ pub use registry::ToolRegistry;
 pub use text::{compile_regex, truncate_chars};
 pub use tool::Tool;
 pub use typed::{TypedTool, deserialize_params, typed_spec};
+pub use untrusted::{
+    CLOSE_TAG as UNTRUSTED_CLOSE_TAG, OPEN_TAG as UNTRUSTED_OPEN_TAG, UntrustedFlag,
+    contains_untrusted_block, escape_closing_tags, wrap as wrap_untrusted,
+};
 pub use workspace::{DirEntryInfo, GrepMatch, WorkspaceFs};

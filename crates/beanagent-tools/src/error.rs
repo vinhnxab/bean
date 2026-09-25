@@ -33,6 +33,10 @@ pub enum ToolError {
     /// Tool vượt quá thời gian cho phép (timeout do agent loop áp, mục 6).
     #[error("tool vượt quá thời gian cho phép ({0}s)")]
     Timeout(u64),
+    /// Lỗi giao tiếp với MCP server (kết nối, discovery, timeout hoặc kết quả `isError`).
+    /// Payload từ server vẫn được bọc `<untrusted_content>` trước khi đi vào thông báo lỗi.
+    #[error("lỗi MCP: {0}")]
+    Mcp(String),
 
     /// Đăng ký hai tool trùng tên.
     #[error("tool đã được đăng ký: {0}")]

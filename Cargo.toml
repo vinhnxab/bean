@@ -10,6 +10,7 @@ members = [
   "crates/beanagent-skills",
   "crates/beanagent-tools",
   "crates/beanagent-types",
+  "crates/beanagent-mcp-test-server",
   "crates/beanagent-web",
 ]
 # `default-members` để `cargo build --no-default-features` (bản headless, không UI)
@@ -128,6 +129,9 @@ chrono-tz = "0.10.4"
 cap-std = "4.0.3"
 # Property-based test cho path jail (mục 15.1/20) — chỉ dev-dependency.
 proptest = "1.11.0"
+# MCP client chính thức (M14). Chỉ bật stdio client, không kéo server/macros/HTTP.
+# API đã đối chiếu source rmcp 3.4.1 trong cargo registry.
+rmcp = { version = "3.4.0", default-features = false, features = ["client", "transport-child-process"] }
 
 [profile.release]
 lto = "thin"

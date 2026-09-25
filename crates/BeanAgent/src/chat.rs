@@ -30,7 +30,7 @@ use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell, web_fetch, web_search,
 };
 use beanagent_skills::{SkillCatalog, skill_tools};
-use beanagent_tools::ToolRegistry;
+use beanagent_tools::{ToolRegistry, mcp::McpRuntime};
 use beanagent_types::{Config, Outbound, RunEvent, RunId};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -96,12 +96,9 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     } else {
         String::new()
     };
-    let registry = Arc::new(build_registry(
-        &config,
-        store.clone(),
-        skills,
-        web_search_api_key,
-    )?);
+    let built = build_registry(&config, store.clone(), skills, web_search_api_key).await?;
+    let mcp = built.mcp;
+    let registry = Arc::new(built.registry);
     let audit = build_audit(&config);
     let workspace = config.agent.workspace.display().to_string();
     let router = Arc::new(Router::new(RouterDeps {
@@ -122,20 +119,19 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         Some(read_piped_lines().await?)
     };
     let channel = Arc::new(CliChannel::new(piped));
-    router
-        .register_channel(channel.clone())
-        .context("đăng ký CLI channel thất bại")?;
+    if let Err(error) = router.register_channel(channel.clone()) {
+        mcp.close().await;
+        return Err(error).context("đăng ký CLI channel thất bại");
+    }
 
     println!(
         "BeanAgent chat — provider: {}. Gõ /exit hoặc Ctrl-D để thoát.",
         provider.name()
     );
     println!("workspace: {workspace}");
-    channel
-        .run(router, CancellationToken::new())
-        .await
-        .context("CLI channel dừng lỗi")?;
-    Ok(())
+    let run_result = channel.run(router, CancellationToken::new()).await;
+    mcp.close().await;
+    run_result.context("CLI channel dừng lỗi")
 }
 
 /// Chọn provider: kịch bản `--fake-llm` nếu có, ngược lại provider thật theo `[llm]`.
@@ -160,15 +156,22 @@ pub(crate) fn build_provider(
     Ok((provider, web_search_api_key))
 }
 
+/// Registry tool và các kết nối MCP cần shutdown cùng tiến trình.
+pub(crate) struct BuiltRegistry {
+    /// Registry dùng bởi Router.
+    pub(crate) registry: ToolRegistry,
+    /// Connection MCP để đóng tường minh khi `chat`/`serve` kết thúc.
+    pub(crate) mcp: McpRuntime,
+}
+
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
-/// Path jail bằng `CapWorkspace` (cap-std — mục 15.1); `run_shell` gắn sandbox
-/// docker/host (mục 15.2).
-pub(crate) fn build_registry(
+/// Path jail bằng `CapWorkspace`; MCP stdio nạp ở M14 và lỗi từng server không chặn startup.
+pub(crate) async fn build_registry(
     config: &Config,
     store: Arc<SqliteStore>,
     skills: SkillCatalog,
     web_search_api_key: Option<SecretString>,
-) -> Result<ToolRegistry> {
+) -> Result<BuiltRegistry> {
     std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
         format!(
             "không tạo được workspace {}",
@@ -231,7 +234,8 @@ pub(crate) fn build_registry(
                 .context("đăng ký tool scheduler thất bại")?;
         }
     }
-    Ok(registry)
+    let mcp = McpRuntime::load(&config.mcp_servers, &mut registry).await;
+    Ok(BuiltRegistry { registry, mcp })
 }
 
 /// Hàng đợi stdin cho chế độ pipe; confirm và lượt user dùng chung một nguồn.

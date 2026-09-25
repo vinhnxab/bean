@@ -61,6 +61,7 @@ rate_limit_per_minute = 20
 
 [[mcp_servers]]
 name = "example"
-command = "/usr/local/bin/some-mcp-server"
+command = "/usr/local/bin/some-mcp-server" # executable; không phải dòng shell
 args = []
-trust = false
+# env = { APP_MODE = "production" }     # chỉ biến không bí mật; không ghi token vào config
+trust = false                           # false => Confirm; true chỉ sau khi audit server
