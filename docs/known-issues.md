@@ -6,7 +6,7 @@ File này dành cho việc **nhớ lại quyết định đã chốt** và **ghi
 * Lý do kỹ thuật chi tiết của từng quyết định: `docs/decisions.md` (M5 = mục 8, `D8.1`–`D8.10`).
 * Yêu cầu gốc (đừng sửa file này để đổi phạm vi): `AGENTS.md`, bản prompt theo milestone: `PROMPTS.md`.
 
-Cập nhật lần cuối: 2026-09-24 (sau M5).
+Cập nhật lần cuối: 2026-09-25 (sau M15).
 
 ---
 
@@ -53,6 +53,12 @@ Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung b�
 | K12 | Chưa kiểm chứng với **provider thật**. | Compaction + ngân sách token mới chạy với `FakeProvider`; môi trường build không có API key. Điều kiện "hội thoại dài không lỗi API" của M5 vì vậy mới đúng ở mức logic. | Một lượt thật (Anthropic hoặc OpenAI-compat) với hội thoại đủ dài để kích hoạt compaction, hoặc đưa vào `make e2e`. | trung bình | bất kỳ lúc nào có key; M16 |
 | K13 | `/new` hiện chỉ có ở `chat.rs` (adapter). | Xử lý slash command thuộc lõi sẽ là M8 (Router); hiện chưa trùng lặp logic. | Khi M8 có Router: chuyển `/new`, `/stop`… vào lõi, adapter chỉ đọc dòng. | thấp | M8 |
 | K14 | Chưa có API/UI đọc-ghi `MEMORY.md`/`USER.md`. | Trong prompt mục 19 và mục 8.4 có nhắc, nhưng thiết kế đặt ở M9 (REST) + M11 (UI). | Làm đúng milestone của nó, đừng kéo sớm. | thấp | M9/M11 |
+| K15 | **Chưa smoke test Telegram với bot thật.** | M12 đã kiểm chứng adapter bằng `MockTransport` và Router thật, nhưng môi trường triển khai chưa có `TELEGRAM_BOT_TOKEN`; chưa xác minh long polling, typing, callback/approval, `/stop` và hành vi cùng web trên một instance thật. | Sau khi hoàn thành các milestone: dựng môi trường Telegram riêng, đặt token qua biến môi trường (không commit/ghi log), thêm đúng `telegram:<user_id>` vào `agent.allowed_users`, chạy `serve`; kiểm tra chat thường, tool cần xác nhận, Dangerous không có nút session, callback người lạ bị bỏ qua, `/stop`, reconnect và web đồng thời. Nếu cần, bổ sung checklist/e2e opt-in; không làm `make check` phụ thuộc secret. | trung bình | Sau tất cả milestone (M16+ / trước phát hành) |
+| K16 | **Chưa có tín hiệu “người dùng phàn nàn” cho learning loop.** | M15 coi run `Final` và không có lỗi trong chính lượt đó là tín hiệu chưa phàn nàn; phản hồi sửa sai ở lượt sau không thể chặn một đề xuất vừa tạo. | Thêm feedback/rejection ngữ nghĩa rõ ràng (ví dụ phản hồi phủ nhận workflow) hoặc lưu reflection candidate ở trạng thái chờ rồi chỉ tạo draft sau khi lượt kế tiếp xác nhận không có phản hồi tiêu cực; test bằng `FakeProvider`. | trung bình | M16/backlog learning |
+| K17 | **Reflection M15 mới chỉ được kiểm chứng bằng `FakeProvider`.** | Chưa xác minh model thật luôn trả đúng JSON schema, không gọi tool khi không được cấp, chấp nhận fenced JSON, và tạo SKILL.md hợp lệ trên Anthropic/OpenAI-compat/Ollama. | Chạy một kịch bản opt-in có provider thật hoặc mock HTTP tham gia xác thực wire format; kiểm tra output malformed, fenced JSON, body rỗng, description quá dài và update nhầm skill chưa load. Không đưa API key vào repo. | trung bình | Khi có provider/key; M16 hardening |
+| K18 | **Chưa có E2E M15 xuyên qua binary/server thật.** | Unit/integration test đã chứng minh learning, REST và Telegram adapter, nhưng chưa có `make e2e` đi hết luồng: task ≥5 tool call → notification → xem draft/diff → duyệt → run kế tiếp thấy skill mới. | Bổ sung fake scenario không cần network vào `tests/e2e/`, chạy `serve --fake-llm`; kiểm tra restart vẫn giữ rate limit và loader không thấy skill trước khi duyệt. | trung bình | M16 (`make e2e`) |
+| K19 | **Quyết định draft chưa có audit/lịch sử bền.** | Draft được duyệt hoặc bỏ rồi xóa khỏi `_drafts`; hiện chỉ có ID/status trả về request, chưa lưu actor, thời điểm, nội dung đã duyệt và lý do bỏ trong audit JSONL hoặc lịch sử riêng. | Ghi sự kiện tạo/duyệt/bỏ với actor đã xác thực vào audit; cân nhắc archive metadata sau quyết định, có retention policy và cách xem/xóa từ UI. Không log secret hoặc toàn bộ output tool. | trung bình | M16/security hardening |
+| K20 | **Draft phát sinh từ scheduler không có nút inline Telegram.** | Scheduler không gắn với user Telegram cụ thể; adapter cố ý gửi notification dạng text để không gán callback cho sai user, nên phải dùng `/approve <id>` hoặc duyệt qua web. | Quy định chính sách rõ: chỉ tạo learning proposal từ interactive run, hoặc gửi scheduler draft về một chat quản trị được cấu hình và yêu cầu xác nhận từ user có quyền trong chat đó. | thấp | Backlog sau M15 |
 
 ---
 
@@ -77,5 +83,6 @@ Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung b�
 * **M6 (Skills)**: K9 (giới hạn cú pháp FTS trong description), K5 (nhiễu tool-call trong search).
 * **M8 (Router/Channel)**: K2, K3, K6, K7, K13.
 * **M9 (Web server)**: K6, K14 (REST cho phiên/memory files), giữ `/api/*` trả 404 JSON.
-* **M15 (Learning loop)**: K1 (injection qua summary), K5, K8.
-* **M16 (Hardening)**: K1, K2, K3, K4, K11, K12 + `make audit`/`make e2e`.
+* **M15 (Learning loop — phần còn lại)**: K16 (tín hiệu phàn nàn), K17 (provider thật), K19 (audit/lịch sử draft), K20 (draft từ scheduler).
+* **M16 (Hardening)**: K1, K2, K3, K4, K11, K12, K18 + `make audit`/`make e2e`.
+* **Sau tất cả milestone / trước phát hành**: K15 — smoke test Telegram thật bằng token lấy từ môi trường; không đưa token vào repo hay làm `make check` phụ thuộc secret.
