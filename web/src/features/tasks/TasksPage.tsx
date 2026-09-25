@@ -44,6 +44,7 @@ export function TasksPage() {
     }
     try {
       await create.mutateAsync({
+        session_id: null,
         cron: form.cron.trim(),
         prompt: form.prompt.trim(),
         channel: form.channel.trim(),

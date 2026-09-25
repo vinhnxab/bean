@@ -3,7 +3,7 @@
 //! Run thuộc Router: adapter chỉ `submit` và nhận event. Vòng đời run không phụ
 //! thuộc subscriber, nên WebSocket rớt không làm cancel tool hoặc confirm.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak};
 use std::time::Duration;
@@ -239,6 +239,8 @@ struct QueuedRun {
     session_id: SessionId,
     incoming: Incoming,
     cancel: CancellationToken,
+    /// `Some` khi run do scheduler gọi; interactive run là `None`.
+    background_allowed_tools: Option<Arc<HashSet<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -398,6 +400,30 @@ impl Router {
             session_id: session,
             incoming,
             cancel: CancellationToken::new(),
+            background_allowed_tools: None,
+        })?;
+        Ok(run_id)
+    }
+
+    /// Submit một prompt tự động cho session đã được scheduler xác nhận.
+    ///
+    /// Khác với run interactive, mọi tool Confirm/Dangerous sẽ được RouterIo
+    /// cho chạy nếu nằm trong `allowed_tools`, nếu không sẽ bị từ chối ngay.
+    pub async fn submit_scheduled(
+        &self,
+        incoming: Incoming,
+        allowed_tools: Vec<String>,
+    ) -> Result<RunId, RouterError> {
+        self.authorize(&incoming)?;
+        let _submission = self.inner.submission.lock().await;
+        let run_id = new_run_id()?;
+        let session = self.resolve_session(&incoming).await?;
+        self.enqueue(QueuedRun {
+            run_id: run_id.clone(),
+            session_id: session,
+            incoming,
+            cancel: CancellationToken::new(),
+            background_allowed_tools: Some(Arc::new(allowed_tools.into_iter().collect())),
         })?;
         Ok(run_id)
     }
@@ -504,16 +530,27 @@ impl Router {
                 return;
             }
         };
-        let policy = lock(&self.inner.state)
-            .ok()
-            .and_then(|state| state.policies.get(&queued.session_id).cloned())
-            .unwrap_or_else(|| Arc::new(SessionPolicy::new()));
+        let policy = if queued.background_allowed_tools.is_some() {
+            // Scheduler không dùng allow-in-session của một phiên tương tác.
+            Arc::new(SessionPolicy::new())
+        } else {
+            lock(&self.inner.state)
+                .ok()
+                .and_then(|state| state.policies.get(&queued.session_id).cloned())
+                .unwrap_or_else(|| Arc::new(SessionPolicy::new()))
+        };
+        let audit_channel = if queued.background_allowed_tools.is_some() {
+            "scheduler"
+        } else {
+            &queued.incoming.channel
+        };
         let io = Arc::new(RouterIo {
             inner: Arc::downgrade(&self.inner),
             session_id: queued.session_id,
             run_id: queued.run_id.clone(),
             user_id: queued.incoming.user_id.clone(),
             cancel: queued.cancel.clone(),
+            background_allowed_tools: queued.background_allowed_tools.clone(),
             last_actor: Mutex::new(None),
         });
         let result = run_turn_outcome(RunTurnArgs {
@@ -527,7 +564,7 @@ impl Router {
             cancel: queued.cancel.clone(),
             session_policy: Some(policy),
             audit: self.inner.audit.clone(),
-            channel: &queued.incoming.channel,
+            channel: audit_channel,
             skills_index: &self.inner.skills_index,
         })
         .await;
@@ -1048,6 +1085,7 @@ struct RouterIo {
     run_id: RunId,
     user_id: String,
     cancel: CancellationToken,
+    background_allowed_tools: Option<Arc<HashSet<String>>>,
     last_actor: Mutex<Option<String>>,
 }
 
@@ -1099,6 +1137,13 @@ impl RunIo for RouterIo {
         allow_in_session: bool,
         timeout: Duration,
     ) -> Option<Decision> {
+        if self.background_allowed_tools.is_some() {
+            return Some(if self.background_tool_allowed(_tool) {
+                Decision::Allow
+            } else {
+                Decision::Deny
+            });
+        }
         let inner = self.inner.upgrade()?;
         let router = Router { inner };
         let (confirm_id, receiver) = router
@@ -1145,7 +1190,20 @@ impl RunIo for RouterIo {
     }
 
     fn decision_actor(&self) -> Option<String> {
+        if self.background_allowed_tools.is_some() {
+            return Some("scheduler".into());
+        }
         self.last_actor.lock().ok().and_then(|actor| actor.clone())
+    }
+
+    fn is_background(&self) -> bool {
+        self.background_allowed_tools.is_some()
+    }
+
+    fn background_tool_allowed(&self, tool: &str) -> bool {
+        self.background_allowed_tools
+            .as_ref()
+            .is_some_and(|tools| tools.contains(tool))
     }
 
     fn cancel_token(&self) -> &CancellationToken {

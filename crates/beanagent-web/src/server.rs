@@ -1,7 +1,6 @@
 //! Axum application, REST, WebSocket và WebChannel cho M9.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, patch, post};
 use axum::{Json, Router as AxumRouter};
 use axum_extra::extract::cookie::CookieJar;
-use beanagent_core::{Channel, Decision, Incoming, Router};
+use beanagent_core::{Channel, Decision, Incoming, Router, next_run_after};
 use beanagent_memory::{
     MemoryRecord, MessageRecord, NewScheduledTask, ScheduledTask, SessionSummary, Store,
 };
@@ -29,7 +28,6 @@ use url::Url;
 
 use crate::api_types::*;
 use crate::auth::{AuthError, AuthService, WEB_USER};
-use croner::Cron;
 
 /// Kích thước request HTTP tối đa.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -375,6 +373,7 @@ fn memory_dto(memory: MemoryRecord) -> MemoryDto {
 fn task_dto(task: ScheduledTask) -> TaskDto {
     TaskDto {
         id: task.id,
+        session_id: task.session_id.map_or(0, |id| id.get()),
         cron: task.cron,
         prompt: task.prompt,
         channel: task.channel,
@@ -382,28 +381,10 @@ fn task_dto(task: ScheduledTask) -> TaskDto {
         allowed_tools: task.allowed_tools,
         next_run: task.next_run,
         enabled: task.enabled,
+        created_at: task.created_at,
+        last_run_at: task.last_run_at,
+        last_status: task.last_status,
     }
-}
-
-/// Parse cron và tính lần chạy kế tiếp UTC. M11 chỉ cung cấp metadata; M13 mới tick.
-fn next_task_run(cron: &str) -> ApiResult<String> {
-    let pattern = Cron::from_str(cron).map_err(|_| {
-        ApiFailure::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_cron",
-            "biểu thức cron không hợp lệ",
-        )
-    })?;
-    let now = chrono::Utc::now();
-    let next: chrono::DateTime<chrono::Utc> =
-        pattern.find_next_occurrence(&now, false).map_err(|_| {
-            ApiFailure::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_cron",
-                "không tìm thấy lần chạy kế tiếp",
-            )
-        })?;
-    Ok(next.to_rfc3339())
 }
 
 /// Đăng nhập; không trả token trong JSON, chỉ đặt cookie.
@@ -760,20 +741,39 @@ async fn get_skill(
     }))
 }
 
+async fn task_owned_by_user(
+    state: &WebState,
+    task: &ScheduledTask,
+    user_id: &str,
+) -> ApiResult<bool> {
+    let Some(session) = task.session_id else {
+        return Ok(false);
+    };
+    let info = state
+        .store
+        .session_info(session)
+        .await
+        .map_err(|_| ApiFailure::internal())?;
+    Ok(info.is_some_and(|info| info.user_id == user_id))
+}
+
 async fn list_tasks(
     State(state): State<WebState>,
     jar: CookieJar,
 ) -> ApiResult<Json<TaskListResponse>> {
-    let _ = require_user(&state, &jar).await?;
+    let user_id = require_user(&state, &jar).await?;
     let tasks = state
         .store
         .list_tasks()
         .await
-        .map_err(|_| ApiFailure::internal())?
-        .into_iter()
-        .map(task_dto)
-        .collect();
-    Ok(Json(TaskListResponse { tasks }))
+        .map_err(|_| ApiFailure::internal())?;
+    let mut result = Vec::new();
+    for task in tasks {
+        if task_owned_by_user(&state, &task, &user_id).await? {
+            result.push(task_dto(task));
+        }
+    }
+    Ok(Json(TaskListResponse { tasks: result }))
 }
 
 async fn create_task(
@@ -781,7 +781,7 @@ async fn create_task(
     jar: CookieJar,
     Json(request): Json<TaskRequest>,
 ) -> ApiResult<(StatusCode, Json<TaskDto>)> {
-    let _ = require_user(&state, &jar).await?;
+    let user_id = require_user(&state, &jar).await?;
     let cron = request.cron.trim().to_string();
     let prompt = request.prompt.trim().to_string();
     let channel = request.channel.trim().to_string();
@@ -800,18 +800,81 @@ async fn create_task(
             "một trường của tác vụ quá dài",
         ));
     }
+    let session = match request.session_id {
+        Some(id) => {
+            let info = state
+                .store
+                .session_info(SessionId::new(id))
+                .await
+                .map_err(|_| ApiFailure::internal())?
+                .ok_or_else(ApiFailure::not_found)?;
+            if info.user_id != user_id
+                || info.channel != channel
+                || info.chat_id != chat_id
+                || info.archived
+            {
+                return Err(ApiFailure::not_found());
+            }
+            SessionId::new(id)
+        }
+        None => {
+            if channel != "web" {
+                return Err(ApiFailure::new(
+                    StatusCode::BAD_REQUEST,
+                    "session_required",
+                    "task ngoài web phải chỉ định session_id thuộc user",
+                ));
+            }
+            let active = state
+                .store
+                .find_active_session(&channel, &chat_id)
+                .await
+                .map_err(|_| ApiFailure::internal())?;
+            if let Some(active) = active {
+                let info = state
+                    .store
+                    .session_info(active)
+                    .await
+                    .map_err(|_| ApiFailure::internal())?;
+                if info.is_some_and(|info| info.user_id == user_id && !info.archived) {
+                    active
+                } else {
+                    state
+                        .store
+                        .ensure_session_for_user(&channel, &chat_id, &user_id, "")
+                        .await
+                        .map_err(|_| ApiFailure::internal())?
+                }
+            } else {
+                state
+                    .store
+                    .ensure_session_for_user(&channel, &chat_id, &user_id, "")
+                    .await
+                    .map_err(|_| ApiFailure::internal())?
+            }
+        }
+    };
     let allowed_tools = request
         .allowed_tools
         .into_iter()
         .map(|tool| tool.trim().to_string())
         .filter(|tool| !tool.is_empty())
         .collect();
-    let next_run = next_task_run(&cron)?;
+    let next_run = next_run_after(&cron, &state.config.agent.timezone, chrono::Utc::now())
+        .map_err(|_| {
+            ApiFailure::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_cron",
+                "biểu thức cron không hợp lệ",
+            )
+        })?
+        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
     let task = state
         .store
         .create_task(NewScheduledTask {
             cron,
             prompt,
+            session_id: Some(session),
             channel,
             chat_id,
             allowed_tools,
@@ -829,7 +892,18 @@ async fn update_task(
     Path(id): Path<u64>,
     Json(request): Json<TaskUpdateRequest>,
 ) -> ApiResult<Json<TaskDto>> {
-    let _ = require_user(&state, &jar).await?;
+    let user_id = require_user(&state, &jar).await?;
+    let existing = state
+        .store
+        .list_tasks()
+        .await
+        .map_err(|_| ApiFailure::internal())?
+        .into_iter()
+        .find(|task| task.id == id)
+        .ok_or_else(ApiFailure::not_found)?;
+    if !task_owned_by_user(&state, &existing, &user_id).await? {
+        return Err(ApiFailure::not_found());
+    }
     let task = state
         .store
         .set_task_enabled(id, request.enabled)
@@ -844,7 +918,18 @@ async fn delete_task(
     jar: CookieJar,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<DeleteResponse>> {
-    let _ = require_user(&state, &jar).await?;
+    let user_id = require_user(&state, &jar).await?;
+    let existing = state
+        .store
+        .list_tasks()
+        .await
+        .map_err(|_| ApiFailure::internal())?
+        .into_iter()
+        .find(|task| task.id == id)
+        .ok_or_else(ApiFailure::not_found)?;
+    if !task_owned_by_user(&state, &existing, &user_id).await? {
+        return Err(ApiFailure::not_found());
+    }
     let deleted = state
         .store
         .delete_task(id)

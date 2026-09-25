@@ -21,7 +21,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use beanagent_core::{Channel, Decision, Incoming, Router, RouterDeps, SqliteStore, memory_tools};
+use beanagent_core::{
+    Channel, Decision, Incoming, Router, RouterDeps, SqliteStore, SystemClock, memory_tools,
+    schedule_tools,
+};
 use beanagent_llm::{FakeProvider, LlmProvider};
 use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell, web_fetch, web_search,
@@ -204,7 +207,7 @@ pub(crate) fn build_registry(
             .context("đăng ký web_search thất bại")?;
     }
     if config.tools.enabled.iter().any(|g| g == "memory") {
-        for tool in memory_tools(store) {
+        for tool in memory_tools(store.clone()) {
             registry
                 .register(tool)
                 .context("đăng ký tool memory thất bại")?;
@@ -215,6 +218,17 @@ pub(crate) fn build_registry(
             registry
                 .register(tool)
                 .context("đăng ký tool skill thất bại")?;
+        }
+    }
+    if config.tools.enabled.iter().any(|g| g == "schedule") {
+        for tool in schedule_tools(
+            store.clone(),
+            config.agent.timezone.clone(),
+            Arc::new(SystemClock),
+        ) {
+            registry
+                .register(tool)
+                .context("đăng ký tool scheduler thất bại")?;
         }
     }
     Ok(registry)

@@ -9,6 +9,10 @@ export type TaskDto = {
  */
 id: number, 
 /**
+ * Session sở hữu tác vụ.
+ */
+session_id: number, 
+/**
  * Cron.
  */
 cron: string, 
@@ -35,4 +39,16 @@ next_run: string,
 /**
  * Đang bật hay không.
  */
-enabled: boolean, };
+enabled: boolean, 
+/**
+ * Thời điểm tạo UTC.
+ */
+created_at: string, 
+/**
+ * Lần chạy gần nhất UTC nếu có.
+ */
+last_run_at: string | null, 
+/**
+ * Trạng thái lần chạy gần nhất.
+ */
+last_status: string, };

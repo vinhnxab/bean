@@ -252,8 +252,10 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                         .map(|reason| format!("\n[cảnh báo deny-list] {}", reason.label))
                         .unwrap_or_default();
                     let prompt = format!("{} {}{deny_note}", call.name, args_preview);
-                    let replied = io
-                        .confirm(
+                    let replied = if io.is_background() && untrusted {
+                        Some(Decision::Deny)
+                    } else {
+                        io.confirm(
                             &call.id,
                             &call.name,
                             risk,
@@ -261,7 +263,8 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                             allow_in_session,
                             CONFIRM_TIMEOUT,
                         )
-                        .await;
+                        .await
+                    };
                     let actor = io.decision_actor();
                     match replied {
                         Some(Decision::Allow) => {

@@ -146,10 +146,12 @@ pub struct MemoryRecord {
 /// Dữ liệu đầu vào khi tạo tác vụ định kỳ.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewScheduledTask {
-    /// Biểu thức cron.
+    /// Biểu thức cron, được hiểu theo `Config.agent.timezone` và lưu lịch UTC.
     pub cron: String,
     /// Prompt agent.
     pub prompt: String,
+    /// Session sẽ chạy task; `None` chỉ dành cho dữ liệu migration cũ.
+    pub session_id: Option<SessionId>,
     /// Channel nhận kết quả.
     pub channel: String,
     /// Chat ID nhận kết quả.
@@ -163,7 +165,7 @@ pub struct NewScheduledTask {
 }
 
 /// Một tác vụ định kỳ đã lưu.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ScheduledTask {
     /// ID tác vụ.
     pub id: u64,
@@ -171,6 +173,8 @@ pub struct ScheduledTask {
     pub cron: String,
     /// Prompt agent.
     pub prompt: String,
+    /// Session sở hữu task; `None` với bản ghi cũ chưa migration.
+    pub session_id: Option<SessionId>,
     /// Channel nhận kết quả.
     pub channel: String,
     /// Chat ID nhận kết quả.
@@ -181,6 +185,12 @@ pub struct ScheduledTask {
     pub next_run: String,
     /// Tác vụ có bật hay không.
     pub enabled: bool,
+    /// RFC3339 UTC lúc tạo.
+    pub created_at: String,
+    /// RFC3339 UTC của lần claim gần nhất.
+    pub last_run_at: Option<String>,
+    /// Trạng thái runtime gần nhất (pending/running/success/error/skipped).
+    pub last_status: String,
 }
 
 /// Thông tin phiên đăng nhập sau khi token đã được xác thực.
@@ -281,8 +291,21 @@ pub trait Store: Send + Sync {
         session: SessionId,
     ) -> Result<Option<SessionSummary>, StoreError>;
 
+    /// Tìm session đang hoạt động theo channel/chat, không tạo session mới.
+    async fn find_active_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+    ) -> Result<Option<SessionId>, StoreError>;
+
     /// Liệt kê tác vụ định kỳ đã lưu.
     async fn list_tasks(&self) -> Result<Vec<ScheduledTask>, StoreError>;
+
+    /// Liệt kê task thuộc một session (tool model không được thấy task của session khác).
+    async fn list_tasks_for_session(
+        &self,
+        session: SessionId,
+    ) -> Result<Vec<ScheduledTask>, StoreError>;
 
     /// Tạo tác vụ định kỳ và trả bản ghi đã có ID.
     async fn create_task(&self, task: NewScheduledTask) -> Result<ScheduledTask, StoreError>;
@@ -294,8 +317,34 @@ pub trait Store: Send + Sync {
         enabled: bool,
     ) -> Result<Option<ScheduledTask>, StoreError>;
 
+    /// Xoá task chỉ khi nó thuộc session; trả false nếu không tồn tại hoặc sai session.
+    async fn delete_task_for_session(
+        &self,
+        id: u64,
+        session: SessionId,
+    ) -> Result<bool, StoreError>;
+
     /// Xoá tác vụ; trả false nếu không tồn tại.
     async fn delete_task(&self, id: u64) -> Result<bool, StoreError>;
+
+    /// Các task đến hạn, cũ nhất trước.
+    async fn due_tasks(&self, now: &str, limit: usize) -> Result<Vec<ScheduledTask>, StoreError>;
+
+    /// Atomically claim một task và đẩy lịch sang occurrence kế tiếp.
+    ///
+    /// `expected_next_run` là điều kiện compare-and-swap; nhờ vậy hai tick
+    /// đồng thời không thể claim cùng một occurrence.
+    async fn claim_task(
+        &self,
+        id: u64,
+        expected_next_run: &str,
+        next_run: &str,
+        last_run_at: &str,
+        status: &str,
+    ) -> Result<Option<ScheduledTask>, StoreError>;
+
+    /// Cập nhật trạng thái runtime sau khi run kết thúc.
+    async fn set_task_status(&self, id: u64, status: &str) -> Result<bool, StoreError>;
 
     /// Cập nhật metadata của session sau khi đã kiểm tra ownership.
     async fn update_session(
@@ -730,6 +779,19 @@ impl Store for MemoryStore {
             }))
     }
 
+    async fn find_active_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+    ) -> Result<Option<SessionId>, StoreError> {
+        let sessions = self.sessions.read().await;
+        Ok(sessions
+            .iter()
+            .rev()
+            .find(|item| !item.archived && item.channel == channel && item.chat_id == chat_id)
+            .map(|item| item.id))
+    }
+
     async fn update_session(
         &self,
         session: SessionId,
@@ -878,6 +940,20 @@ impl Store for MemoryStore {
         Ok(self.tasks.read().await.clone())
     }
 
+    async fn list_tasks_for_session(
+        &self,
+        session: SessionId,
+    ) -> Result<Vec<ScheduledTask>, StoreError> {
+        Ok(self
+            .tasks
+            .read()
+            .await
+            .iter()
+            .filter(|task| task.session_id == Some(session))
+            .cloned()
+            .collect())
+    }
+
     async fn create_task(&self, task: NewScheduledTask) -> Result<ScheduledTask, StoreError> {
         let id = {
             let mut next = self.next_task_id.write().await;
@@ -885,15 +961,20 @@ impl Store for MemoryStore {
             *next = next.saturating_add(1);
             value
         };
+        let created_at = now_rfc3339();
         let record = ScheduledTask {
             id,
             cron: task.cron,
             prompt: task.prompt,
+            session_id: task.session_id,
             channel: task.channel,
             chat_id: task.chat_id,
             allowed_tools: task.allowed_tools,
             next_run: task.next_run,
             enabled: task.enabled,
+            created_at: created_at.clone(),
+            last_run_at: None,
+            last_status: if task.enabled { "pending" } else { "disabled" }.into(),
         };
         self.tasks.write().await.push(record.clone());
         Ok(record)
@@ -909,7 +990,23 @@ impl Store for MemoryStore {
             return Ok(None);
         };
         task.enabled = enabled;
+        if !enabled {
+            task.last_status = "disabled".into();
+        } else if task.last_status == "disabled" {
+            task.last_status = "pending".into();
+        }
         Ok(Some(task.clone()))
+    }
+
+    async fn delete_task_for_session(
+        &self,
+        id: u64,
+        session: SessionId,
+    ) -> Result<bool, StoreError> {
+        let mut tasks = self.tasks.write().await;
+        let before = tasks.len();
+        tasks.retain(|task| task.id != id || task.session_id != Some(session));
+        Ok(tasks.len() != before)
     }
 
     async fn delete_task(&self, id: u64) -> Result<bool, StoreError> {
@@ -917,6 +1014,56 @@ impl Store for MemoryStore {
         let before = tasks.len();
         tasks.retain(|task| task.id != id);
         Ok(tasks.len() != before)
+    }
+
+    async fn due_tasks(&self, now: &str, limit: usize) -> Result<Vec<ScheduledTask>, StoreError> {
+        let tasks = self.tasks.read().await;
+        let mut result: Vec<_> = tasks
+            .iter()
+            .filter(|task| {
+                task.enabled && task.last_status != "running" && task.next_run.as_str() <= now
+            })
+            .cloned()
+            .collect();
+        result.sort_by(|left, right| {
+            left.next_run
+                .cmp(&right.next_run)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        if limit > 0 {
+            result.truncate(limit);
+        }
+        Ok(result)
+    }
+
+    async fn claim_task(
+        &self,
+        id: u64,
+        expected_next_run: &str,
+        next_run: &str,
+        last_run_at: &str,
+        status: &str,
+    ) -> Result<Option<ScheduledTask>, StoreError> {
+        let mut tasks = self.tasks.write().await;
+        let Some(task) = tasks
+            .iter_mut()
+            .find(|task| task.id == id && task.enabled && task.next_run == expected_next_run)
+        else {
+            return Ok(None);
+        };
+        task.next_run = next_run.to_string();
+        task.last_run_at = Some(last_run_at.to_string());
+        task.last_status = status.to_string();
+        Ok(Some(task.clone()))
+    }
+
+    async fn set_task_status(&self, id: u64, status: &str) -> Result<bool, StoreError> {
+        let mut tasks = self.tasks.write().await;
+        let Some(task) = tasks.iter_mut().find(|task| task.id == id) else {
+            return Ok(false);
+        };
+        task.last_status = status.to_string();
+        Ok(true)
     }
 
     async fn add_usage(&self, day: &str, usage: Usage) -> Result<(), StoreError> {
@@ -1473,6 +1620,11 @@ enum DbCommand {
         session: SessionId,
         reply: Reply<Option<SessionSummary>>,
     },
+    FindActiveSession {
+        channel: String,
+        chat_id: String,
+        reply: Reply<Option<SessionId>>,
+    },
     UpdateSession {
         session: SessionId,
         user_id: String,
@@ -1514,6 +1666,10 @@ enum DbCommand {
     ListTasks {
         reply: Reply<Vec<ScheduledTask>>,
     },
+    ListTasksForSession {
+        session: SessionId,
+        reply: Reply<Vec<ScheduledTask>>,
+    },
     CreateTask {
         task: NewScheduledTask,
         reply: Reply<ScheduledTask>,
@@ -1523,8 +1679,31 @@ enum DbCommand {
         enabled: bool,
         reply: Reply<Option<ScheduledTask>>,
     },
+    DeleteTaskForSession {
+        id: u64,
+        session: SessionId,
+        reply: Reply<bool>,
+    },
     DeleteTask {
         id: u64,
+        reply: Reply<bool>,
+    },
+    DueTasks {
+        now: String,
+        limit: usize,
+        reply: Reply<Vec<ScheduledTask>>,
+    },
+    ClaimTask {
+        id: u64,
+        expected_next_run: String,
+        next_run: String,
+        last_run_at: String,
+        status: String,
+        reply: Reply<Option<ScheduledTask>>,
+    },
+    SetTaskStatus {
+        id: u64,
+        status: String,
         reply: Reply<bool>,
     },
     AddUsage {
@@ -1912,8 +2091,31 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn find_active_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+    ) -> Result<Option<SessionId>, StoreError> {
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
+        self.request(move |reply| DbCommand::FindActiveSession {
+            channel,
+            chat_id,
+            reply,
+        })
+        .await
+    }
+
     async fn list_tasks(&self) -> Result<Vec<ScheduledTask>, StoreError> {
         self.request(|reply| DbCommand::ListTasks { reply }).await
+    }
+
+    async fn list_tasks_for_session(
+        &self,
+        session: SessionId,
+    ) -> Result<Vec<ScheduledTask>, StoreError> {
+        self.request(move |reply| DbCommand::ListTasksForSession { session, reply })
+            .await
     }
 
     async fn create_task(&self, task: NewScheduledTask) -> Result<ScheduledTask, StoreError> {
@@ -1930,8 +2132,52 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn delete_task_for_session(
+        &self,
+        id: u64,
+        session: SessionId,
+    ) -> Result<bool, StoreError> {
+        self.request(move |reply| DbCommand::DeleteTaskForSession { id, session, reply })
+            .await
+    }
+
     async fn delete_task(&self, id: u64) -> Result<bool, StoreError> {
         self.request(move |reply| DbCommand::DeleteTask { id, reply })
+            .await
+    }
+
+    async fn due_tasks(&self, now: &str, limit: usize) -> Result<Vec<ScheduledTask>, StoreError> {
+        let now = now.to_string();
+        self.request(move |reply| DbCommand::DueTasks { now, limit, reply })
+            .await
+    }
+
+    async fn claim_task(
+        &self,
+        id: u64,
+        expected_next_run: &str,
+        next_run: &str,
+        last_run_at: &str,
+        status: &str,
+    ) -> Result<Option<ScheduledTask>, StoreError> {
+        let expected_next_run = expected_next_run.to_string();
+        let next_run = next_run.to_string();
+        let last_run_at = last_run_at.to_string();
+        let status = status.to_string();
+        self.request(move |reply| DbCommand::ClaimTask {
+            id,
+            expected_next_run,
+            next_run,
+            last_run_at,
+            status,
+            reply,
+        })
+        .await
+    }
+
+    async fn set_task_status(&self, id: u64, status: &str) -> Result<bool, StoreError> {
+        let status = status.to_string();
+        self.request(move |reply| DbCommand::SetTaskStatus { id, status, reply })
             .await
     }
 
@@ -2175,6 +2421,13 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::SessionSummary { session, reply } => {
             let _ = reply.send(load_session_summary(conn, session));
         }
+        DbCommand::FindActiveSession {
+            channel,
+            chat_id,
+            reply,
+        } => {
+            let _ = reply.send(find_active_session(conn, &channel, &chat_id));
+        }
         DbCommand::UpdateSession {
             session,
             user_id,
@@ -2236,14 +2489,43 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::ListTasks { reply } => {
             let _ = reply.send(list_tasks(conn));
         }
+        DbCommand::ListTasksForSession { session, reply } => {
+            let _ = reply.send(list_tasks_for_session(conn, session));
+        }
         DbCommand::CreateTask { task, reply } => {
             let _ = reply.send(create_task(conn, task));
         }
         DbCommand::SetTaskEnabled { id, enabled, reply } => {
             let _ = reply.send(set_task_enabled(conn, id, enabled));
         }
+        DbCommand::DeleteTaskForSession { id, session, reply } => {
+            let _ = reply.send(delete_task_for_session(conn, id, session));
+        }
         DbCommand::DeleteTask { id, reply } => {
             let _ = reply.send(delete_task(conn, id));
+        }
+        DbCommand::DueTasks { now, limit, reply } => {
+            let _ = reply.send(due_tasks(conn, &now, limit));
+        }
+        DbCommand::ClaimTask {
+            id,
+            expected_next_run,
+            next_run,
+            last_run_at,
+            status,
+            reply,
+        } => {
+            let _ = reply.send(claim_task(
+                conn,
+                id,
+                &expected_next_run,
+                &next_run,
+                &last_run_at,
+                &status,
+            ));
+        }
+        DbCommand::SetTaskStatus { id, status, reply } => {
+            let _ = reply.send(set_task_status(conn, id, &status));
         }
         DbCommand::AddUsage { day, usage, reply } => {
             let _ = reply.send(add_usage(conn, &day, usage));
@@ -2352,7 +2634,7 @@ fn configure(conn: &Connection) -> Result<(), StoreError> {
 
 /// Migration tuần tự theo `user_version` (agents.md mục 8.1).
 fn run_migration(conn: &Connection) -> Result<(), StoreError> {
-    let version: i64 = conn
+    let mut version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(internal)?;
     if version < 1 {
@@ -2363,6 +2645,7 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         })?;
         conn.pragma_update(None, "user_version", 1)
             .map_err(internal)?;
+        version = 1;
     }
     if version < 2 {
         add_column_if_missing(conn, "sessions", "user_id", "TEXT NOT NULL DEFAULT ''")?;
@@ -2380,6 +2663,7 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         .map_err(|err| StoreError::Internal(format!("migration v2 outbox thất bại: {err}")))?;
         conn.pragma_update(None, "user_version", 2)
             .map_err(internal)?;
+        version = 2;
     }
     if version < 3 {
         add_column_if_missing(
@@ -2398,6 +2682,38 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         )
         .map_err(|err| StoreError::Internal(format!("migration v3 web/usage thất bại: {err}")))?;
         conn.pragma_update(None, "user_version", 3)
+            .map_err(internal)?;
+        version = 3;
+    }
+    if version < 4 {
+        add_column_if_missing(
+            conn,
+            "scheduled_tasks",
+            "session_id",
+            "INTEGER REFERENCES sessions(id)",
+        )?;
+        add_column_if_missing(
+            conn,
+            "scheduled_tasks",
+            "created_at",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        add_column_if_missing(conn, "scheduled_tasks", "last_run_at", "TEXT")?;
+        add_column_if_missing(
+            conn,
+            "scheduled_tasks",
+            "last_status",
+            "TEXT NOT NULL DEFAULT 'pending'",
+        )?;
+        conn.execute_batch(
+            "UPDATE scheduled_tasks
+                SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+              WHERE created_at = '';
+             CREATE INDEX IF NOT EXISTS scheduled_tasks_due
+               ON scheduled_tasks(enabled, next_run, id);",
+        )
+        .map_err(|err| StoreError::Internal(format!("migration v4 scheduler thất bại: {err}")))?;
+        conn.pragma_update(None, "user_version", 4)
             .map_err(internal)?;
     }
     Ok(())
@@ -2666,65 +2982,103 @@ fn delete_memory(conn: &Connection, id: u64) -> Result<bool, StoreError> {
         > 0)
 }
 
+fn find_active_session(
+    conn: &Connection,
+    channel: &str,
+    chat_id: &str,
+) -> Result<Option<SessionId>, StoreError> {
+    conn.query_row(
+        "SELECT id FROM sessions
+          WHERE channel = ?1 AND chat_id = ?2 AND archived = 0
+          ORDER BY id DESC LIMIT 1",
+        params![channel, chat_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|id| id.map(SessionId::new))
+    .map_err(internal)
+}
+
+fn task_select(where_clause: &str) -> String {
+    format!(
+        "SELECT id, cron, prompt, session_id, channel, chat_id, allowed_tools, next_run, \
+                enabled, created_at, last_run_at, last_status
+         FROM scheduled_tasks {where_clause}"
+    )
+}
+
+fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledTask> {
+    let id = row.get::<_, i64>(0)?;
+    let allowed = row.get::<_, String>(6)?;
+    let allowed_tools = serde_json::from_str::<Vec<String>>(&allowed).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    let id = u64::try_from(id).map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Integer,
+            "scheduled task id âm".into(),
+        )
+    })?;
+    Ok(ScheduledTask {
+        id,
+        cron: row.get(1)?,
+        prompt: row.get(2)?,
+        session_id: row.get::<_, Option<i64>>(3)?.map(SessionId::new),
+        channel: row.get(4)?,
+        chat_id: row.get(5)?,
+        allowed_tools,
+        next_run: row.get(7)?,
+        enabled: row.get::<_, i64>(8)? != 0,
+        created_at: row.get(9)?,
+        last_run_at: row.get(10)?,
+        last_status: row.get(11)?,
+    })
+}
+
 fn list_tasks(conn: &Connection) -> Result<Vec<ScheduledTask>, StoreError> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, cron, prompt, channel, chat_id, allowed_tools, next_run, enabled \
-             FROM scheduled_tasks ORDER BY id DESC",
-        )
+        .prepare(&task_select("ORDER BY id DESC"))
+        .map_err(internal)?;
+    let rows = stmt.query_map([], task_from_row).map_err(internal)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(internal)
+}
+
+fn list_tasks_for_session(
+    conn: &Connection,
+    session: SessionId,
+) -> Result<Vec<ScheduledTask>, StoreError> {
+    let mut stmt = conn
+        .prepare(&task_select("WHERE session_id = ?1 ORDER BY id DESC"))
         .map_err(internal)?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, i64>(7)?,
-            ))
-        })
+        .query_map(params![session.get()], task_from_row)
         .map_err(internal)?;
-    let mut tasks = Vec::new();
-    for row in rows {
-        let (id, cron, prompt, channel, chat_id, allowed, next_run, enabled) =
-            row.map_err(internal)?;
-        let id = u64::try_from(id)
-            .map_err(|_| StoreError::Internal("scheduled task id âm tính trong SQLite".into()))?;
-        let allowed_tools = serde_json::from_str::<Vec<String>>(&allowed).map_err(|error| {
-            StoreError::Internal(format!("scheduled task allowed_tools hỏng: {error}"))
-        })?;
-        tasks.push(ScheduledTask {
-            id,
-            cron,
-            prompt,
-            channel,
-            chat_id,
-            allowed_tools,
-            next_run,
-            enabled: enabled != 0,
-        });
-    }
-    Ok(tasks)
+    rows.collect::<Result<Vec<_>, _>>().map_err(internal)
 }
 
 fn create_task(conn: &Connection, task: NewScheduledTask) -> Result<ScheduledTask, StoreError> {
     let allowed_tools = serde_json::to_string(&task.allowed_tools).map_err(|error| {
         StoreError::Internal(format!("serialize allowed_tools thất bại: {error}"))
     })?;
+    let created_at = now_rfc3339();
+    let last_status = if task.enabled { "pending" } else { "disabled" };
     conn.execute(
-        "INSERT INTO scheduled_tasks(cron, prompt, channel, chat_id, allowed_tools, next_run, enabled) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO scheduled_tasks
+           (cron, prompt, session_id, channel, chat_id, allowed_tools, next_run, enabled,
+            created_at, last_run_at, last_status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)",
         params![
             task.cron,
             task.prompt,
+            task.session_id.map(|session| session.get()),
             task.channel,
             task.chat_id,
             allowed_tools,
             task.next_run,
             i64::from(task.enabled),
+            created_at,
+            last_status,
         ],
     )
     .map_err(internal)?;
@@ -2735,55 +3089,28 @@ fn create_task(conn: &Connection, task: NewScheduledTask) -> Result<ScheduledTas
         id,
         cron: task.cron,
         prompt: task.prompt,
+        session_id: task.session_id,
         channel: task.channel,
         chat_id: task.chat_id,
         allowed_tools: task.allowed_tools,
         next_run: task.next_run,
         enabled: task.enabled,
+        created_at,
+        last_run_at: None,
+        last_status: last_status.into(),
     })
 }
 
 fn load_task(conn: &Connection, id: u64) -> Result<Option<ScheduledTask>, StoreError> {
     let id_i64 = i64::try_from(id)
         .map_err(|_| StoreError::Internal("scheduled task id vượt giới hạn SQLite".into()))?;
-    let row = conn
-        .query_row(
-            "SELECT id, cron, prompt, channel, chat_id, allowed_tools, next_run, enabled \
-             FROM scheduled_tasks WHERE id = ?1",
-            params![id_i64],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, i64>(7)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(internal)?;
-    let Some((stored_id, cron, prompt, channel, chat_id, allowed, next_run, enabled)) = row else {
-        return Ok(None);
-    };
-    let stored_id = u64::try_from(stored_id)
-        .map_err(|_| StoreError::Internal("scheduled task id âm tính trong SQLite".into()))?;
-    let allowed_tools = serde_json::from_str::<Vec<String>>(&allowed).map_err(|error| {
-        StoreError::Internal(format!("scheduled task allowed_tools hỏng: {error}"))
-    })?;
-    Ok(Some(ScheduledTask {
-        id: stored_id,
-        cron,
-        prompt,
-        channel,
-        chat_id,
-        allowed_tools,
-        next_run,
-        enabled: enabled != 0,
-    }))
+    conn.query_row(
+        &task_select("WHERE id = ?1"),
+        params![id_i64],
+        task_from_row,
+    )
+    .optional()
+    .map_err(internal)
 }
 
 fn set_task_enabled(
@@ -2795,7 +3122,14 @@ fn set_task_enabled(
         .map_err(|_| StoreError::Internal("scheduled task id vượt giới hạn SQLite".into()))?;
     let changed = conn
         .execute(
-            "UPDATE scheduled_tasks SET enabled = ?2 WHERE id = ?1",
+            "UPDATE scheduled_tasks
+                SET enabled = ?2,
+                    last_status = CASE
+                        WHEN ?2 = 0 THEN 'disabled'
+                        WHEN last_status = 'disabled' THEN 'pending'
+                        ELSE last_status
+                    END
+              WHERE id = ?1",
             params![id_i64, i64::from(enabled)],
         )
         .map_err(internal)?;
@@ -2805,11 +3139,76 @@ fn set_task_enabled(
     load_task(conn, id)
 }
 
+fn delete_task_for_session(
+    conn: &Connection,
+    id: u64,
+    session: SessionId,
+) -> Result<bool, StoreError> {
+    let id_i64 = i64::try_from(id)
+        .map_err(|_| StoreError::Internal("scheduled task id vượt giới hạn SQLite".into()))?;
+    Ok(conn
+        .execute(
+            "DELETE FROM scheduled_tasks WHERE id = ?1 AND session_id = ?2",
+            params![id_i64, session.get()],
+        )
+        .map_err(internal)?
+        > 0)
+}
+
 fn delete_task(conn: &Connection, id: u64) -> Result<bool, StoreError> {
     let id_i64 = i64::try_from(id)
         .map_err(|_| StoreError::Internal("scheduled task id vượt giới hạn SQLite".into()))?;
     Ok(conn
         .execute("DELETE FROM scheduled_tasks WHERE id = ?1", params![id_i64])
+        .map_err(internal)?
+        > 0)
+}
+
+fn due_tasks(conn: &Connection, now: &str, limit: usize) -> Result<Vec<ScheduledTask>, StoreError> {
+    let mut stmt = conn
+        .prepare(&task_select(
+            "WHERE enabled = 1 AND last_status != 'running' AND next_run <= ?1
+             ORDER BY next_run, id LIMIT ?2",
+        ))
+        .map_err(internal)?;
+    let rows = stmt
+        .query_map(params![now, sql_limit(limit)], task_from_row)
+        .map_err(internal)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(internal)
+}
+
+fn claim_task(
+    conn: &Connection,
+    id: u64,
+    expected_next_run: &str,
+    next_run: &str,
+    last_run_at: &str,
+    status: &str,
+) -> Result<Option<ScheduledTask>, StoreError> {
+    let id_i64 = i64::try_from(id)
+        .map_err(|_| StoreError::Internal("scheduled task id vượt giới hạn SQLite".into()))?;
+    let changed = conn
+        .execute(
+            "UPDATE scheduled_tasks
+                SET next_run = ?2, last_run_at = ?3, last_status = ?4
+              WHERE id = ?1 AND enabled = 1 AND next_run = ?5",
+            params![id_i64, next_run, last_run_at, status, expected_next_run],
+        )
+        .map_err(internal)?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    load_task(conn, id)
+}
+
+fn set_task_status(conn: &Connection, id: u64, status: &str) -> Result<bool, StoreError> {
+    let id_i64 = i64::try_from(id)
+        .map_err(|_| StoreError::Internal("scheduled task id vượt giới hạn SQLite".into()))?;
+    Ok(conn
+        .execute(
+            "UPDATE scheduled_tasks SET last_status = ?2 WHERE id = ?1",
+            params![id_i64, status],
+        )
         .map_err(internal)?
         > 0)
 }
@@ -3561,7 +3960,7 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     /// Tiêu đề phiên lấy từ **dòng đầu** của tin đầu tiên do người dùng gửi (mục 8.1).

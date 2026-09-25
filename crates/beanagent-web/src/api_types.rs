@@ -306,7 +306,10 @@ pub struct NotImplementedResponse {
 #[serde(deny_unknown_fields)]
 #[ts(export)]
 pub struct TaskRequest {
-    /// Cron UTC theo cấu hình scheduler.
+    /// Session sẽ chạy task; nếu bỏ trống, server dùng session đang hoạt động của channel/chat.
+    #[serde(default)]
+    pub session_id: Option<i64>,
+    /// Cron theo timezone cấu hình của agent, ví dụ `0 7 * * *`.
     pub cron: String,
     /// Prompt sẽ chạy.
     pub prompt: String,
@@ -326,6 +329,8 @@ pub struct TaskRequest {
 pub struct TaskDto {
     /// ID tác vụ.
     pub id: u64,
+    /// Session sở hữu tác vụ.
+    pub session_id: i64,
     /// Cron.
     pub cron: String,
     /// Prompt.
@@ -340,6 +345,12 @@ pub struct TaskDto {
     pub next_run: String,
     /// Đang bật hay không.
     pub enabled: bool,
+    /// Thời điểm tạo UTC.
+    pub created_at: String,
+    /// Lần chạy gần nhất UTC nếu có.
+    pub last_run_at: Option<String>,
+    /// Trạng thái lần chạy gần nhất.
+    pub last_status: String,
 }
 
 /// Danh sách tác vụ định kỳ.

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use axum::serve;
 use beanagent_channels::TelegramChannel;
-use beanagent_core::{Channel, Router, RouterDeps};
+use beanagent_core::{Channel, Router, RouterDeps, Scheduler};
 use beanagent_memory::{SqliteStore, Store};
 use beanagent_skills::SkillCatalog;
 use beanagent_types::Config;
@@ -103,6 +103,14 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         audit: audit.clone(),
         skills_index,
     }));
+    let scheduler = Arc::new(
+        Scheduler::new(
+            store_dyn.clone(),
+            router.clone(),
+            config.agent.timezone.clone(),
+        )
+        .context("không khởi tạo được scheduler")?,
+    );
 
     let mut web_listener = None;
     if web_enabled {
@@ -142,6 +150,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         .context("không khởi động được worker outbox")?;
 
     let shutdown = CancellationToken::new();
+    let scheduler_shutdown = shutdown.clone();
+    let scheduler_task = tokio::spawn(async move {
+        scheduler.run(scheduler_shutdown).await;
+    });
     let web_shutdown = shutdown.clone();
     let telegram_shutdown = shutdown.clone();
     let telegram_router = router.clone();
@@ -205,5 +217,6 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         }
     }
     router.shutdown();
+    let _ = scheduler_task.await;
     result
 }

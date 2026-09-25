@@ -22,6 +22,7 @@ pub mod context;
 pub mod prompt;
 pub mod router;
 pub mod run_io;
+pub mod scheduler;
 pub mod store;
 
 pub use agent::{EndReason, RunOutcome, RunTurnArgs, run_turn, run_turn_outcome};
@@ -32,4 +33,7 @@ pub use router::{
     RouterSnapshot, RunningInfo,
 };
 pub use run_io::{Decision, RunIo};
+pub use scheduler::{
+    Clock, FixedClock, Scheduler, SchedulerError, SystemClock, next_run_after, schedule_tools,
+};
 pub use store::{MemoryStore, SqliteStore, Store, memory_tools};

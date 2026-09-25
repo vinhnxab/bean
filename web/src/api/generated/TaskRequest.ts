@@ -6,7 +6,11 @@
  */
 export type TaskRequest = { 
 /**
- * Cron UTC theo cấu hình scheduler.
+ * Session sẽ chạy task; nếu bỏ trống, server dùng session đang hoạt động của channel/chat.
+ */
+session_id: number | null, 
+/**
+ * Cron theo timezone cấu hình của agent, ví dụ `0 7 * * *`.
  */
 cron: string, 
 /**

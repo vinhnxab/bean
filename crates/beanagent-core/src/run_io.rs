@@ -50,6 +50,18 @@ pub trait RunIo: Send + Sync + 'static {
         None
     }
 
+    /// `true` khi run do scheduler gọi tự động, không có người xác nhận.
+    ///
+    /// Mặc định `false` để các adapter/run cũ giữ nguyên hành vi interactive.
+    fn is_background(&self) -> bool {
+        false
+    }
+
+    /// Tool Confirm/Dangerous được scheduler cho phép tự động hay không.
+    fn background_tool_allowed(&self, _tool: &str) -> bool {
+        false
+    }
+
     /// Nhận `CancellationToken` để kiểm tra huỷ giữa chừng (adapter có thể ignore nếu
     /// không hỗ trợ huỷ — ví dụ web không huỷ khi đóng tab).
     fn cancel_token(&self) -> &CancellationToken;

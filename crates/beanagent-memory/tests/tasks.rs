@@ -6,6 +6,7 @@ fn input() -> NewScheduledTask {
     NewScheduledTask {
         cron: "0 9 * * *".into(),
         prompt: "daily summary".into(),
+        session_id: None,
         channel: "web".into(),
         chat_id: "web:admin".into(),
         allowed_tools: vec!["web_fetch".into()],
