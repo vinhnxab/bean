@@ -4,7 +4,15 @@
 //! `tools/list`, rồi đăng ký từng tool thành `mcp__<server>__<tool>`. Server lỗi hoặc treo
 //! chỉ bị log và bỏ qua; registry built-in vẫn dùng được để agent khởi động.
 
-use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use beanagent_types::{Risk, ToolSpec, config::McpServerConfig as ServerConfig};
@@ -14,7 +22,11 @@ use rmcp::{
     service::{RoleClient, RunningService},
     transport::TokioChildProcess,
 };
-use tokio::{process::Command, sync::Mutex, time::timeout};
+use tokio::{
+    process::Command,
+    sync::Mutex,
+    time::{sleep, timeout},
+};
 
 use crate::{ToolCtx, ToolError, ToolRegistry, tool::Tool, untrusted::wrap};
 
@@ -22,8 +34,16 @@ const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_RECONNECT_DELAY: Duration = Duration::from_secs(1);
+const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 type ClientService = RunningService<RoleClient, ()>;
+
+#[derive(Debug)]
+enum McpCallFailure {
+    Timeout,
+    Transport(String),
+}
 
 /// Các timeout của một kết nối MCP.
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +56,8 @@ pub struct McpTimeouts {
     pub call: Duration,
     /// Timeout đóng service và tiến trình con.
     pub shutdown: Duration,
+    /// Backoff tối thiểu trước khi thử lại một stdio server bị rớt.
+    pub reconnect: Duration,
 }
 
 impl Default for McpTimeouts {
@@ -45,6 +67,7 @@ impl Default for McpTimeouts {
             discover: DEFAULT_DISCOVERY_TIMEOUT,
             call: DEFAULT_CALL_TIMEOUT,
             shutdown: DEFAULT_SHUTDOWN_TIMEOUT,
+            reconnect: DEFAULT_RECONNECT_DELAY,
         }
     }
 }
@@ -117,47 +140,107 @@ fn validate_spawn_config(server: &ServerConfig) -> Result<(), McpError> {
     Ok(())
 }
 
-/// Một kết nối stdio tới server, dùng chung cho các tool của server đó.
-#[derive(Debug)]
+async fn connect_service(
+    server: &ServerConfig,
+    timeouts: McpTimeouts,
+) -> Result<ClientService, McpError> {
+    validate_spawn_config(server)?;
+    let mut command = Command::new(&server.command);
+    command.args(&server.args).env_clear().kill_on_drop(true);
+    // Không kế thừa toàn bộ host env (có thể chứa secret); chỉ truyền env khai báo.
+    for (key, value) in &server.env {
+        command.env(key, value);
+    }
+    let connecting = async {
+        let transport = TokioChildProcess::new(command).map_err(|error| {
+            McpError::server(&server.name, format!("không spawn được: {error}"))
+        })?;
+        let service = ().serve(transport).await.map_err(|error| {
+            McpError::server(&server.name, format!("initialize thất bại: {error}"))
+        })?;
+        Ok::<ClientService, McpError>(service)
+    };
+    timeout(timeouts.connect, connecting)
+        .await
+        .map_err(|_| McpError::ConnectTimeout {
+            server: server.name.clone(),
+            timeout: timeouts.connect,
+        })?
+}
+
 struct McpConnection {
     server: String,
+    config: ServerConfig,
     timeouts: McpTimeouts,
     // `RunningService::call_tool_*` nhận `&self`; Mutex giữ quyền sở hữu khi shutdown
     // và ngăn service bị đóng giữa lúc một tool call đang chạy.
     service: Mutex<Option<ClientService>>,
+    reconnect_lock: Mutex<()>,
+    reconnect_failures: AtomicU32,
+}
+
+impl fmt::Debug for McpConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("McpConnection")
+            .field("server", &self.server)
+            .field("trusted", &self.config.trust)
+            .field("reconnect_failures", &self.reconnect_failures)
+            .finish_non_exhaustive()
+    }
 }
 
 impl McpConnection {
     async fn connect(server: &ServerConfig, timeouts: McpTimeouts) -> Result<Self, McpError> {
-        validate_spawn_config(server)?;
-        let mut command = Command::new(&server.command);
-        command.args(&server.args).env_clear().kill_on_drop(true);
-        // Không kế thừa toàn bộ host env (có thể chứa secret); chỉ truyền env khai báo.
-        for (key, value) in &server.env {
-            command.env(key, value);
-        }
-
-        let connecting = async {
-            let transport = TokioChildProcess::new(command).map_err(|error| {
-                McpError::server(&server.name, format!("không spawn được: {error}"))
-            })?;
-            let service = ().serve(transport).await.map_err(|error| {
-                McpError::server(&server.name, format!("initialize thất bại: {error}"))
-            })?;
-            Ok::<ClientService, McpError>(service)
-        };
-
-        let service = timeout(timeouts.connect, connecting).await.map_err(|_| {
-            McpError::ConnectTimeout {
-                server: server.name.clone(),
-                timeout: timeouts.connect,
-            }
-        })??;
+        let service = connect_service(server, timeouts).await?;
         Ok(Self {
             server: server.name.clone(),
+            config: server.clone(),
             timeouts,
             service: Mutex::new(Some(service)),
+            reconnect_lock: Mutex::new(()),
+            reconnect_failures: AtomicU32::new(0),
         })
+    }
+
+    async fn reconnect(&self) -> Result<(), McpError> {
+        let _guard = self.reconnect_lock.lock().await;
+        if let Some(old_service) = self.service.lock().await.take() {
+            // Call đang treo có thể không đóng trong shutdown timeout; drop RunningService
+            // để TokioChildProcess kill/reap child ngay, rồi spawn instance mới.
+            drop(old_service);
+        }
+        let attempt = self.reconnect_failures.fetch_add(1, Ordering::AcqRel);
+        let multiplier = 1_u32 << attempt.min(5);
+        let delay = self
+            .timeouts
+            .reconnect
+            .saturating_mul(multiplier)
+            .min(MAX_RECONNECT_DELAY);
+        if !delay.is_zero() {
+            sleep(delay).await;
+        }
+        let service = connect_service(&self.config, self.timeouts).await?;
+        *self.service.lock().await = Some(service);
+        self.reconnect_failures.store(0, Ordering::Release);
+        Ok(())
+    }
+
+    async fn call_tool(
+        &self,
+        remote_name: &str,
+        arguments: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<CallToolResponse, McpCallFailure> {
+        let params = CallToolRequestParams::new(Cow::Owned(remote_name.to_owned()))
+            .with_arguments(arguments);
+        let service = self.service.lock().await;
+        let Some(service) = service.as_ref() else {
+            return Err(McpCallFailure::Transport("kết nối đã đóng".into()));
+        };
+        match timeout(self.timeouts.call, service.call_tool_once(params)).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(error)) => Err(McpCallFailure::Transport(error.to_string())),
+            Err(_) => Err(McpCallFailure::Timeout),
+        }
     }
 
     async fn discover(&self) -> Result<Vec<rmcp::model::Tool>, McpError> {
@@ -326,6 +409,20 @@ impl McpTool {
             .unwrap_or_else(|_| "{\"error\":\"không serialize được kết quả MCP\"}".to_string());
         ToolError::Mcp(wrap(&encoded))
     }
+
+    fn call_failure(&self, failure: McpCallFailure) -> ToolError {
+        let detail = match failure {
+            McpCallFailure::Timeout => format!(
+                "MCP tool `{}` treo sau {} ms",
+                self.spec.name,
+                self.connection.timeouts.call.as_millis()
+            ),
+            McpCallFailure::Transport(message) => {
+                format!("MCP tool `{}` lỗi transport: {message}", self.spec.name)
+            }
+        };
+        ToolError::Mcp(detail)
+    }
 }
 
 #[async_trait]
@@ -352,34 +449,35 @@ impl Tool for McpTool {
                 self.spec.parameters
             )));
         };
-        let params = CallToolRequestParams::new(Cow::Owned(self.remote_name.clone()))
-            .with_arguments(arguments);
-        let response = {
-            let service = self.connection.service.lock().await;
-            let Some(service) = service.as_ref() else {
-                return Err(ToolError::Mcp(format!(
-                    "MCP server `{}` đã đóng",
-                    self.connection.server
-                )));
-            };
-            timeout(
-                self.connection.timeouts.call,
-                service.call_tool_once(params),
-            )
-            .await
+        let mut retried = false;
+        let response = loop {
+            match self
+                .connection
+                .call_tool(&self.remote_name, arguments.clone())
+                .await
+            {
+                Ok(response) => break response,
+                Err(failure) if !retried => {
+                    retried = true;
+                    tracing::warn!(
+                        server = %self.connection.server,
+                        tool = %self.spec.name,
+                        ?failure,
+                        "MCP transport rớt; thực hiện reconnect một lần"
+                    );
+                    if let Err(error) = self.connection.reconnect().await {
+                        return Err(ToolError::Mcp(format!(
+                            "MCP server `{}` reconnect thất bại: {error}",
+                            self.connection.server
+                        )));
+                    }
+                }
+                Err(failure) => return Err(self.call_failure(failure)),
+            }
         };
 
         match response {
-            Err(_) => Err(ToolError::Mcp(format!(
-                "MCP tool `{}` treo sau {} ms",
-                self.spec.name,
-                self.connection.timeouts.call.as_millis()
-            ))),
-            Ok(Err(error)) => Err(Self::remote_error(
-                ctx,
-                serde_json::json!({ "error": error.to_string() }),
-            )),
-            Ok(Ok(CallToolResponse::Complete(result))) => {
+            CallToolResponse::Complete(result) => {
                 let is_error = result.is_error.unwrap_or(false);
                 let encoded = match serde_json::to_string(&result) {
                     Ok(encoded) => encoded,
@@ -398,19 +496,19 @@ impl Tool for McpTool {
                     Ok(wrapped)
                 }
             }
-            Ok(Ok(CallToolResponse::InputRequired(_))) => Err(Self::remote_error(
+            CallToolResponse::InputRequired(_) => Err(Self::remote_error(
                 ctx,
                 serde_json::json!({
                     "error": "MCP server yêu cầu input tương tác; BeanAgent chưa hỗ trợ MRTR input_required"
                 }),
             )),
-            Ok(Ok(CallToolResponse::Task(_))) => Err(Self::remote_error(
+            CallToolResponse::Task(_) => Err(Self::remote_error(
                 ctx,
                 serde_json::json!({
                     "error": "MCP server trả task handle; BeanAgent chưa hỗ trợ task polling"
                 }),
             )),
-            Ok(Ok(_)) => Err(Self::remote_error(
+            _ => Err(Self::remote_error(
                 ctx,
                 serde_json::json!({ "error": "MCP server trả loại kết quả không hỗ trợ" }),
             )),

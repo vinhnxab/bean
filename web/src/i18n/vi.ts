@@ -141,6 +141,8 @@ export const vi = {
   "status.description": "Thông tin runtime của BeanAgent được cập nhật định kỳ.",
   "status.version": "Phiên bản",
   "status.model": "Model",
+  "status.maxSteps": "Giới hạn bước / lượt",
+  "status.budgetExceeded": "Đã vượt ngân sách",
   "status.uptime": "Thời gian chạy",
   "status.tokenUsage": "Token hôm nay",
   "status.channels": "Kênh đang chạy",

@@ -24,6 +24,7 @@ describe("StatusPage", () => {
         HttpResponse.json({
           version: "0.1.0",
           model: "test-model",
+          max_steps: 25,
           daily_token_budget: 2000,
           tokens_used: 500,
           uptime_seconds: 3660,
@@ -34,6 +35,7 @@ describe("StatusPage", () => {
     renderManagement(<StatusPage />);
     expect(await screen.findByText("0.1.0")).toBeInTheDocument();
     expect(screen.getByText("test-model")).toBeInTheDocument();
+    expect(screen.getByText("25")).toBeInTheDocument();
     expect(screen.getByText("500 / 2,000")).toBeInTheDocument();
     expect(screen.getByText("telegram")).toBeInTheDocument();
   });

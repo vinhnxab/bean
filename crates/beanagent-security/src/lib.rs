@@ -21,7 +21,7 @@ pub mod ssrf;
 pub mod untrusted;
 pub mod web;
 
-pub use audit::{AuditEntry, AuditLog, entry_now, redact_secrets};
+pub use audit::{AuditEntry, AuditLog, entry_now, redact_secrets, redact_text_secrets};
 pub use paths::CapWorkspace;
 pub use policy::{DenyReason, Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 pub use sandbox::{Sandbox, SandboxError, ShellOutcome};

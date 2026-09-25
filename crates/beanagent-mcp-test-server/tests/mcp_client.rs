@@ -43,6 +43,7 @@ fn test_timeouts() -> McpTimeouts {
         discover: Duration::from_secs(2),
         call: Duration::from_millis(200),
         shutdown: Duration::from_secs(5),
+        reconnect: Duration::from_millis(1),
     }
 }
 
@@ -241,12 +242,45 @@ async fn bad_or_hanging_server_is_skipped_and_valid_server_still_loads() {
             discover: Duration::from_secs(2),
             call: Duration::from_millis(200),
             shutdown: Duration::from_secs(5),
+            reconnect: Duration::from_millis(1),
         },
     )
     .await;
 
     assert!(registry.get("mcp__fixture__echo").is_some());
     assert!(registry.names().iter().all(|name| !name.contains("broken")));
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn mcp_reconnects_after_stdio_server_drops() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("first-call-dropped");
+    let mut config = server_config(&["--drop-first-call"], true);
+    config.env.insert(
+        "BEANAGENT_MCP_TEST_DROP_FILE".into(),
+        marker.display().to_string(),
+    );
+    let (_workspace_dir, workspace) = workspace();
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    let mut runtime = McpRuntime::default();
+    runtime
+        .register_server(&config, &mut registry, test_timeouts())
+        .await
+        .unwrap();
+    let tool = registry.get("mcp__fixture__echo").unwrap();
+    let ctx = ToolCtx {
+        workspace: registry.workspace().unwrap(),
+        session: SessionId::new(9),
+        cancel: CancellationToken::new(),
+        untrusted_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let output = tool
+        .call(&ctx, serde_json::json!({ "text": "sau reconnect" }))
+        .await
+        .unwrap();
+    assert!(output.contains("echo: sau reconnect"), "{output}");
+    assert!(marker.exists());
     runtime.close().await;
 }
 

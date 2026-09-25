@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crate::store::Store;
+use crate::store::{Store, StoreError};
 use beanagent_llm::{LlmError, LlmProvider};
+use beanagent_memory::{ensure_daily_budget, record_usage};
 use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
 use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 use beanagent_security::untrusted::contains_untrusted_block;
@@ -58,6 +59,8 @@ pub enum EndReason {
     Final,
     /// Đạt giới hạn bước.
     MaxSteps,
+    /// Đã chạm hoặc vượt ngân sách token/ngày.
+    BudgetExceeded,
 }
 
 /// Kết quả đầy đủ cho Router; wrapper [`run_turn`] chỉ trả text để tương thích M3.
@@ -113,7 +116,22 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         Message::user(turn_input.clone()),
     )
     .await?;
-    store.compact(session, llm, config).await?;
+    match store.compact(session, llm, config).await {
+        Ok(()) => {}
+        Err(StoreError::BudgetExceeded { used, limit }) => {
+            return finish_with_notice(
+                store,
+                session,
+                transcript,
+                budget_notice(used, limit),
+                EndReason::BudgetExceeded,
+                tool_call_count,
+                loaded_skills,
+            )
+            .await;
+        }
+        Err(error) => return Err(error.into()),
+    }
     let mut failure_counts: HashMap<RepeatKey, u32> = HashMap::new();
     let mut consecutive_same_failure: Option<RepeatKey> = None;
     // (M4, mục 15.4) Cờ untrusted dùng chung cho MỌI tool trong lượt — khi một tool
@@ -150,6 +168,23 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             messages.push(Message::user(turn_input.clone()));
         }
 
+        let usage_day = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        match ensure_daily_budget(store, &usage_day, config.security.daily_token_budget).await {
+            Ok(()) => {}
+            Err(StoreError::BudgetExceeded { used, limit }) => {
+                return finish_with_notice(
+                    store,
+                    session,
+                    transcript,
+                    budget_notice(used, limit),
+                    EndReason::BudgetExceeded,
+                    tool_call_count,
+                    loaded_skills,
+                )
+                .await;
+            }
+            Err(error) => return Err(error.into()),
+        }
         let tool_specs: Vec<ToolSpec> = registry.specs();
         let req = beanagent_llm::ChatRequest {
             system: &system,
@@ -164,12 +199,20 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             response = chat => response?,
         };
 
-        store
-            .add_usage(
-                &chrono::Utc::now().format("%Y-%m-%d").to_string(),
-                resp.usage,
+        let usage = record_usage(store, &usage_day, resp.usage).await?;
+        let used = u64::from(usage.total());
+        if used > config.security.daily_token_budget {
+            return finish_with_notice(
+                store,
+                session,
+                transcript,
+                budget_notice(used, config.security.daily_token_budget),
+                EndReason::BudgetExceeded,
+                tool_call_count,
+                loaded_skills,
             )
-            .await?;
+            .await;
+        }
         let is_final = resp.tool_calls.is_empty();
         let final_text = resp.text.clone().unwrap_or_default();
         let assistant_message = Message::from_response(&resp);
@@ -439,15 +482,52 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         }
     }
 
-    let text = "Đã đạt giới hạn số bước. Hãy nói tiếp nếu muốn tôi tiếp tục.";
+    let text = format!(
+        "Đã dừng sau {} bước: đã đạt giới hạn số bước. Hãy nói tiếp nếu muốn tôi tiếp tục.",
+        config.agent.max_steps
+    );
+    finish_with_notice(
+        store,
+        session,
+        transcript,
+        text,
+        EndReason::MaxSteps,
+        tool_call_count,
+        loaded_skills,
+    )
+    .await
+}
+
+async fn finish_with_notice(
+    store: &dyn Store,
+    session: beanagent_types::SessionId,
+    mut transcript: Vec<Message>,
+    text: String,
+    ended: EndReason,
+    tool_call_count: usize,
+    loaded_skills: BTreeSet<String>,
+) -> Result<RunOutcome, AgentError> {
+    let message_id = append_run_message(
+        store,
+        session,
+        &mut transcript,
+        Message::assistant(Some(text.clone()), Vec::new()),
+    )
+    .await?;
     Ok(RunOutcome {
-        text: text.into(),
-        message_id: None,
-        ended: EndReason::MaxSteps,
+        text,
+        message_id: Some(message_id),
+        ended,
         tool_call_count,
         loaded_skills: loaded_skills.into_iter().collect(),
         transcript,
     })
+}
+
+fn budget_notice(used: u64, limit: u64) -> String {
+    format!(
+        "Đã dừng: ngân sách token/ngày đã đạt {used}/{limit} token. Hãy tiếp tục vào ngày mới hoặc tăng `security.daily_token_budget`."
+    )
 }
 
 async fn append_run_message(

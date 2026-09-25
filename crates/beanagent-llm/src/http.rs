@@ -3,8 +3,10 @@
 //! reqwest 0.13 dùng **rustls** làm backend mặc định — không kéo OpenSSL, đúng yêu cầu
 //! agents.md mục 3.1. Header nhạy cảm (API key) không bao giờ được log ở đây.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
+use regex::Regex;
 use reqwest::Client;
 
 use crate::LlmError;
@@ -14,6 +16,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Trần ký tự khi nhúng body lỗi vào [`LlmError::HttpStatus`].
 const MAX_ERROR_BODY_CHARS: usize = 500;
+static ERROR_SECRET_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
 
 /// Tạo `reqwest::Client`: rustls, timeout, connect-timeout và User-Agent riêng.
 ///
@@ -41,10 +44,20 @@ pub fn to_transport_error(err: reqwest::Error) -> LlmError {
 /// Cắt body lỗi xuống mức an toàn để nhúng vào [`LlmError::HttpStatus`] (giữ ranh giới ký tự).
 #[must_use]
 pub fn truncate_body(text: &str) -> String {
-    if text.chars().count() <= MAX_ERROR_BODY_CHARS {
-        return text.to_string();
+    let pattern = ERROR_SECRET_PATTERN.get_or_init(|| {
+        Regex::new(
+            r"(?i)(sk-[A-Za-z0-9_-]{6,}|Bearer\s+[A-Za-z0-9._~+/=-]{6,}|(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|authorization)\s*[:=]\s*[^\s,;]+)",
+        )
+        .ok()
+    });
+    let redacted = pattern.as_ref().map_or_else(
+        || text.to_string(),
+        |regex| regex.replace_all(text, "[REDACTED]").into_owned(),
+    );
+    if redacted.chars().count() <= MAX_ERROR_BODY_CHARS {
+        return redacted;
     }
-    let cut: String = text.chars().take(MAX_ERROR_BODY_CHARS).collect();
+    let cut: String = redacted.chars().take(MAX_ERROR_BODY_CHARS).collect();
     format!("{cut}… [đã cắt]")
 }
 

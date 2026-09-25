@@ -50,6 +50,8 @@ pub struct StatusResponse {
     pub version: String,
     /// Model đang dùng.
     pub model: String,
+    /// Trần số bước của một lượt chat.
+    pub max_steps: u32,
     /// Ngân sách token/ngày.
     pub daily_token_budget: u64,
     /// Token đã dùng hôm nay.

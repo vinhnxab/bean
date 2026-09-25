@@ -3,6 +3,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use axum::serve;
@@ -152,7 +153,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
 
     let shutdown = CancellationToken::new();
     let scheduler_shutdown = shutdown.clone();
-    let scheduler_task = tokio::spawn(async move {
+    let mut scheduler_task = tokio::spawn(async move {
         scheduler.run(scheduler_shutdown).await;
     });
     let web_shutdown = shutdown.clone();
@@ -181,44 +182,84 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     };
     tokio::pin!(web_future);
     tokio::pin!(telegram_future);
+    #[derive(Clone, Copy)]
     enum FirstExit {
         Signal,
         Web,
         Telegram,
     }
     let (first_exit, result) = tokio::select! {
-        signal = tokio::signal::ctrl_c() => {
-            if let Err(error) = signal {
-                tracing::warn!(%error, "không lắng nghe được Ctrl-C");
+        signal = wait_for_shutdown_signal() => {
+            match signal {
+                Ok(signal) => {
+                    tracing::info!(signal, "nhận tín hiệu dừng êm");
+                    (FirstExit::Signal, Ok(()))
+                }
+                Err(error) => {
+                    tracing::error!(%error, "không lắng nghe được tín hiệu dừng");
+                    (FirstExit::Signal, Err(error))
+                }
             }
-            (FirstExit::Signal, Ok(()))
         }
         result = &mut web_future => (FirstExit::Web, result),
         result = &mut telegram_future => (FirstExit::Telegram, result),
     };
     shutdown.cancel();
-    match first_exit {
-        FirstExit::Signal => {
-            if web_enabled {
-                let _ = web_future.await;
-            }
-            if telegram_enabled {
-                let _ = telegram_future.await;
-            }
+    router.shutdown();
+    let grace = Duration::from_secs(20);
+    if web_enabled && !matches!(first_exit, FirstExit::Web) {
+        match tokio::time::timeout(grace, &mut web_future).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!(%error, "web dừng lỗi trong graceful shutdown"),
+            Err(_) => tracing::warn!("web chưa đóng trong 20s; tiếp tục shutdown"),
         }
-        FirstExit::Web => {
-            if telegram_enabled {
-                let _ = telegram_future.await;
-            }
+    }
+    if telegram_enabled && !matches!(first_exit, FirstExit::Telegram) {
+        match tokio::time::timeout(grace, &mut telegram_future).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!(%error, "Telegram dừng lỗi trong graceful shutdown"),
+            Err(_) => tracing::warn!("Telegram chưa đóng trong 20s; tiếp tục shutdown"),
         }
-        FirstExit::Telegram => {
-            if web_enabled {
-                let _ = web_future.await;
+    }
+    match tokio::time::timeout(grace, &mut scheduler_task).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::warn!(%error, "scheduler worker kết thúc lỗi"),
+        Err(_) => {
+            scheduler_task.abort();
+            tracing::warn!("scheduler chưa đóng trong 20s; đã abort worker");
+        }
+    }
+    if tokio::time::timeout(Duration::from_secs(5), mcp.close())
+        .await
+        .is_err()
+    {
+        tracing::warn!("MCP chưa đóng trong 5s; tiến trình sẽ reap child khi drop");
+    }
+    result
+}
+
+async fn wait_for_shutdown_signal() -> Result<&'static str> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .context("không lắng nghe được SIGTERM")?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.context("không lắng nghe được SIGINT")?;
+                Ok("SIGINT")
+            }
+            signal = terminate.recv() => {
+                signal.context("stream SIGTERM đã đóng")?;
+                Ok("SIGTERM")
             }
         }
     }
-    router.shutdown();
-    let _ = scheduler_task.await;
-    mcp.close().await;
-    result
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .context("không lắng nghe được Ctrl-C")?;
+        Ok("SIGINT")
+    }
 }

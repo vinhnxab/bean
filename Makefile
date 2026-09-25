@@ -9,7 +9,7 @@ BIN := BeanAgent
 
 .DEFAULT_GOAL := help
 
-.PHONY: help types check-rust check-web check audit build build-headless e2e \
+.PHONY: help types check-rust check-web check audit build build-headless e2e smoke-scheduler \
         fmt lint test dev-web run-chat clean
 
 help: ## In danh sách target
@@ -17,13 +17,13 @@ help: ## In danh sách target
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 types: ## Sinh và kiểm tra kiểu TypeScript từ Rust (ts-rs)
-	$(CARGO) test --workspace export_bindings
+	$(CARGO) test --workspace export_bindings --locked
 	git diff --exit-code -- web/src/api/generated
 
 check-rust: ## cargo fmt + clippy + test toàn workspace + kiểm tra kiểu sinh
 	$(CARGO) fmt --all --check
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
-	$(CARGO) test --workspace
+	$(CARGO) test --workspace --locked
 	$(MAKE) types
 
 check-web: ## Biome + tsc + vitest + build production
@@ -34,23 +34,36 @@ check-web: ## Biome + tsc + vitest + build production
 
 check: check-rust check-web ## Cổng chất lượng của mỗi milestone
 
-audit: ## cargo audit + pnpm audit --prod (mục 15.10)
-	@if command -v cargo-audit >/dev/null 2>&1; then \
-		$(CARGO) audit; \
+# RUSTSEC-2026-0173 là cảnh báo unmaintained của aquamarine, chỉ nằm trong
+# teloxide 0.17 (latest hiện tại); không phải vulnerability và không có bản sửa.
+# Giữ ignore tường minh để `make audit` không báo pass giả.
+
+audit: ## cargo audit (strict) + pnpm audit --prod
+	@set -e; \
+	if command -v cargo-audit >/dev/null 2>&1; then \
+		$(CARGO) audit -D warnings --ignore RUSTSEC-2026-0173; \
+	elif command -v cargo-deny >/dev/null 2>&1; then \
+		$(CARGO) deny check advisories; \
 	else \
-		echo "!! cargo-audit chưa cài — bỏ qua phần Rust (xem README/PROMPTS.md phần Chuẩn bị)"; \
+		echo "cần cài cargo-audit hoặc cargo-deny để chạy audit Rust" >&2; \
+		exit 1; \
 	fi
 	cd $(WEB_DIR) && $(PNPM) audit --prod
 
-build: ## Build web -> build Rust release (nhúng UI, feature `ui`)
+build: ## Build web -> build Rust release (UI embedded, locked)
 	cd $(WEB_DIR) && $(PNPM) build
-	$(CARGO) build --release -p $(BIN)
+	$(CARGO) build --release --locked -p $(BIN) --features ui
 
-build-headless: ## Build Rust release KHÔNG UI, không cần Node
-	$(CARGO) build --release --no-default-features
+build-headless: ## Build Rust release without UI, no Node required
+	$(CARGO) build --release --locked --no-default-features
 
-e2e: ## Bộ test end-to-end (mục 20, làm ở M16)
-	@echo "make e2e: chưa có (M16)"
+e2e: ## Binary E2E: login -> chat -> confirm -> Stop -> reconnect Sync
+	$(CARGO) test --locked -p $(BIN) --test m16_e2e -- --nocapture
+	$(CARGO) test --locked -p beanagent-channels allowlist_blocks_unknown_user_without_reply -- --nocapture
+
+smoke-scheduler: ## M16 scheduler smoke: 1 virtual hour with 1ms tick
+	$(CARGO) test --locked -p beanagent-core --test scheduler one_hour_scheduler_smoke_with_fast_tick -- --nocapture
+
 
 fmt: ## Định dạng code
 	$(CARGO) fmt --all
@@ -61,7 +74,7 @@ lint: ## Chỉ lint
 	cd $(WEB_DIR) && $(PNPM) exec biome check .
 
 test: ## Chạy test
-	$(CARGO) test --workspace
+	$(CARGO) test --workspace --locked
 	cd $(WEB_DIR) && $(PNPM) exec vitest run
 
 dev-web: ## Vite dev server (proxy /api -> 127.0.0.1:7878)

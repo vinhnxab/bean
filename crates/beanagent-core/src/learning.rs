@@ -4,6 +4,7 @@
 //! theo schema cứng trước khi ghi bất kỳ file nào.
 
 use beanagent_llm::{ChatRequest, LlmProvider};
+use beanagent_memory::{StoreError, ensure_daily_budget, record_usage};
 use beanagent_security::untrusted::wrap;
 use beanagent_skills::{NewSkillDraft, SkillCatalog, SkillDraft, SkillDraftKind};
 use beanagent_tools::truncate_chars;
@@ -80,18 +81,27 @@ pub(crate) async fn reflect(args: ReflectionArgs<'_>) -> Result<Option<SkillDraf
         tools: &[],
         max_tokens: args.config.llm.max_tokens,
     };
+    let usage_day = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    ensure_daily_budget(
+        args.store,
+        &usage_day,
+        args.config.security.daily_token_budget,
+    )
+    .await?;
     let call = args.llm.chat_with_model(request, &args.config.llm.model);
     let response = tokio::select! {
         biased;
         _ = args.cancel.cancelled() => return Ok(None),
         response = call => response.map_err(|error| LearningError::Provider(error.to_string()))?,
     };
-    args.store
-        .add_usage(
-            &chrono::Utc::now().format("%Y-%m-%d").to_string(),
-            response.usage,
-        )
-        .await?;
+    let usage = record_usage(args.store, &usage_day, response.usage).await?;
+    let used = u64::from(usage.total());
+    if used > args.config.security.daily_token_budget {
+        return Err(LearningError::Store(StoreError::BudgetExceeded {
+            used,
+            limit: args.config.security.daily_token_budget,
+        }));
+    }
     if !response.tool_calls.is_empty() {
         return Err(LearningError::UnexpectedToolCall);
     }

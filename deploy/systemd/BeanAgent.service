@@ -1,0 +1,50 @@
+[Unit]
+Description=BeanAgent personal AI agent
+Documentation=https://github.com/BeanAgent/BeanAgent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=beanagent
+Group=beanagent
+# Docker socket access is equivalent to root on the host. Remove this line and
+# use a rootless Docker/Podman sandbox if that trust boundary is unacceptable.
+SupplementaryGroups=docker
+WorkingDirectory=/srv/beanagent
+ExecStart=/usr/local/bin/BeanAgent --config /etc/beanagent/BeanAgent.toml serve
+EnvironmentFile=-/etc/beanagent/beanagent.env
+Environment=RUST_LOG=info,beanagent_security=warn
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# State/config directories are created by systemd; the workspace is provisioned
+# by the administrator because it is the only directory intentionally writable
+# by the agent.
+StateDirectory=beanagent
+StateDirectoryMode=0700
+ConfigurationDirectory=beanagent
+UMask=0077
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/beanagent /srv/beanagent/workspace
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

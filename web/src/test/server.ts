@@ -24,6 +24,7 @@ export const testServer = setupServer(
     HttpResponse.json({
       version: "0.1.0",
       model: "fake-model",
+      max_steps: 25,
       daily_token_budget: 1000,
       tokens_used: 0,
       uptime_seconds: 0,

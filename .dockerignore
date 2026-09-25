@@ -1,0 +1,13 @@
+.git
+.gitignore
+target
+web/node_modules
+web/dist
+web/coverage
+data
+workspace/*
+skills/_drafts
+*.log
+*.jsonl
+BeanAgent.toml
+auth.toml

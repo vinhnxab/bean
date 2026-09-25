@@ -331,3 +331,27 @@ async fn outbox_keeps_failed_notification_and_delivers_on_retry() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn one_hour_scheduler_smoke_with_fast_tick() {
+    let now = at(2026, 9, 26, 0, 0);
+    let responses = (0..60)
+        .map(|_| LlmResponse::text_only("tick"))
+        .collect::<Vec<_>>();
+    let (_temp, store, router, clock, channel) = fixture(responses, None, false, now).await;
+    let session = store
+        .ensure_session_for_user("test", "chat", "test:user", "")
+        .await
+        .unwrap();
+    let mut task = task_input(session, now, vec![]);
+    task.cron = "* * * * *".into();
+    store.create_task(task).await.unwrap();
+    let scheduler = Scheduler::with_clock(store, router, "UTC", clock.clone())
+        .unwrap()
+        .with_tick(Duration::from_millis(1));
+    for _ in 0..60 {
+        assert_eq!(scheduler.run_once().await.unwrap(), 1);
+        clock.advance(Duration::from_secs(60));
+    }
+    assert_eq!(channel.sent.lock().unwrap().len(), 60);
+}

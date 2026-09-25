@@ -479,6 +479,7 @@ async fn status(State(state): State<WebState>, jar: CookieJar) -> ApiResult<Json
     Ok(Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         model: state.config.llm.model.clone(),
+        max_steps: state.config.agent.max_steps,
         daily_token_budget: state.config.security.daily_token_budget,
         tokens_used: u64::from(usage.total()),
         uptime_seconds: state.started_at.elapsed().as_secs(),

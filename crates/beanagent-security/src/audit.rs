@@ -12,8 +12,9 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
+use regex::Regex;
 use serde::Serialize;
 
 /// Lỗi audit log.
@@ -28,7 +29,7 @@ pub enum AuditError {
 }
 
 /// Một bản ghi audit — một dòng JSONL.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AuditEntry {
     /// Thời điểm ghi (RFC3339 UTC).
     pub ts: String,
@@ -85,8 +86,11 @@ impl AuditLog {
     /// [`AuditError`] khi serialize/ghi thất bại. Lỗi ghi **không** được làm hỏng vòng
     /// lặp agent — caller nên log cảnh báo và tiếp tục.
     pub fn record(&self, entry: &AuditEntry) -> Result<(), AuditError> {
+        let mut safe = entry.clone();
+        safe.args = redact_secrets(&safe.args);
+        safe.error = safe.error.as_deref().map(redact_text_secrets);
         let mut line =
-            serde_json::to_string(entry).map_err(|e| AuditError::Internal(e.to_string()))?;
+            serde_json::to_string(&safe).map_err(|e| AuditError::Internal(e.to_string()))?;
         line.push('\n');
         let mut file = self
             .file
@@ -111,7 +115,11 @@ impl AuditLog {
         }
         lines
             .into_iter()
-            .filter_map(|line| serde_json::from_str(line).ok())
+            .filter_map(|line| {
+                let safe_line = redact_text_secrets(line);
+                let value = serde_json::from_str(&safe_line).ok()?;
+                Some(redact_secrets(&value))
+            })
             .collect()
     }
 }
@@ -141,6 +149,26 @@ const SENSITIVE_KEY_PARTS: &[&str] = &[
     "authorization",
     "credential",
 ];
+
+static TEXT_SECRET_PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+
+/// Redact token-shaped values and explicit secret assignments in free-form log text.
+///
+/// Key-based redaction xử lý JSON args; hàm này là lớp phòng thủ cho chuỗi lỗi/log
+/// (body provider, stderr, thông báo MCP) không có cấu trúc JSON.
+#[must_use]
+pub fn redact_text_secrets(text: &str) -> String {
+    let pattern = TEXT_SECRET_PATTERN.get_or_init(|| {
+        Regex::new(
+            r"(?i)(sk-[A-Za-z0-9_-]{6,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9_-]{6,}|xox[baprs]-[A-Za-z0-9-]{6,}|\d{8,12}:[A-Za-z0-9_-]{20,}|Bearer\s+[A-Za-z0-9._~+/=-]{6,}|(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|authorization)\s*[:=]\s*[^\s,;]+)",
+        )
+        .ok()
+    });
+    pattern.as_ref().map_or_else(
+        || text.to_string(),
+        |regex| regex.replace_all(text, "[REDACTED]").into_owned(),
+    )
+}
 
 /// Trả về bản sao của `args` với mọi giá trị chuỗi dưới khoá nhạy cảm bị thay
 /// bằng `[REDACTED]`.
@@ -235,6 +263,17 @@ mod tests {
         assert_eq!(out["env"]["nested"][0]["user"], "bob");
         // Bản gốc không đổi.
         assert_eq!(args["env"]["API_KEY"], "sk-ant-1234567890");
+    }
+
+    #[test]
+    fn redacts_token_shaped_text_in_error_fields() {
+        let redacted = redact_text_secrets(
+            "Authorization: Bearer sk-ant-abcdefghijk; telegram=123456789:ABCDEFGHIJKLMNOPQRSTUVWX; password=hunter2",
+        );
+        assert!(!redacted.contains("sk-ant-abcdefghijk"));
+        assert!(!redacted.contains("ABCDEFGHIJKLMNOPQRSTUVWX"));
+        assert!(!redacted.contains("hunter2"));
+        assert!(redacted.contains("[REDACTED]"));
     }
 
     #[test]

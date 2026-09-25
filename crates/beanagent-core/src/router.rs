@@ -394,9 +394,31 @@ impl Router {
         }
     }
 
-    /// Dừng worker outbox; không tự huỷ run (chỉ `cancel`/`/stop` mới được huỷ).
+    /// Dừng worker outbox và huỷ các run đang active.
+    ///
+    /// Đây là shutdown của process, khác với `cancel` của người dùng: mọi token
+    /// active đều được huỷ để tool/confirm không giữ tiến trình sống sau SIGTERM.
     pub fn shutdown(&self) {
         self.inner.shutdown.cancel();
+        let tokens = lock(&self.inner.state)
+            .map(|state| {
+                let mut tokens: Vec<_> = state
+                    .active
+                    .values()
+                    .map(|active| active.cancel.clone())
+                    .collect();
+                tokens.extend(
+                    state
+                        .queues
+                        .values()
+                        .flat_map(|queue| queue.pending.iter().map(|job| job.cancel.clone())),
+                );
+                tokens
+            })
+            .unwrap_or_default();
+        for token in tokens {
+            token.cancel();
+        }
     }
 
     /// Submit trả `RunId` ngay; run LLM được spawn nền.
@@ -772,7 +794,13 @@ impl Router {
                 return;
             }
             queue.active = None;
-            let next = queue.pending.pop_front();
+            let shutting_down = self.inner.shutdown.is_cancelled();
+            let next = if shutting_down {
+                queue.pending.clear();
+                None
+            } else {
+                queue.pending.pop_front()
+            };
             let positions: Vec<_> = queue
                 .pending
                 .iter()

@@ -13,6 +13,10 @@ version: string,
  */
 model: string, 
 /**
+ * Trần số bước của một lượt chat.
+ */
+max_steps: number, 
+/**
  * Ngân sách token/ngày.
  */
 daily_token_budget: number, 

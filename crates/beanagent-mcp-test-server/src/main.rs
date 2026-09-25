@@ -112,11 +112,28 @@ async fn handle_message(message: Value) -> Result<Option<Value>, Box<dyn Error>>
     ))
 }
 
+fn drop_first_call_requested() -> bool {
+    if !std::env::args().any(|arg| arg == "--drop-first-call") {
+        return false;
+    }
+    let Some(marker) = std::env::var_os("BEANAGENT_MCP_TEST_DROP_FILE") else {
+        return false;
+    };
+    let marker = std::path::PathBuf::from(marker);
+    if marker.exists() {
+        return false;
+    }
+    std::fs::write(marker, b"dropped").is_ok()
+}
+
 async fn call_tool(params: &Value) -> Result<Value, Box<dyn Error>> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or("tools/call thiếu name")?;
+    if name == "echo" && drop_first_call_requested() {
+        std::process::exit(0);
+    }
     if name == "slow" {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     }

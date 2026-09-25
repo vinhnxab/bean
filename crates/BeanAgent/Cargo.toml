@@ -48,7 +48,11 @@ beanagent-skills.workspace = true
 beanagent-tools.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+reqwest.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
+toml.workspace = true
 wiremock.workspace = true

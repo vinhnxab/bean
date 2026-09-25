@@ -45,6 +45,14 @@ pub enum StoreError {
     /// Lỗi nội bộ (SQLite, worker dừng, dữ liệu hỏng…).
     #[error("lỗi nội bộ store: {0}")]
     Internal(String),
+    /// Đã chạm hoặc vượt ngân sách token của ngày UTC hiện tại.
+    #[error("đã dừng: ngân sách token/ngày đã đạt {used}/{limit} token")]
+    BudgetExceeded {
+        /// Tổng token đã ghi nhận trong ngày UTC.
+        used: u64,
+        /// Trần được cấu hình.
+        limit: u64,
+    },
 }
 
 /// Nguồn gốc của một kết quả `memory_search`.
@@ -476,6 +484,33 @@ pub trait Store: Send + Sync {
         llm: &dyn LlmProvider,
         config: &Config,
     ) -> Result<(), StoreError>;
+}
+
+/// Kiểm tra ngân sách trước một lượt gọi LLM mới.
+///
+/// `Usage` là số token thực trả về bởi provider. Khi đã chạm trần, caller phải dừng và
+/// báo người dùng; lượt gọi mới không được gửi đi. Ngày được truyền rõ ràng để test và
+/// scheduler có thể kiểm soát mốc UTC.
+pub async fn ensure_daily_budget(
+    store: &dyn Store,
+    day: &str,
+    limit: u64,
+) -> Result<(), StoreError> {
+    let usage = store.usage(day).await?;
+    let used = u64::from(usage.total());
+    if used >= limit {
+        return Err(StoreError::BudgetExceeded { used, limit });
+    }
+    Ok(())
+}
+
+/// Ghi usage và trả tổng mới của ngày.
+///
+/// Việc đọc lại sau `add_usage` giữ API store đơn giản cho cả SQLite và MemoryStore;
+/// lớp gọi LLM chỉ cần một cổng cập nhật usage duy nhất.
+pub async fn record_usage(store: &dyn Store, day: &str, usage: Usage) -> Result<Usage, StoreError> {
+    store.add_usage(day, usage).await?;
+    store.usage(day).await
 }
 
 // ---------------------------------------------------------------------------
@@ -1357,6 +1392,7 @@ facts that are not in the transcript. Output only the summary, no preamble.";
 
 /// Gọi LLM một lượt để tóm tắt phần lịch sử cũ.
 async fn summarize(
+    store: &dyn Store,
     llm: &dyn LlmProvider,
     config: &Config,
     previous: Option<&str>,
@@ -1383,10 +1419,20 @@ async fn summarize(
         tools: &[],
         max_tokens: config.llm.max_tokens.min(2048),
     };
+    let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    ensure_daily_budget(store, &day, config.security.daily_token_budget).await?;
     let response = llm
         .chat_with_model(request, &config.llm.model)
         .await
         .map_err(|err| StoreError::Internal(format!("gọi LLM để tóm tắt thất bại: {err}")))?;
+    let usage = record_usage(store, &day, response.usage).await?;
+    let used = u64::from(usage.total());
+    if used > config.security.daily_token_budget {
+        return Err(StoreError::BudgetExceeded {
+            used,
+            limit: config.security.daily_token_budget,
+        });
+    }
     Ok(response.text.unwrap_or_default())
 }
 
@@ -1424,8 +1470,10 @@ async fn compact_via(
         return Ok(());
     };
     let previous = store.summary(session).await?;
-    let summary = match summarize(llm, config, previous.as_deref(), &messages[..start]).await {
+    let summary = match summarize(store, llm, config, previous.as_deref(), &messages[..start]).await
+    {
         Ok(text) => text,
+        Err(error @ StoreError::BudgetExceeded { .. }) => return Err(error),
         Err(err) => {
             tracing::warn!(session = %session, error = %err, "compaction thất bại — giữ nguyên lịch sử");
             return Ok(());

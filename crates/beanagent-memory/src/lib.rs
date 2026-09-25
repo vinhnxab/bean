@@ -26,5 +26,5 @@ pub use safe_cut::{
 pub use store::{
     MemoryRecord, MemorySearchHit, MemorySource, MemoryStore, MessageRecord, NewScheduledTask,
     OutboxEntry, ScheduledTask, SessionInfo, SessionSummary, SqliteStore, Store, StoreError,
-    StoredMessage, WebSessionInfo,
+    StoredMessage, WebSessionInfo, ensure_daily_budget, record_usage,
 };

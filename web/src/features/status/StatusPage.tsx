@@ -11,6 +11,7 @@ export function StatusPage() {
     data && data.daily_token_budget > 0
       ? Math.min(100, Math.round((data.tokens_used / data.daily_token_budget) * 100))
       : 0;
+  const overBudget = data !== undefined && data.tokens_used > data.daily_token_budget;
 
   return (
     <PageShell title={t("status.title")} description={t("status.description")}>
@@ -20,6 +21,7 @@ export function StatusPage() {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <StatusCard label={t("status.version")} value={data.version} />
           <StatusCard label={t("status.model")} value={data.model} />
+          <StatusCard label={t("status.maxSteps")} value={data.max_steps.toLocaleString()} />
           <StatusCard label={t("status.uptime")} value={formatUptime(data.uptime_seconds)} />
           <Panel className="sm:col-span-2 xl:col-span-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -31,7 +33,15 @@ export function StatusPage() {
                   {data.tokens_used.toLocaleString()} / {data.daily_token_budget.toLocaleString()}
                 </p>
               </div>
-              <span className="text-sm text-slate-500 dark:text-slate-400">{percent}%</span>
+              <span
+                className={
+                  overBudget
+                    ? "text-sm font-semibold text-rose-600"
+                    : "text-sm text-slate-500 dark:text-slate-400"
+                }
+              >
+                {overBudget ? t("status.budgetExceeded") : `${percent}%`}
+              </span>
             </div>
             <div
               className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
@@ -41,7 +51,12 @@ export function StatusPage() {
               aria-valuemax={100}
               aria-label={t("status.tokenUsage")}
             >
-              <div className="h-full rounded-full bg-emerald-600" style={{ width: `${percent}%` }} />
+              <div
+                className={
+                  overBudget ? "h-full rounded-full bg-rose-600" : "h-full rounded-full bg-emerald-600"
+                }
+                style={{ width: `${percent}%` }}
+              />
             </div>
           </Panel>
           <Panel className="sm:col-span-2 xl:col-span-3">

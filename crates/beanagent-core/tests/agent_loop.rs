@@ -14,7 +14,7 @@ use beanagent_core::{RunTurnArgs, run_turn};
 use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
 use beanagent_security::CapWorkspace;
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
-use beanagent_types::{Config, LlmResponse, Risk, Role, SessionId, ToolCall, ToolSpec};
+use beanagent_types::{Config, LlmResponse, Risk, Role, SessionId, ToolCall, ToolSpec, Usage};
 use tokio_util::sync::CancellationToken;
 
 /// Provider dựng sẵn: trả lần lượt danh sách response; hết thì lỗi (không panic).
@@ -326,6 +326,40 @@ async fn stops_at_max_steps() {
     let out = turn(responses, &reg, &io, &store, &cfg(3)).await.unwrap();
     assert_eq!(t.count(), 3);
     assert!(out.contains("giới hạn số bước"), "{out}");
+    let history = store.history(SessionId::new(1), None, 0).await.unwrap();
+    assert_eq!(
+        history.last().and_then(|m| m.text.as_deref()),
+        Some(out.as_str())
+    );
+}
+
+#[tokio::test]
+async fn stops_with_persisted_notice_when_daily_budget_is_exceeded() {
+    let (_ws, reg) = registry_with(Arc::new(ProbeTool {
+        risk: Risk::Safe,
+        fail: false,
+        cancel_after_ms: AtomicU64::new(0),
+        calls: AtomicUsize::new(0),
+    }));
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let mut config = cfg(5);
+    config.security.daily_token_budget = 10;
+    let mut response = text_resp("provider đã trả lời");
+    response.usage = Usage {
+        input_tokens: 6,
+        output_tokens: 5,
+    };
+    let out = turn(vec![response], &reg, &io, &store, &config)
+        .await
+        .unwrap();
+    assert!(out.contains("ngân sách token/ngày"), "{out}");
+    let history = store.history(SessionId::new(1), None, 0).await.unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(
+        history.last().and_then(|m| m.text.as_deref()),
+        Some(out.as_str())
+    );
 }
 
 fn files_registry() -> (tempfile::TempDir, ToolRegistry) {

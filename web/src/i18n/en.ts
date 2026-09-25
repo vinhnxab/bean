@@ -141,6 +141,8 @@ export const en: Record<MessageKey, string> = {
   "status.description": "BeanAgent runtime information, refreshed periodically.",
   "status.version": "Version",
   "status.model": "Model",
+  "status.maxSteps": "Steps per run",
+  "status.budgetExceeded": "Budget exceeded",
   "status.uptime": "Uptime",
   "status.tokenUsage": "Tokens today",
   "status.channels": "Running channels",
