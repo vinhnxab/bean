@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use beanagent_security::CapWorkspace;
-use beanagent_skills::{SkillCatalog, SkillError, skill_tools};
+use beanagent_skills::{
+    NewSkillDraft, SkillCatalog, SkillDraftKind, SkillDraftStatus, SkillError, skill_tools,
+};
 use beanagent_tools::ToolCtx;
 use beanagent_types::{Risk, SessionId};
 use tokio_util::sync::CancellationToken;
@@ -186,4 +188,74 @@ async fn load_skill_is_safe_and_create_skill_is_confirm() {
         .unwrap();
     assert!(created.contains("new-skill"));
     assert!(catalog.get("new-skill").is_ok());
+}
+
+#[test]
+fn draft_stays_inactive_until_approve_and_reload() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("skills");
+    let catalog = SkillCatalog::load_with_paths(
+        std::slice::from_ref(&root),
+        root.clone(),
+        root.join("_drafts"),
+    );
+    let draft = catalog
+        .create_draft(NewSkillDraft {
+            name: "release-checklist".into(),
+            kind: SkillDraftKind::New,
+            description: "Dùng trước khi phát hành.".into(),
+            body: "# Steps\n1. Chạy test.".into(),
+            reason: "Một quy trình lặp lại nhiều lần.".into(),
+            source_session_id: 7,
+            source_channel: "test".into(),
+            source_chat_id: "chat".into(),
+            created_at: "2026-09-25T10:00:00Z".into(),
+        })
+        .unwrap();
+    assert!(root.join("_drafts/release-checklist/SKILL.md").is_file());
+    assert!(catalog.get("release-checklist").is_err());
+    assert_eq!(draft.status, SkillDraftStatus::Pending);
+    assert!(catalog.last_proposal_at().unwrap().is_some());
+    let reloaded = SkillCatalog::load_with_paths(
+        std::slice::from_ref(&root),
+        root.clone(),
+        root.join("_drafts"),
+    );
+    assert!(reloaded.last_proposal_at().unwrap().is_some());
+
+    let decision = catalog.approve_draft(&draft.id).unwrap();
+    assert_eq!(decision.status, SkillDraftStatus::Approved);
+    assert!(root.join("release-checklist/SKILL.md").is_file());
+    assert!(!root.join("_drafts/release-checklist").exists());
+    assert!(catalog.get("release-checklist").is_ok());
+}
+
+#[test]
+fn malformed_draft_is_skipped_and_invalid_body_is_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("skills");
+    let catalog = SkillCatalog::load_with_paths(
+        std::slice::from_ref(&root),
+        root.clone(),
+        root.join("_drafts"),
+    );
+    let error = catalog
+        .create_draft(NewSkillDraft {
+            name: "invalid-skill".into(),
+            kind: SkillDraftKind::New,
+            description: "Mô tả hợp lệ.".into(),
+            body: "   ".into(),
+            reason: "Lý do hợp lệ.".into(),
+            source_session_id: 1,
+            source_channel: "test".into(),
+            source_chat_id: "chat".into(),
+            created_at: "2026-09-25T10:00:00Z".into(),
+        })
+        .unwrap_err();
+    assert!(matches!(error, SkillError::MissingBody));
+
+    let malformed = root.join("_drafts/malformed");
+    std::fs::create_dir_all(&malformed).unwrap();
+    std::fs::write(malformed.join("SKILL.md"), "không có frontmatter").unwrap();
+    assert!(catalog.list_drafts().unwrap().is_empty());
 }

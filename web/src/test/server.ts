@@ -35,6 +35,7 @@ export const testServer = setupServer(
   ),
   http.get("/api/memories", () => HttpResponse.json({ memories: [] })),
   http.get("/api/skills", () => HttpResponse.json({ skills: [] })),
+  http.get("/api/skills/drafts", () => HttpResponse.json({ drafts: [] })),
   http.get("/api/tasks", () => HttpResponse.json({ tasks: [] })),
   http.get("/api/audit", () => HttpResponse.json({ entries: [] })),
 );

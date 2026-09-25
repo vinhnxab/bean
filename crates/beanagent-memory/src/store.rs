@@ -3870,6 +3870,7 @@ mod tests {
             message_id: 42,
             text: "tin chủ động 🦀".into(),
             kind: OutboundKind::Notification,
+            action: None,
         };
         let id = {
             let store = open(&dir);

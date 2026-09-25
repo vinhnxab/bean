@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 beanagent-tools.workspace = true
 beanagent-types.workspace = true
+chrono.workspace = true
+getrandom.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

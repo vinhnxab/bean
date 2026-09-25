@@ -232,6 +232,28 @@ impl Default for WebSearchConfig {
     }
 }
 
+/// Cấu hình learning loop sau run thành công (agents.md mục 17, milestone M15).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LearningConfig {
+    /// Bật reflection và tạo đề xuất skill.
+    pub enabled: bool,
+    /// Số tool call tối thiểu trong một run trước khi reflection.
+    pub min_tool_calls: u32,
+    /// Khoảng cách tối thiểu giữa hai đề xuất, tính bằng phút.
+    pub proposal_interval_minutes: u64,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_tool_calls: 5,
+            proposal_interval_minutes: 60,
+        }
+    }
+}
+
 /// `[tools]`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -394,6 +416,8 @@ pub struct Config {
     pub llm: LlmConfig,
     /// `[tools]`.
     pub tools: ToolsConfig,
+    /// `[learning]` — reflection và duyệt skill nháp.
+    pub learning: LearningConfig,
     /// `[security]`.
     pub security: SecurityConfig,
     /// `[web]`.
@@ -550,6 +574,12 @@ impl Config {
             return Err(invalid(
                 "tools.web_search.provider = searxng cần tools.web_search.base_url",
             ));
+        }
+        if self.learning.min_tool_calls == 0 {
+            return Err(invalid("learning.min_tool_calls phải > 0"));
+        }
+        if self.learning.proposal_interval_minutes == 0 {
+            return Err(invalid("learning.proposal_interval_minutes phải > 0"));
         }
 
         if self.llm.model.trim().is_empty() {

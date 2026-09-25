@@ -115,6 +115,7 @@ async fn fixture(
             llm: Arc::new(FakeProvider::new(responses)),
             audit: None,
             skills_index: String::new(),
+            skills: None,
         },
         RouterOptions {
             outbox_base_delay: Duration::from_millis(1),
@@ -306,6 +307,7 @@ async fn outbox_keeps_failed_notification_and_delivers_on_retry() {
         message_id,
         text: "tin bù".into(),
         kind: OutboundKind::Notification,
+        action: None,
     };
     router.notify("test", "chat", out.clone()).await.unwrap();
     assert_eq!(

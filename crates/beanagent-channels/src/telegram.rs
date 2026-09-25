@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use beanagent_core::{Channel, Decision, Incoming, Router};
+use beanagent_skills::is_valid_draft_id;
 use beanagent_types::config::TelegramConfig;
-use beanagent_types::{ConfirmOutcome, Outbound, RunEvent, RunId};
+use beanagent_types::{ConfirmOutcome, Outbound, OutboundAction, RunEvent, RunId};
 use secrecy::{ExposeSecret, SecretString};
 use teloxide::prelude::*;
 use teloxide::types::{
@@ -495,6 +496,13 @@ struct RunTarget {
 }
 
 #[derive(Clone, Debug)]
+struct DraftTarget {
+    chat_id: i64,
+    message_id: i32,
+    user_id: String,
+}
+
+#[derive(Clone, Debug)]
 struct ConfirmTarget {
     chat_id: i64,
     message_id: i32,
@@ -502,21 +510,48 @@ struct ConfirmTarget {
     allow_session: bool,
 }
 
-fn parse_callback(data: &str) -> Option<(Decision, String)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallbackAction {
+    Confirm(Decision),
+    ApproveDraft,
+    RejectDraft,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedCallback {
+    action: CallbackAction,
+    id: String,
+}
+
+fn parse_callback(data: &str) -> Option<ParsedCallback> {
     if data.len() > 64 {
         return None;
     }
-    let (action, confirm_id) = data.split_once(':')?;
-    if !is_valid_confirm_id(confirm_id) {
-        return None;
+    let (action, id) = data.rsplit_once(':')?;
+    if is_valid_confirm_id(id) {
+        let decision = match action {
+            "a" => Decision::Allow,
+            "s" => Decision::AllowInSession,
+            "d" => Decision::Deny,
+            _ => return None,
+        };
+        return Some(ParsedCallback {
+            action: CallbackAction::Confirm(decision),
+            id: id.to_owned(),
+        });
     }
-    let decision = match action {
-        "a" => Decision::Allow,
-        "s" => Decision::AllowInSession,
-        "d" => Decision::Deny,
-        _ => return None,
-    };
-    Some((decision, confirm_id.to_owned()))
+    if is_valid_draft_id(id) {
+        let action = match action {
+            "skill:a" => CallbackAction::ApproveDraft,
+            "skill:r" => CallbackAction::RejectDraft,
+            _ => return None,
+        };
+        return Some(ParsedCallback {
+            action,
+            id: id.to_owned(),
+        });
+    }
+    None
 }
 
 fn is_valid_confirm_id(value: &str) -> bool {
@@ -557,6 +592,7 @@ pub struct TelegramChannel {
     dedup: Mutex<UpdateDedup>,
     runs: Mutex<HashMap<RunId, RunTarget>>,
     confirms: Mutex<HashMap<String, ConfirmTarget>>,
+    drafts: Mutex<HashMap<String, DraftTarget>>,
     typing_tasks: Mutex<HashMap<RunId, CancellationToken>>,
 }
 
@@ -578,6 +614,7 @@ impl TelegramChannel {
             dedup: Mutex::new(UpdateDedup::new(UPDATE_DEDUP_CAPACITY)),
             runs: Mutex::new(HashMap::new()),
             confirms: Mutex::new(HashMap::new()),
+            drafts: Mutex::new(HashMap::new()),
             typing_tasks: Mutex::new(HashMap::new()),
         }
     }
@@ -602,6 +639,47 @@ impl TelegramChannel {
                 tracing::warn!(chat_id, error = %error, "gửi text Telegram thất bại");
             }
         }
+    }
+
+    async fn send_skill_draft(
+        &self,
+        chat_id: i64,
+        text: &str,
+        draft_id: &str,
+        actor: &str,
+    ) -> TelegramResult<()> {
+        if !is_valid_draft_id(draft_id) {
+            return Err(TelegramError::Transport(
+                "ID skill nháp không hợp lệ".into(),
+            ));
+        }
+        let keyboard = TelegramKeyboard {
+            rows: vec![vec![
+                TelegramButton {
+                    text: "Duyệt".into(),
+                    callback_data: format!("skill:a:{draft_id}"),
+                },
+                TelegramButton {
+                    text: "Bỏ".into(),
+                    callback_data: format!("skill:r:{draft_id}"),
+                },
+            ]],
+        };
+        let message_id = self
+            .transport
+            .send_confirmation(chat_id, text, keyboard)
+            .await?;
+        if let Ok(mut drafts) = self.drafts.lock() {
+            drafts.insert(
+                draft_id.to_string(),
+                DraftTarget {
+                    chat_id,
+                    message_id,
+                    user_id: actor.to_string(),
+                },
+            );
+        }
+        Ok(())
     }
 
     async fn start_typing(&self, run_id: &RunId, chat_id: i64, shutdown: &CancellationToken) {
@@ -729,44 +807,113 @@ impl TelegramChannel {
                 .await;
             return;
         }
-        let Some((decision, confirm_id)) = parse_callback(&callback.data) else {
+        let Some(parsed) = parse_callback(&callback.data) else {
             self.answer_callback(&callback.callback_id, Some("Yêu cầu không hợp lệ"))
                 .await;
             return;
         };
-        let target = self
-            .confirms
-            .lock()
-            .ok()
-            .and_then(|confirms| confirms.get(&confirm_id).cloned());
-        let Some(target) = target else {
-            self.answer_callback(&callback.callback_id, Some("Yêu cầu đã hết hạn"))
-                .await;
-            return;
-        };
-        if callback.chat_id != Some(target.chat_id)
-            || callback.message_id != Some(target.message_id)
-            || target.user_id != actor
-        {
-            self.answer_callback(&callback.callback_id, Some("Yêu cầu không hợp lệ"))
-                .await;
-            return;
-        }
-        if matches!(decision, Decision::AllowInSession) && !target.allow_session {
-            self.answer_callback(
-                &callback.callback_id,
-                Some("Tác vụ này không cho phép trong phiên"),
-            )
-            .await;
-            return;
-        }
-        if let Err(error) = router.resolve_confirm(&confirm_id, decision, &actor).await {
-            tracing::debug!(confirm_id, error = %error, "callback Telegram không resolve được confirm");
-            self.answer_callback(&callback.callback_id, Some("Yêu cầu đã hết hạn"))
-                .await;
-        } else {
-            self.answer_callback(&callback.callback_id, Some("Đã ghi nhận"))
-                .await;
+        match parsed.action {
+            CallbackAction::Confirm(decision) => {
+                let target = self
+                    .confirms
+                    .lock()
+                    .ok()
+                    .and_then(|confirms| confirms.get(&parsed.id).cloned());
+                let Some(target) = target else {
+                    self.answer_callback(&callback.callback_id, Some("Yêu cầu đã hết hạn"))
+                        .await;
+                    return;
+                };
+                if callback.chat_id != Some(target.chat_id)
+                    || callback.message_id != Some(target.message_id)
+                    || target.user_id != actor
+                {
+                    self.answer_callback(&callback.callback_id, Some("Yêu cầu không hợp lệ"))
+                        .await;
+                    return;
+                }
+                if matches!(decision, Decision::AllowInSession) && !target.allow_session {
+                    self.answer_callback(
+                        &callback.callback_id,
+                        Some("Tác vụ này không cho phép trong phiên"),
+                    )
+                    .await;
+                    return;
+                }
+                if let Err(error) = router.resolve_confirm(&parsed.id, decision, &actor).await {
+                    tracing::debug!(confirm_id = %parsed.id, error = %error,
+                        "callback Telegram không resolve được confirm");
+                    self.answer_callback(&callback.callback_id, Some("Yêu cầu đã hết hạn"))
+                        .await;
+                } else {
+                    self.answer_callback(&callback.callback_id, Some("Đã ghi nhận"))
+                        .await;
+                }
+            }
+            CallbackAction::ApproveDraft | CallbackAction::RejectDraft => {
+                let target = self
+                    .drafts
+                    .lock()
+                    .ok()
+                    .and_then(|drafts| drafts.get(&parsed.id).cloned());
+                let Some(target) = target else {
+                    self.answer_callback(&callback.callback_id, Some("Đề xuất đã hết hạn"))
+                        .await;
+                    return;
+                };
+                if callback.chat_id != Some(target.chat_id)
+                    || callback.message_id != Some(target.message_id)
+                    || target.user_id != actor
+                {
+                    self.answer_callback(&callback.callback_id, Some("Yêu cầu không hợp lệ"))
+                        .await;
+                    return;
+                }
+                let claimed = self
+                    .drafts
+                    .lock()
+                    .ok()
+                    .and_then(|mut drafts| drafts.remove(&parsed.id));
+                if claimed.is_none() {
+                    self.answer_callback(&callback.callback_id, Some("Đề xuất đã hết hạn"))
+                        .await;
+                    return;
+                }
+                let approve = matches!(parsed.action, CallbackAction::ApproveDraft);
+                let result = if approve {
+                    router.approve_draft(&parsed.id, &actor).await
+                } else {
+                    router.reject_draft(&parsed.id, &actor).await
+                };
+                match result {
+                    Ok(_) => {
+                        let text = if approve {
+                            "Đã duyệt skill"
+                        } else {
+                            "Đã bỏ đề xuất"
+                        };
+                        self.answer_callback(&callback.callback_id, Some(text))
+                            .await;
+                        if let Err(error) = self
+                            .transport
+                            .edit_text(target.chat_id, target.message_id, text, true)
+                            .await
+                        {
+                            tracing::warn!(draft_id = %parsed.id, error = %error,
+                                "cập nhật thông báo draft Telegram thất bại");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::debug!(draft_id = %parsed.id, error = %error,
+                            "callback Telegram không xử lý được draft");
+                        self.answer_callback(
+                            &callback.callback_id,
+                            Some("Đề xuất không còn hợp lệ"),
+                        )
+                        .await;
+                    }
+                }
+            }
         }
     }
 
@@ -1044,6 +1191,14 @@ impl Channel for TelegramChannel {
         let chat_id = chat_id
             .parse::<i64>()
             .map_err(|_| anyhow!("chat_id Telegram không hợp lệ: {chat_id}"))?;
+        if let Some(OutboundAction::SkillDraft { id, actor, .. }) = out.action
+            && actor.starts_with("telegram:")
+        {
+            self.send_skill_draft(chat_id, &out.text, &id, &actor)
+                .await
+                .map_err(|error| anyhow!("gửi skill draft Telegram thất bại: {error}"))?;
+            return Ok(());
+        }
         for part in split_text(&out.text, MAX_MESSAGE_CHARS) {
             self.transport
                 .send_text(chat_id, &part)
@@ -1070,6 +1225,7 @@ mod tests {
     use beanagent_core::router::{RouterDeps, RouterOptions};
     use beanagent_llm::FakeProvider;
     use beanagent_security::CapWorkspace;
+    use beanagent_skills::{NewSkillDraft, SkillDraftKind};
     use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
     use beanagent_types::{Config, LlmResponse, Risk, ToolCall, ToolSpec};
     use tokio::time::{Duration, timeout};
@@ -1256,6 +1412,7 @@ mod tests {
                 llm: Arc::new(FakeProvider::new(responses)),
                 audit: None,
                 skills_index: String::new(),
+                skills: None,
             },
             options,
         ));
@@ -1398,7 +1555,13 @@ mod tests {
     fn callback_data_is_short_and_minimal() {
         let confirm_id = format!("confirm_{}", "a".repeat(32));
         let parsed = parse_callback(&format!("a:{confirm_id}"));
-        assert_eq!(parsed, Some((Decision::Allow, confirm_id.clone())));
+        assert_eq!(
+            parsed,
+            Some(ParsedCallback {
+                action: CallbackAction::Confirm(Decision::Allow),
+                id: confirm_id.clone(),
+            })
+        );
         assert_eq!(format!("a:{confirm_id}").len(), 42);
         assert_eq!(parse_callback("a:secret:extra"), None);
     }
@@ -1735,5 +1898,91 @@ mod tests {
             .await
             .expect_err("409 phải là fatal");
         assert!(error.to_string().contains("409"));
+    }
+    #[tokio::test]
+    async fn skill_draft_inline_button_approves_for_exact_allowed_user() {
+        let temp = tempfile::tempdir().unwrap();
+        let skills_root = temp.path().join("skills");
+        let catalog = beanagent_skills::SkillCatalog::load_with_paths(
+            std::slice::from_ref(&skills_root),
+            skills_root.clone(),
+            skills_root.join("_drafts"),
+        );
+        let draft = catalog
+            .create_draft(NewSkillDraft {
+                name: "release-checklist".into(),
+                kind: SkillDraftKind::New,
+                description: "Dùng trước khi phát hành.".into(),
+                body: "# Steps\n1. Chạy test.".into(),
+                reason: "Quy trình lặp lại.".into(),
+                source_session_id: 1,
+                source_channel: "telegram".into(),
+                source_chat_id: "100".into(),
+                created_at: "2026-09-25T10:00:00Z".into(),
+            })
+            .unwrap();
+        let workspace_path = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace_path).unwrap();
+        let workspace = Arc::new(CapWorkspace::open(workspace_path).unwrap());
+        let mut config = Config::default();
+        config.agent.allowed_users = vec!["telegram:42".into()];
+        let router = Arc::new(Router::new(RouterDeps {
+            config,
+            store: Arc::new(MemoryStore::new()),
+            registry: Arc::new(ToolRegistry::with_workspace(workspace)),
+            llm: Arc::new(FakeProvider::echo()),
+            audit: None,
+            skills_index: catalog.index(),
+            skills: Some(catalog.clone()),
+        }));
+        let transport = Arc::new(MockTransport::new());
+        let mut telegram_config = telegram_config();
+        telegram_config.allowed_user_ids.push(43);
+        let channel = TelegramChannel::with_transport(transport.clone(), telegram_config);
+        channel
+            .send(
+                "100",
+                Outbound {
+                    session_id: beanagent_types::SessionId::new(1),
+                    message_id: 1,
+                    text: format!("Đề xuất `{}`", draft.name),
+                    kind: beanagent_types::OutboundKind::Notification,
+                    action: Some(OutboundAction::SkillDraft {
+                        id: draft.id.clone(),
+                        name: draft.name.clone(),
+                        actor: "telegram:42".into(),
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+        let command = wait_command(&transport, |command| {
+            matches!(command, Command::Confirmation { .. })
+        })
+        .await;
+        let message_id = confirmation_message_id(&command);
+        let buttons = confirmation_buttons(&command);
+        assert_eq!(buttons[0].callback_data, format!("skill:a:{}", draft.id));
+        assert_eq!(buttons[1].callback_data, format!("skill:r:{}", draft.id));
+
+        let wrong_user = callback_update(98, 43, &buttons[0].callback_data, message_id);
+        channel
+            .process_update(&router, wrong_user, &CancellationToken::new())
+            .await;
+        wait_command(&transport, |command| {
+            matches!(command, Command::Callback { text: Some(text), .. } if text == "Yêu cầu không hợp lệ")
+        })
+        .await;
+        assert!(catalog.get("release-checklist").is_err());
+
+        let update = callback_update(99, 42, &buttons[0].callback_data, message_id);
+        channel
+            .process_update(&router, update, &CancellationToken::new())
+            .await;
+        wait_command(&transport, |command| {
+            matches!(command, Command::Edit { text, remove_keyboard: true, .. } if text == "Đã duyệt skill")
+        })
+        .await;
+        assert!(catalog.get("release-checklist").is_ok());
     }
 }

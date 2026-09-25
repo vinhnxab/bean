@@ -1,6 +1,6 @@
 //! Vòng lặp agent (agents.md mục 6, 7.2, 15.3, 15.4, 15.8).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -61,7 +61,7 @@ pub enum EndReason {
 }
 
 /// Kết quả đầy đủ cho Router; wrapper [`run_turn`] chỉ trả text để tương thích M3.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RunOutcome {
     /// Text cuối để hiển thị.
     pub text: String,
@@ -69,6 +69,12 @@ pub struct RunOutcome {
     pub message_id: Option<i64>,
     /// Lý do kết thúc.
     pub ended: EndReason,
+    /// Tổng số tool call phát sinh trong lượt này.
+    pub tool_call_count: usize,
+    /// Tên skill được load thành công trong lượt này.
+    pub loaded_skills: Vec<String>,
+    /// Chỉ chứa message của lượt này, dùng làm bằng chứng cho reflection.
+    pub transcript: Vec<Message>,
 }
 
 /// Chạy lượt và chỉ trả text (API tương thích M3–M7).
@@ -97,9 +103,16 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
     // bị model hiểu nhầm là câu lệnh của người dùng). Giữ `turn_input` để dựng lỡ
     // trường hợp lịch sử rỗng.
     let turn_input = user_text;
-    store
-        .append(session, Message::user(turn_input.clone()))
-        .await?;
+    let mut transcript = Vec::new();
+    let mut tool_call_count = 0_usize;
+    let mut loaded_skills = BTreeSet::new();
+    append_run_message(
+        store,
+        session,
+        &mut transcript,
+        Message::user(turn_input.clone()),
+    )
+    .await?;
     store.compact(session, llm, config).await?;
     let mut failure_counts: HashMap<RepeatKey, u32> = HashMap::new();
     let mut consecutive_same_failure: Option<RepeatKey> = None;
@@ -159,13 +172,18 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             .await?;
         let is_final = resp.tool_calls.is_empty();
         let final_text = resp.text.clone().unwrap_or_default();
-        let message_id = store.append(session, Message::from_response(&resp)).await?;
+        let assistant_message = Message::from_response(&resp);
+        let message_id =
+            append_run_message(store, session, &mut transcript, assistant_message).await?;
 
         if is_final {
             return Ok(RunOutcome {
                 text: final_text,
                 message_id: Some(message_id),
                 ended: EndReason::Final,
+                tool_call_count,
+                loaded_skills: loaded_skills.into_iter().collect(),
+                transcript,
             });
         }
         // Text "suy nghĩ" của model khi vẫn còn gọi tool — phát cho kênh hiển thị.
@@ -174,6 +192,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         let mut repeated_tool: Option<String> = None;
 
         for call in resp.tool_calls {
+            tool_call_count = tool_call_count.saturating_add(1);
             let risk = registry
                 .get(&call.name)
                 .map_or(beanagent_types::Risk::Safe, |tool| tool.risk(&call.args));
@@ -181,9 +200,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             io.on_tool_start(&call.id, &call.name, risk, &call.name, &args_preview);
 
             if cancel.is_cancelled() {
-                store
-                    .append(session, Message::tool_error(call.id.clone(), CANCELLED_MSG))
-                    .await?;
+                append_run_message(
+                    store,
+                    session,
+                    &mut transcript,
+                    Message::tool_error(call.id.clone(), CANCELLED_MSG),
+                )
+                .await?;
                 io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
                 continue;
             }
@@ -192,12 +215,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 Ok(workspace) => workspace,
                 Err(error) => {
                     let message = format!("registry thiếu workspace: {error}");
-                    store
-                        .append(
-                            session,
-                            Message::tool_error(call.id.clone(), message.clone()),
-                        )
-                        .await?;
+                    append_run_message(
+                        store,
+                        session,
+                        &mut transcript,
+                        Message::tool_error(call.id.clone(), message.clone()),
+                    )
+                    .await?;
                     io.on_tool_end(&call.id, &call.name, false, &message);
                     continue;
                 }
@@ -218,9 +242,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                     "Tool `{}` với cùng tham số đã thất bại 2 lần liên tiếp. Hãy thử cách khác.",
                     call.name
                 );
-                store
-                    .append(session, Message::tool_error(call.id.clone(), hint.clone()))
-                    .await?;
+                append_run_message(
+                    store,
+                    session,
+                    &mut transcript,
+                    Message::tool_error(call.id.clone(), hint.clone()),
+                )
+                .await?;
                 io.on_tool_end(&call.id, &call.name, false, &hint);
                 repeated_tool = Some(call.name);
                 continue;
@@ -239,9 +267,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 }
                 PolicyDecision::NeedsConfirm { allow_in_session } => {
                     if cancel.is_cancelled() {
-                        store
-                            .append(session, Message::tool_error(call.id.clone(), CANCELLED_MSG))
-                            .await?;
+                        append_run_message(
+                            store,
+                            session,
+                            &mut transcript,
+                            Message::tool_error(call.id.clone(), CANCELLED_MSG),
+                        )
+                        .await?;
                         io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
                         audit.decision = "deny";
                         audit.decided_by = "cancelled".into();
@@ -281,12 +313,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                             audit.decided_by = actor.unwrap_or_else(|| "user".into());
                             record_audit(audit_log.as_ref(), &audit);
                             let message = "Người dùng đã từ chối hành động này.".to_string();
-                            store
-                                .append(
-                                    session,
-                                    Message::tool_error(call.id.clone(), message.clone()),
-                                )
-                                .await?;
+                            append_run_message(
+                                store,
+                                session,
+                                &mut transcript,
+                                Message::tool_error(call.id.clone(), message.clone()),
+                            )
+                            .await?;
                             io.on_tool_end(&call.id, &call.name, false, &message);
                             continue;
                         }
@@ -300,12 +333,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                             };
                             audit.decision = "deny";
                             record_audit(audit_log.as_ref(), &audit);
-                            store
-                                .append(
-                                    session,
-                                    Message::tool_error(call.id.clone(), message.clone()),
-                                )
-                                .await?;
+                            append_run_message(
+                                store,
+                                session,
+                                &mut transcript,
+                                Message::tool_error(call.id.clone(), message.clone()),
+                            )
+                            .await?;
                             io.on_tool_end(&call.id, &call.name, false, &message);
                             continue;
                         }
@@ -380,16 +414,18 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             } else {
                 output
             };
-            store
-                .append(
-                    session,
-                    if ok {
-                        Message::tool(call.id.clone(), output.clone())
-                    } else {
-                        Message::tool_error(call.id.clone(), output.clone())
-                    },
-                )
-                .await?;
+            let result_message = if ok {
+                Message::tool(call.id.clone(), output.clone())
+            } else {
+                Message::tool_error(call.id.clone(), output.clone())
+            };
+            append_run_message(store, session, &mut transcript, result_message).await?;
+            if ok
+                && call.name == "load_skill"
+                && let Some(name) = call.args.get("name").and_then(serde_json::Value::as_str)
+            {
+                loaded_skills.insert(name.to_string());
+            }
             io.on_tool_end(&call.id, &call.name, ok, &output);
             if cancelled {
                 continue;
@@ -408,7 +444,21 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         text: text.into(),
         message_id: None,
         ended: EndReason::MaxSteps,
+        tool_call_count,
+        loaded_skills: loaded_skills.into_iter().collect(),
+        transcript,
     })
+}
+
+async fn append_run_message(
+    store: &dyn Store,
+    session: beanagent_types::SessionId,
+    transcript: &mut Vec<Message>,
+    message: Message,
+) -> Result<i64, crate::store::StoreError> {
+    let id = store.append(session, message.clone()).await?;
+    transcript.push(message);
+    Ok(id)
 }
 
 /// Ghi một bản ghi audit — lỗi được log cảnh báo và **không** làm hỏng vòng lặp

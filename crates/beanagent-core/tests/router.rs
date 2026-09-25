@@ -52,6 +52,7 @@ async fn router_with(
             llm: provider,
             audit: None,
             skills_index: "demo: Dùng cho test".into(),
+            skills: None,
         },
         options,
     ));
@@ -495,6 +496,7 @@ async fn confirm_actor_is_written_to_audit_log() {
         llm: provider,
         audit: Some(audit),
         skills_index: String::new(),
+        skills: None,
     }));
     let mut events = router.events();
     let run = router
@@ -636,6 +638,7 @@ async fn explicit_session_id_from_another_user_is_rejected() {
         llm: fake("không được gọi"),
         audit: None,
         skills_index: String::new(),
+        skills: None,
     });
     let result = router
         .submit(Incoming::new("cli", "local", "cli:other", "cướp session").with_session(owned))
@@ -655,8 +658,8 @@ async fn slash_commands_do_not_call_llm() {
     for (command, expected) in [
         ("/skills", "demo:"),
         ("/tasks", "Chưa có"),
-        ("/approve skill-1", "M15"),
-        ("/reject skill-1", "M15"),
+        ("/approve", "Dùng: /approve"),
+        ("/reject", "Dùng: /reject"),
     ] {
         let run = router
             .submit(Incoming::new("cli", "local", "cli:local", command))
@@ -715,6 +718,7 @@ async fn model_command_applies_override_to_next_run_only() {
         llm: provider.clone(),
         audit: None,
         skills_index: String::new(),
+        skills: None,
     }));
     let mut events = router.events();
 
@@ -756,6 +760,7 @@ async fn outbox_retries_with_backoff_then_succeeds() {
         message_id: 9,
         text: "tin cần gửi".into(),
         kind: OutboundKind::Notification,
+        action: None,
     };
     router.notify("test", "chat-1", out.clone()).await.unwrap();
     let channel = Arc::new(FlakyChannel {

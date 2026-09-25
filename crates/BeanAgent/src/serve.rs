@@ -78,9 +78,11 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         .resolve_telegram_token()
         .context("đọc TELEGRAM_BOT_TOKEN thất bại")?;
     let user_skills_root = chat::expand_tilde(&config.data.dir).join("skills");
-    let skills = SkillCatalog::load_with_create_root(
-        &[std::path::PathBuf::from("skills"), user_skills_root.clone()],
+    let project_skills_root = std::path::PathBuf::from("skills");
+    let skills = SkillCatalog::load_with_paths(
+        &[project_skills_root.clone(), user_skills_root.clone()],
         user_skills_root,
+        project_skills_root.join("_drafts"),
     );
     let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
         skills.index()
@@ -100,6 +102,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         llm: provider,
         audit: audit.clone(),
         skills_index,
+        skills: Some(skills.clone()),
     }));
     let scheduler = Arc::new(
         Scheduler::new(

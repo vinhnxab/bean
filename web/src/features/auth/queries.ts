@@ -15,6 +15,7 @@ export const queryKeys = {
   memories: (q: string) => ["memories", { q }] as const,
   skills: ["skills"] as const,
   skill: (name: string) => ["skills", name] as const,
+  skillDrafts: ["skills", "drafts"] as const,
   tasks: ["tasks"] as const,
   audit: ["audit"] as const,
   status: ["status"] as const,

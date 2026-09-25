@@ -16,6 +16,9 @@ import type {
   SessionListResponse,
   SessionQuery,
   SkillDetail,
+  SkillDraftDecisionRequest,
+  SkillDraftDecisionResponse,
+  SkillDraftListResponse,
   SkillListResponse,
   StatusResponse,
   TaskDto,
@@ -178,6 +181,21 @@ export const api = {
 
   getSkill: (name: string, signal?: AbortSignal) =>
     requestJson<SkillDetail>(`/api/skills/${encodeURIComponent(name)}`, { signal }),
+
+  listSkillDrafts: (signal?: AbortSignal) =>
+    requestJson<SkillDraftListResponse>("/api/skills/drafts", { signal }),
+
+  approveSkillDraft: (id: string, request: SkillDraftDecisionRequest) =>
+    requestJson<SkillDraftDecisionResponse>(`/api/skills/drafts/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      body: request,
+    }),
+
+  rejectSkillDraft: (id: string, request: SkillDraftDecisionRequest) =>
+    requestJson<SkillDraftDecisionResponse>(`/api/skills/drafts/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+      body: request,
+    }),
 
   listTasks: (signal?: AbortSignal) => requestJson<TaskListResponse>("/api/tasks", { signal }),
 

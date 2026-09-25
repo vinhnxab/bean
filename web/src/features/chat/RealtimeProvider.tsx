@@ -43,6 +43,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           if (message.type === "final" || message.type === "notification") {
             void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
           }
+          if (message.type === "notification") {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.skillDrafts });
+          }
         }
       },
     });

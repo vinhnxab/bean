@@ -27,6 +27,11 @@ max_tokens = 4096
 [tools]
 enabled = ["files", "shell", "web", "memory", "skills", "schedule"]
 
+[learning]
+enabled = true
+min_tool_calls = 5
+proposal_interval_minutes = 60
+
 [tools.web_search]
 provider = "tavily"                  # tavily | brave | searxng
 api_key_env = "TAVILY_API_KEY"

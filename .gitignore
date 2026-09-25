@@ -15,6 +15,7 @@ web/.vite/
 /workspace/*
 !/workspace/.gitkeep
 /data/
+/skills/_drafts/
 BeanAgent.toml
 auth.toml
 

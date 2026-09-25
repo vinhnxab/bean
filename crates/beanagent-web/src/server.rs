@@ -19,7 +19,7 @@ use beanagent_memory::{
     MemoryRecord, MessageRecord, NewScheduledTask, ScheduledTask, SessionSummary, Store,
 };
 use beanagent_security::AuditLog;
-use beanagent_skills::SkillCatalog;
+use beanagent_skills::{SkillCatalog, SkillDraft, SkillError};
 use beanagent_tools::WorkspaceFs;
 use beanagent_types::{Config, Outbound, Risk, RunEvent, SessionId};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
@@ -741,6 +741,104 @@ async fn get_skill(
     }))
 }
 
+async fn list_skill_drafts(
+    State(state): State<WebState>,
+    jar: CookieJar,
+) -> ApiResult<Json<SkillDraftListResponse>> {
+    let _ = require_user(&state, &jar).await?;
+    let catalog = state.skills.clone();
+    let drafts = tokio::task::spawn_blocking(move || catalog.list_drafts())
+        .await
+        .map_err(|_| ApiFailure::internal())?
+        .map_err(skill_draft_api_error)?;
+    Ok(Json(SkillDraftListResponse {
+        drafts: drafts.iter().map(skill_draft_dto).collect(),
+    }))
+}
+
+async fn approve_skill_draft(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(id): Path<String>,
+    Json(_request): Json<SkillDraftDecisionRequest>,
+) -> ApiResult<Json<SkillDraftDecisionResponse>> {
+    let user_id = require_user(&state, &jar).await?;
+    let decision = state
+        .router
+        .approve_draft(&id, &user_id)
+        .await
+        .map_err(router_skill_error)?;
+    Ok(Json(SkillDraftDecisionResponse {
+        id: decision.id,
+        status: decision.status.as_str().into(),
+    }))
+}
+
+async fn reject_skill_draft(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(id): Path<String>,
+    Json(_request): Json<SkillDraftDecisionRequest>,
+) -> ApiResult<Json<SkillDraftDecisionResponse>> {
+    let user_id = require_user(&state, &jar).await?;
+    let decision = state
+        .router
+        .reject_draft(&id, &user_id)
+        .await
+        .map_err(router_skill_error)?;
+    Ok(Json(SkillDraftDecisionResponse {
+        id: decision.id,
+        status: decision.status.as_str().into(),
+    }))
+}
+
+fn skill_draft_dto(draft: &SkillDraft) -> SkillDraftDto {
+    SkillDraftDto {
+        id: draft.id.clone(),
+        name: draft.name.clone(),
+        kind: draft.kind.as_str().into(),
+        description: draft.description.clone(),
+        content: draft.content.clone(),
+        reason: draft.reason.clone(),
+        status: draft.status.as_str().into(),
+        created_at: draft.created_at.clone(),
+    }
+}
+
+fn router_skill_error(error: beanagent_core::RouterError) -> ApiFailure {
+    match error {
+        beanagent_core::RouterError::Skill(error) => skill_draft_api_error(error),
+        beanagent_core::RouterError::Forbidden(_) => ApiFailure::forbidden(),
+        _ => ApiFailure::internal(),
+    }
+}
+
+fn skill_draft_api_error(error: SkillError) -> ApiFailure {
+    match error {
+        SkillError::DraftNotFound(_) | SkillError::NotFound(_) => ApiFailure::not_found(),
+        SkillError::DraftAlreadyPending(_)
+        | SkillError::DraftConflict(_)
+        | SkillError::AlreadyExists(_) => ApiFailure::new(
+            StatusCode::CONFLICT,
+            "skill_draft_conflict",
+            "skill hoặc bản sửa đã thay đổi",
+        ),
+        SkillError::InvalidName(_)
+        | SkillError::InvalidDescription(_)
+        | SkillError::InvalidFrontmatter(_)
+        | SkillError::MissingField(_)
+        | SkillError::MissingBody
+        | SkillError::InvalidDraft(_) => ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_skill_draft",
+            "skill nháp không hợp lệ",
+        ),
+        SkillError::Io(_) | SkillError::DraftRandom(_) | SkillError::CatalogPoisoned => {
+            ApiFailure::internal()
+        }
+    }
+}
+
 async fn task_owned_by_user(
     state: &WebState,
     task: &ScheduledTask,
@@ -941,18 +1039,6 @@ async fn delete_task(
     Ok(Json(DeleteResponse { deleted }))
 }
 
-async fn not_implemented(State(state): State<WebState>, jar: CookieJar) -> ApiResult<Response> {
-    let _ = require_user(&state, &jar).await?;
-    Ok((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(NotImplementedResponse {
-            code: "not_implemented".into(),
-            message: "tính năng thuộc milestone sau".into(),
-        }),
-    )
-        .into_response())
-}
-
 async fn list_audit(
     State(state): State<WebState>,
     jar: CookieJar,
@@ -993,10 +1079,10 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/memories", get(list_memories))
         .route("/memories/{id}", delete(delete_memory))
         .route("/skills", get(list_skills))
+        .route("/skills/drafts", get(list_skill_drafts))
+        .route("/skills/drafts/{id}/approve", post(approve_skill_draft))
+        .route("/skills/drafts/{id}/reject", post(reject_skill_draft))
         .route("/skills/{name}", get(get_skill))
-        .route("/skills/drafts", get(not_implemented))
-        .route("/skills/drafts/{id}/approve", post(not_implemented))
-        .route("/skills/drafts/{id}/reject", post(not_implemented))
         .route("/tasks", get(list_tasks).post(create_task))
         .route("/tasks/{id}", patch(update_task).delete(delete_task))
         .route("/audit", get(list_audit))

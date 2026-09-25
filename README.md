@@ -10,6 +10,23 @@ make build-headless # binary Rust không cần Node
 make build          # build web rồi nhúng UI vào binary release
 ```
 
+## Learning loop (M15)
+
+Sau một run thành công có đủ số tool call, BeanAgent gọi LLM reflection và chỉ tạo đề xuất
+trong `skills/_drafts/<name>/`; draft không được loader sử dụng cho tới khi người dùng duyệt.
+
+```toml
+[learning]
+enabled = true
+min_tool_calls = 5
+proposal_interval_minutes = 60
+```
+
+Duyệt hoặc bỏ bằng `/approve <id>` / `/reject <id>`, nút inline Telegram, hoặc màn Skills
+trong web. Skill mới chỉ được kích hoạt sau khi duyệt; bản sửa chỉ nhận skill đã được load
+trong chính run đó. Timestamp đề xuất được lưu cạnh draft nên giới hạn tần suất vẫn giữ
+qua restart.
+
 ## MCP client (M14)
 
 BeanAgent dùng SDK Rust chính thức `rmcp` để nạp MCP server qua stdio. Khai báo một hoặc

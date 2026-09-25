@@ -87,16 +87,18 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
             .map_err(|error| anyhow::anyhow!("không mở được store: {error}"))?,
     );
     let user_skills_root = expand_tilde(&config.data.dir).join("skills");
-    let skills = SkillCatalog::load_with_create_root(
-        &[PathBuf::from("skills"), user_skills_root.clone()],
+    let project_skills_root = PathBuf::from("skills");
+    let skills = SkillCatalog::load_with_paths(
+        &[project_skills_root.clone(), user_skills_root.clone()],
         user_skills_root,
+        project_skills_root.join("_drafts"),
     );
     let skills_index = if config.tools.enabled.iter().any(|group| group == "skills") {
         skills.index()
     } else {
         String::new()
     };
-    let built = build_registry(&config, store.clone(), skills, web_search_api_key).await?;
+    let built = build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
     let mcp = built.mcp;
     let registry = Arc::new(built.registry);
     let audit = build_audit(&config);
@@ -108,6 +110,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         llm: provider.clone(),
         audit,
         skills_index,
+        skills: Some(skills),
     }));
     router
         .start_outbox_worker()
@@ -129,7 +132,8 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         provider.name()
     );
     println!("workspace: {workspace}");
-    let run_result = channel.run(router, CancellationToken::new()).await;
+    let run_result = channel.run(router.clone(), CancellationToken::new()).await;
+    router.shutdown();
     mcp.close().await;
     run_result.context("CLI channel dừng lỗi")
 }

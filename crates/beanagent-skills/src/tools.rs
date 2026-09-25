@@ -90,9 +90,18 @@ fn skill_error(error: SkillError) -> ToolError {
         SkillError::AlreadyExists(name) => {
             ToolError::InvalidArgs(format!("skill `{name}` đã tồn tại; chọn tên khác"))
         }
+        SkillError::DraftAlreadyPending(name)
+        | SkillError::DraftConflict(name)
+        | SkillError::DraftNotFound(name) => {
+            ToolError::InvalidArgs(format!("skill nháp `{name}` không hợp lệ"))
+        }
+        SkillError::DraftRandom(message) | SkillError::InvalidDraft(message) => {
+            ToolError::Internal(message)
+        }
         SkillError::InvalidName(message)
         | SkillError::InvalidDescription(message)
         | SkillError::InvalidFrontmatter(message) => ToolError::InvalidArgs(message),
+        SkillError::MissingBody => ToolError::InvalidArgs(SkillError::MissingBody.to_string()),
         SkillError::Io(message) => ToolError::Io(message),
         SkillError::CatalogPoisoned => {
             ToolError::Internal("catalog skill không còn khả dụng".into())

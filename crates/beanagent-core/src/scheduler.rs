@@ -329,6 +329,7 @@ impl Scheduler {
                         message_id,
                         text,
                         kind: OutboundKind::Notification,
+                        action: None,
                     };
                     self.router
                         .notify(&claimed.channel, &claimed.chat_id, outbound)

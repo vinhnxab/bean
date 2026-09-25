@@ -11,6 +11,7 @@ use std::time::Duration;
 use anyhow::Result as AnyResult;
 use beanagent_llm::LlmProvider;
 use beanagent_security::{AuditLog, SessionPolicy};
+use beanagent_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use beanagent_tools::{ToolRegistry, truncate_chars};
 use beanagent_types::{
     Config, ConfirmId, ConfirmOutcome, Outbound, Risk, RunEvent, RunId, SessionId,
@@ -18,7 +19,8 @@ use beanagent_types::{
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{AgentError, RunTurnArgs, run_turn_outcome};
+use crate::agent::{AgentError, RunOutcome, RunTurnArgs, run_turn_outcome};
+use crate::learning::{ReflectionArgs, reflect};
 use crate::run_io::{Decision, RunIo};
 use crate::store::{Store, StoreError};
 
@@ -95,6 +97,12 @@ pub enum RouterError {
     /// Lỗi store.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// Lỗi skill/draft.
+    #[error(transparent)]
+    Skill(#[from] SkillError),
+    /// Lỗi nội bộ không chứa secret.
+    #[error("lỗi nội bộ: {0}")]
+    Internal(String),
     /// Session không tồn tại hoặc không thuộc user/channel/chat.
     #[error("session không hợp lệ cho user/channel/chat")]
     InvalidSession,
@@ -134,6 +142,8 @@ impl RouterError {
         match self {
             Self::Forbidden(_) | Self::InvalidIdentity { .. } => "forbidden",
             Self::Store(_) => "store",
+            Self::Skill(_) => "skill_draft",
+            Self::Internal(_) => "internal",
             Self::InvalidSession => "invalid_session",
             Self::SessionBusy => "session_busy",
             Self::UnknownCommand(_) => "unknown_command",
@@ -189,6 +199,8 @@ pub struct RouterDeps {
     pub audit: Option<Arc<AuditLog>>,
     /// Index skill `name: description` cho `/skills` và system prompt.
     pub skills_index: String,
+    /// Catalog dùng cho learning, duyệt draft và reload sau khi kích hoạt.
+    pub skills: Option<SkillCatalog>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -282,7 +294,9 @@ struct RouterInner {
     registry: Arc<ToolRegistry>,
     llm: Arc<dyn LlmProvider>,
     audit: Option<Arc<AuditLog>>,
-    skills_index: String,
+    skills: Option<SkillCatalog>,
+    skills_index: RwLock<String>,
+    learning_gate: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
     options: RouterOptions,
     events: broadcast::Sender<RunEvent>,
     channels: RwLock<HashMap<String, Arc<dyn Channel>>>,
@@ -323,6 +337,7 @@ impl Router {
             llm,
             audit,
             skills_index,
+            skills,
         } = deps;
         let (events, _) = broadcast::channel(options.event_capacity.max(1));
         Self {
@@ -332,7 +347,9 @@ impl Router {
                 registry,
                 llm,
                 audit,
-                skills_index,
+                skills,
+                skills_index: RwLock::new(skills_index),
+                learning_gate: Mutex::new(None),
                 options,
                 events,
                 channels: RwLock::new(HashMap::new()),
@@ -553,6 +570,13 @@ impl Router {
             background_allowed_tools: queued.background_allowed_tools.clone(),
             last_actor: Mutex::new(None),
         });
+        let skills_index = match read_lock(&self.inner.skills_index) {
+            Ok(index) => index.clone(),
+            Err(error) => {
+                self.emit_error(&queued, "router_state", &error.to_string());
+                return;
+            }
+        };
         let result = run_turn_outcome(RunTurnArgs {
             store: self.inner.store.as_ref(),
             registry: self.inner.registry.as_ref(),
@@ -565,21 +589,164 @@ impl Router {
             session_policy: Some(policy),
             audit: self.inner.audit.clone(),
             channel: audit_channel,
-            skills_index: &self.inner.skills_index,
+            skills_index: &skills_index,
         })
         .await;
         match result {
-            Ok(outcome) => self.emit(RunEvent::Final {
-                session_id: queued.session_id,
-                run_id: queued.run_id,
-                text: outcome.text,
-                message_id: outcome.message_id,
-            }),
+            Ok(outcome) => {
+                let should_reflect = outcome.ended == crate::agent::EndReason::Final
+                    && outcome.tool_call_count
+                        >= usize::try_from(config.learning.min_tool_calls).unwrap_or(usize::MAX);
+                self.emit(RunEvent::Final {
+                    session_id: queued.session_id,
+                    run_id: queued.run_id.clone(),
+                    text: outcome.text.clone(),
+                    message_id: outcome.message_id,
+                });
+                if should_reflect && let Some(reservation) = self.reserve_learning(&config) {
+                    self.spawn_reflection(queued, config, outcome, reservation);
+                }
+            }
             Err(error) => {
                 let code = agent_error_code(&error);
                 self.emit_error(&queued, code, &error.to_string());
             }
         }
+    }
+
+    fn reserve_learning(&self, config: &Config) -> Option<chrono::DateTime<chrono::Utc>> {
+        if !config.learning.enabled {
+            return None;
+        }
+        let catalog = self.inner.skills.as_ref()?;
+        let now = chrono::Utc::now();
+        let last_proposal = match catalog.last_proposal_at() {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(error = %error, "state learning không hợp lệ; bỏ qua reflection");
+                return None;
+            }
+        };
+        if let Some(last) = last_proposal {
+            match chrono::DateTime::parse_from_rfc3339(&last) {
+                Ok(last) => {
+                    let interval = chrono::Duration::from_std(std::time::Duration::from_secs(
+                        config.learning.proposal_interval_minutes.saturating_mul(60),
+                    ))
+                    .unwrap_or(chrono::Duration::MAX);
+                    if now < last.with_timezone(&chrono::Utc) + interval {
+                        return None;
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "state learning có timestamp không hợp lệ");
+                    return None;
+                }
+            }
+        }
+        let mut gate = lock(&self.inner.learning_gate).ok()?;
+        let interval = chrono::Duration::from_std(std::time::Duration::from_secs(
+            config.learning.proposal_interval_minutes.saturating_mul(60),
+        ))
+        .unwrap_or(chrono::Duration::MAX);
+        if gate.is_some_and(|last| now < last + interval) {
+            return None;
+        }
+        *gate = Some(now);
+        Some(now)
+    }
+
+    fn release_learning(&self, reservation: chrono::DateTime<chrono::Utc>) {
+        if let Ok(mut gate) = self.inner.learning_gate.lock()
+            && *gate == Some(reservation)
+        {
+            *gate = None;
+        }
+    }
+
+    fn spawn_reflection(
+        &self,
+        queued: QueuedRun,
+        config: Config,
+        outcome: RunOutcome,
+        reservation: chrono::DateTime<chrono::Utc>,
+    ) {
+        let Some(catalog) = self.inner.skills.clone() else {
+            self.release_learning(reservation);
+            return;
+        };
+        let router = self.clone();
+        let shutdown = self.inner.shutdown.clone();
+        let created_at = reservation.to_rfc3339();
+        tokio::spawn(async move {
+            let result = reflect(ReflectionArgs {
+                store: router.inner.store.as_ref(),
+                llm: router.inner.llm.as_ref(),
+                config: &config,
+                catalog: &catalog,
+                transcript: &outcome.transcript,
+                loaded_skills: &outcome.loaded_skills,
+                session: queued.session_id,
+                channel: &queued.incoming.channel,
+                chat_id: &queued.incoming.chat_id,
+                created_at: &created_at,
+                cancel: shutdown,
+            })
+            .await;
+            match result {
+                Ok(Some(draft)) => {
+                    let verb = match draft.kind {
+                        beanagent_skills::SkillDraftKind::New => "mới",
+                        beanagent_skills::SkillDraftKind::Update => "sửa",
+                    };
+                    let text = format!(
+                        "Đề xuất skill {verb} `{}` đã sẵn sàng để duyệt.\nLý do: {}\nDuyệt: /approve {} · Bỏ: /reject {}",
+                        draft.name, draft.reason, draft.id, draft.id
+                    );
+                    match router
+                        .inner
+                        .store
+                        .append(
+                            queued.session_id,
+                            beanagent_types::Message::assistant(Some(text.clone()), Vec::new()),
+                        )
+                        .await
+                    {
+                        Ok(message_id) => {
+                            let outbound = beanagent_types::Outbound {
+                                session_id: queued.session_id,
+                                message_id,
+                                text,
+                                kind: beanagent_types::OutboundKind::Notification,
+                                action: Some(beanagent_types::OutboundAction::SkillDraft {
+                                    id: draft.id,
+                                    name: draft.name,
+                                    actor: queued.incoming.user_id.clone(),
+                                }),
+                            };
+                            if let Err(error) = router
+                                .notify(
+                                    &queued.incoming.channel,
+                                    &queued.incoming.chat_id,
+                                    outbound,
+                                )
+                                .await
+                            {
+                                tracing::warn!(error = %error, "gửi thông báo skill nháp thất bại");
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(error = %error, "không lưu thông báo skill nháp");
+                        }
+                    }
+                }
+                Ok(None) => router.release_learning(reservation),
+                Err(error) => {
+                    tracing::warn!(error = %error, "reflection M15 thất bại; run chính vẫn hoàn tất");
+                    router.release_learning(reservation);
+                }
+            }
+        });
     }
 
     fn finish(&self, run_id: &RunId, session_id: SessionId) {
@@ -809,11 +976,14 @@ impl Router {
                     }
                 }
             }
-            "/skills" => Ok(if self.inner.skills_index.trim().is_empty() {
-                "Chưa nạp skill.".into()
-            } else {
-                self.inner.skills_index.clone()
-            }),
+            "/skills" => {
+                let index = read_lock(&self.inner.skills_index)?.clone();
+                Ok(if index.trim().is_empty() {
+                    "Chưa nạp skill.".into()
+                } else {
+                    index
+                })
+            }
             "/memory" => {
                 if argument.is_empty() {
                     Ok("Dùng: /memory <truy vấn>".into())
@@ -830,7 +1000,16 @@ impl Router {
                 }
             }
             "/tasks" => Ok("Chưa có tác vụ định kỳ.".into()),
-            "/approve" | "/reject" => Ok("Duyệt skill nháp sẽ được cài ở M15.".into()),
+            "/approve" if argument.is_empty() => Ok("Dùng: /approve <id>".into()),
+            "/reject" if argument.is_empty() => Ok("Dùng: /reject <id>".into()),
+            "/approve" => self
+                .approve_draft(argument, &incoming.user_id)
+                .await
+                .map(|decision| format!("Đã duyệt và kích hoạt skill `{}`.", decision.name)),
+            "/reject" => self
+                .reject_draft(argument, &incoming.user_id)
+                .await
+                .map(|decision| format!("Đã bỏ skill nháp `{}`.", decision.name)),
             other => Err(RouterError::UnknownCommand(other.to_string())),
         };
         match result {
@@ -873,6 +1052,64 @@ impl Router {
 }
 
 impl Router {
+    /// Duyệt skill nháp sau khi actor đã xác thực ở lớp channel.
+    pub async fn approve_draft(
+        &self,
+        id: &str,
+        actor: &str,
+    ) -> Result<SkillDraftDecision, RouterError> {
+        self.authorize_actor(actor)?;
+        let catalog = self.skills_catalog()?;
+        let draft_id = id.to_string();
+        let decision = tokio::task::spawn_blocking(move || catalog.approve_draft(&draft_id))
+            .await
+            .map_err(|error| RouterError::Internal(error.to_string()))??;
+        self.refresh_skills_index()?;
+        Ok(decision)
+    }
+
+    /// Bỏ skill nháp; không reload vì không có skill nào được kích hoạt.
+    pub async fn reject_draft(
+        &self,
+        id: &str,
+        actor: &str,
+    ) -> Result<SkillDraftDecision, RouterError> {
+        self.authorize_actor(actor)?;
+        let catalog = self.skills_catalog()?;
+        let draft_id = id.to_string();
+        tokio::task::spawn_blocking(move || catalog.reject_draft(&draft_id))
+            .await
+            .map_err(|error| RouterError::Internal(error.to_string()))?
+            .map_err(Into::into)
+    }
+
+    fn skills_catalog(&self) -> Result<SkillCatalog, RouterError> {
+        self.inner
+            .skills
+            .clone()
+            .ok_or_else(|| SkillError::NotFound("skill catalog".into()).into())
+    }
+
+    fn authorize_actor(&self, actor: &str) -> Result<(), RouterError> {
+        let config = read_lock(&self.inner.config)?;
+        if config
+            .agent
+            .allowed_users
+            .iter()
+            .any(|allowed| allowed == actor)
+        {
+            Ok(())
+        } else {
+            Err(RouterError::Forbidden(actor.to_string()))
+        }
+    }
+
+    fn refresh_skills_index(&self) -> Result<(), RouterError> {
+        let catalog = self.skills_catalog()?;
+        *write_lock(&self.inner.skills_index)? = catalog.index();
+        Ok(())
+    }
+
     /// Phản hồi hợp lệ đầu tiên thắng; response sau trả `ConfirmNotFound`.
     pub async fn resolve_confirm(
         &self,
@@ -1297,6 +1534,8 @@ fn router_error_code(error: &RouterError) -> &'static str {
     match error {
         RouterError::Forbidden(_) | RouterError::InvalidIdentity { .. } => "forbidden",
         RouterError::Store(_) => "store",
+        RouterError::Skill(_) => "skill_draft",
+        RouterError::Internal(_) => "internal",
         RouterError::InvalidSession => "invalid_session",
         RouterError::SessionBusy => "session_busy",
         RouterError::UnknownCommand(_) => "unknown_command",

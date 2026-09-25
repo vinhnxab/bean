@@ -14,7 +14,7 @@ use beanagent_core::{Router, RouterDeps};
 use beanagent_llm::FakeProvider;
 use beanagent_memory::{MemoryStore, SqliteStore, Store};
 use beanagent_security::{AuditLog, CapWorkspace};
-use beanagent_skills::SkillCatalog;
+use beanagent_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind};
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use beanagent_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec};
 use beanagent_web::{
@@ -90,13 +90,20 @@ async fn make_state(
     let mut registry = ToolRegistry::with_workspace(workspace.clone());
     registry.register(Arc::new(ConfirmWrite)).unwrap();
     let store_dyn = store;
+    let create_root = config.data.dir.join("skills");
+    let skills = SkillCatalog::load_with_paths(
+        std::slice::from_ref(&create_root),
+        create_root.clone(),
+        config.agent.workspace.join("skills/_drafts"),
+    );
     let router = Arc::new(Router::new(RouterDeps {
         config: config.clone(),
         store: store_dyn.clone(),
         registry: Arc::new(registry),
         llm: Arc::new(FakeProvider::new(responses)),
         audit: None,
-        skills_index: String::new(),
+        skills_index: skills.index(),
+        skills: Some(skills.clone()),
     }));
     let auth = AuthService::load(&config, store_dyn.clone()).unwrap();
     let state = WebState::new(
@@ -105,7 +112,7 @@ async fn make_state(
         router,
         auth,
         None,
-        SkillCatalog::load(&[]),
+        skills,
         Some(workspace),
     )
     .unwrap();
@@ -936,4 +943,63 @@ async fn websocket_reconnect_restores_pending_run_and_survives_disconnect() {
         "ok"
     );
     server.abort();
+}
+
+#[tokio::test]
+async fn skill_drafts_can_be_listed_and_approved_but_are_inactive_first() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, state, _store) = fixture(origin, vec![]).await;
+    let draft = state
+        .skills
+        .create_draft(NewSkillDraft {
+            name: "release-checklist".into(),
+            kind: SkillDraftKind::New,
+            description: "Dùng trước khi phát hành.".into(),
+            body: "# Steps\n1. Chạy toàn bộ test.".into(),
+            reason: "Quy trình này được lặp lại.".into(),
+            source_session_id: 1,
+            source_channel: "web".into(),
+            source_chat_id: "web:admin".into(),
+            created_at: "2026-09-25T10:00:00Z".into(),
+        })
+        .unwrap();
+    assert!(state.skills.get("release-checklist").is_err());
+    let token = login(&app, origin).await;
+
+    let listed = app
+        .clone()
+        .oneshot(get_request("/api/skills/drafts", origin, Some(&token)))
+        .await
+        .unwrap();
+    assert_eq!(listed.status(), StatusCode::OK);
+    let body = listed.into_body().collect().await.unwrap().to_bytes();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["drafts"][0]["id"], draft.id);
+    assert_eq!(value["drafts"][0]["kind"], "new");
+
+    let approve = Request::builder()
+        .method("POST")
+        .uri(format!("/api/skills/drafts/{}/approve", draft.id))
+        .header(header::HOST, "127.0.0.1:7878")
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("beanagent_session={token}"))
+        .body(Body::from("{}"))
+        .unwrap();
+    let response = app.clone().oneshot(approve).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(state.skills.get("release-checklist").is_ok());
+    assert!(state.skills.list_drafts().unwrap().is_empty());
+
+    let detail = app
+        .oneshot(get_request(
+            "/api/skills/release-checklist",
+            origin,
+            Some(&token),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::OK);
 }

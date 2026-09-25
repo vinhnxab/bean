@@ -26,6 +26,7 @@ export type { SessionDto } from "./generated/SessionDto";
 export type { SessionListResponse } from "./generated/SessionListResponse";
 export type { SessionQuery } from "./generated/SessionQuery";
 export type { SkillDetail } from "./generated/SkillDetail";
+export type { SkillDraftDecisionRequest } from "./generated/SkillDraftDecisionRequest";
 export type { SkillDraftDecisionResponse } from "./generated/SkillDraftDecisionResponse";
 export type { SkillDraftDto } from "./generated/SkillDraftDto";
 export type { SkillDraftListResponse } from "./generated/SkillDraftListResponse";

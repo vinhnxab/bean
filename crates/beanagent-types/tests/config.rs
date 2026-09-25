@@ -44,6 +44,9 @@ fn example_file_parses_and_validates() {
     assert_eq!(config.security.sandbox.mode, SandboxMode::Docker);
     assert_eq!(config.security.sandbox.memory, "512m");
     assert!(!config.security.sandbox.network);
+    assert!(config.learning.enabled);
+    assert_eq!(config.learning.min_tool_calls, 5);
+    assert_eq!(config.learning.proposal_interval_minutes, 60);
     assert_eq!(config.tools.web_search.provider, WebSearchProvider::Tavily);
     assert_eq!(config.mcp_servers.len(), 1);
     assert_eq!(config.mcp_servers[0].name, "example");
@@ -103,6 +106,11 @@ fn invalid_semantic_values_are_rejected() {
         ),
         ("[llm]\nmodel = \"\"\n", "llm.model"),
         ("[llm]\nmax_tokens = 0\n", "llm.max_tokens"),
+        ("[learning]\nmin_tool_calls = 0\n", "min_tool_calls"),
+        (
+            "[learning]\nproposal_interval_minutes = 0\n",
+            "proposal_interval_minutes",
+        ),
         ("[llm]\nallowed_models = [\"khac\"]\n", "allowed_models"),
         ("[security]\ndaily_token_budget = 0\n", "daily_token_budget"),
         (

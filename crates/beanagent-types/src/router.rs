@@ -136,6 +136,24 @@ pub struct Outbound {
     pub text: String,
     /// Phân loại tin.
     pub kind: OutboundKind,
+    /// Metadata tùy chọn để adapter hiển thị hành động đúng cấu trúc.
+    #[serde(default)]
+    pub action: Option<OutboundAction>,
+}
+
+/// Hành động gắn với outbound chủ động.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OutboundAction {
+    /// Đề xuất skill nháp cần người dùng duyệt.
+    SkillDraft {
+        /// ID draft ngẫu nhiên.
+        id: String,
+        /// Tên skill được đề xuất.
+        name: String,
+        /// User ID đã tạo run; callback inline chỉ nhận đúng user này.
+        actor: String,
+    },
 }
 
 /// Loại tin chủ động.

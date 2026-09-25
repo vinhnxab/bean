@@ -9,10 +9,14 @@ use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use tracing::{debug, warn};
 
+use crate::drafts::DraftRuntime;
+
 /// Tên file bắt buộc trong mỗi thư mục skill.
 pub const SKILL_FILE: &str = "SKILL.md";
 /// Trần độ dài description theo số ký tự Unicode.
 pub const MAX_DESCRIPTION_CHARS: usize = 300;
+/// Trần an toàn cho SKILL.md do reflection sinh.
+pub const MAX_SKILL_CHARS: usize = 100_000;
 
 /// Một skill đã được loader kiểm tra.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +40,9 @@ pub enum SkillError {
     /// Thiếu `name` hoặc `description`.
     #[error("thiếu trường frontmatter `{0}`")]
     MissingField(&'static str),
+    /// Frontmatter hợp lệ nhưng phần hướng dẫn bên dưới rỗng.
+    #[error("nội dung hướng dẫn của skill rỗng")]
+    MissingBody,
     /// Tên không phải kebab-case hoặc chứa ký tự đường dẫn.
     #[error("tên skill không hợp lệ: {0}")]
     InvalidName(String),
@@ -45,6 +52,21 @@ pub enum SkillError {
     /// Skill đã tồn tại; không được ghi đè.
     #[error("skill đã tồn tại: {0}")]
     AlreadyExists(String),
+    /// Đã có một draft pending cho cùng tên skill.
+    #[error("skill `{0}` đã có đề xuất đang chờ duyệt")]
+    DraftAlreadyPending(String),
+    /// Không tìm thấy draft theo ID.
+    #[error("không tìm thấy skill nháp: {0}")]
+    DraftNotFound(String),
+    /// Skill nền đã thay đổi sau khi reflection tạo draft.
+    #[error("skill `{0}` đã thay đổi sau khi đề xuất; hãy tạo lại draft")]
+    DraftConflict(String),
+    /// Metadata hoặc nội dung draft không hợp lệ.
+    #[error("skill nháp không hợp lệ: {0}")]
+    InvalidDraft(String),
+    /// OS không cấp entropy để tạo ID draft.
+    #[error("không sinh được ID skill nháp: {0}")]
+    DraftRandom(String),
     /// Lỗi I/O.
     #[error("lỗi I/O skill: {0}")]
     Io(String),
@@ -59,8 +81,11 @@ pub enum SkillError {
 /// Catalog dùng chung cho system prompt và các tool.
 #[derive(Clone)]
 pub struct SkillCatalog {
-    skills: Arc<RwLock<BTreeMap<String, Skill>>>,
-    create_root: PathBuf,
+    pub(crate) skills: Arc<RwLock<BTreeMap<String, Skill>>>,
+    pub(crate) roots: Arc<Vec<PathBuf>>,
+    pub(crate) create_root: PathBuf,
+    pub(crate) draft_root: PathBuf,
+    pub(crate) drafts: DraftRuntime,
 }
 
 impl std::fmt::Debug for SkillCatalog {
@@ -73,6 +98,7 @@ impl std::fmt::Debug for SkillCatalog {
         f.debug_struct("SkillCatalog")
             .field("skills", &names)
             .field("create_root", &self.create_root)
+            .field("draft_root", &self.draft_root)
             .finish()
     }
 }
@@ -91,9 +117,22 @@ impl SkillCatalog {
     /// Như [`SkillCatalog::load`], nhưng chỉ định rõ thư mục dùng cho `create_skill`.
     #[must_use]
     pub fn load_with_create_root(roots: &[PathBuf], create_root: PathBuf) -> Self {
+        let primary_root = roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("skills"));
+        Self::load_with_paths(roots, create_root, primary_root.join("_drafts"))
+    }
+
+    /// Dựng catalog với đầy đủ các root, gồm thư mục chứa draft M15.
+    #[must_use]
+    pub fn load_with_paths(roots: &[PathBuf], create_root: PathBuf, draft_root: PathBuf) -> Self {
         let catalog = Self {
             skills: Arc::new(RwLock::new(BTreeMap::new())),
+            roots: Arc::new(roots.to_vec()),
             create_root,
+            draft_root: draft_root.clone(),
+            drafts: DraftRuntime::load(&draft_root),
         };
         for root in roots {
             catalog.load_root(root);
@@ -139,6 +178,7 @@ impl SkillCatalog {
     pub fn create(&self, name: &str, description: &str, body: &str) -> Result<Skill, SkillError> {
         validate_name(name)?;
         let description = normalize_description(description)?;
+        let content = render_skill(name, &description, body)?;
         {
             let skills = self
                 .skills
@@ -158,10 +198,6 @@ impl SkillCatalog {
             Err(e) => return Err(SkillError::Io(e.to_string())),
         }
         let file_path = directory.join(SKILL_FILE);
-        let description_yaml =
-            serde_json::to_string(&description).unwrap_or_else(|_| "\"\"".to_string());
-        let content =
-            format!("---\nname: {name}\ndescription: {description_yaml}\n---\n\n{body}\n");
         let result = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -186,6 +222,42 @@ impl SkillCatalog {
         Ok(skill)
     }
 
+    /// Nạp lại toàn bộ skill đang hoạt động từ các root.
+    pub fn reload(&self) -> Result<(), SkillError> {
+        let mut loaded = BTreeMap::new();
+        for root in self.roots.iter() {
+            if let Ok(entries) = fs::read_dir(root) {
+                let mut directories = Vec::new();
+                for entry in entries.flatten() {
+                    let Ok(file_type) = entry.file_type() else {
+                        continue;
+                    };
+                    if file_type.is_dir() && entry.file_name() != std::ffi::OsStr::new("_drafts") {
+                        directories.push(entry.path());
+                    }
+                }
+                directories.sort();
+                for directory in directories {
+                    match Self::read_skill(&directory) {
+                        Ok(skill) => {
+                            loaded.insert(skill.name.clone(), skill);
+                        }
+                        Err(error) => warn!(
+                            path = %directory.display(),
+                            error = %error,
+                            "bỏ qua skill không hợp lệ khi reload"
+                        ),
+                    }
+                }
+            }
+        }
+        *self
+            .skills
+            .write()
+            .map_err(|_| SkillError::CatalogPoisoned)? = loaded;
+        Ok(())
+    }
+
     fn load_root(&self, root: &Path) {
         let entries = match fs::read_dir(root) {
             Ok(entries) => entries,
@@ -202,7 +274,12 @@ impl SkillCatalog {
         for entry in entries {
             match entry {
                 Ok(entry) => match entry.file_type() {
-                    Ok(file_type) if file_type.is_dir() => directories.push(entry.path()),
+                    Ok(file_type)
+                        if file_type.is_dir()
+                            && entry.file_name() != std::ffi::OsStr::new("_drafts") =>
+                    {
+                        directories.push(entry.path());
+                    }
                     Ok(_) => {}
                     Err(e) => {
                         warn!(path = %entry.path().display(), error = %e, "bỏ qua entry skill lỗi")
@@ -233,7 +310,7 @@ impl SkillCatalog {
         }
     }
 
-    fn read_skill(directory: &Path) -> Result<Skill, SkillError> {
+    pub(crate) fn read_skill(directory: &Path) -> Result<Skill, SkillError> {
         let directory_name = directory
             .file_name()
             .and_then(|name| name.to_str())
@@ -247,6 +324,7 @@ impl SkillCatalog {
             )));
         }
         let content = fs::read_to_string(&file_path).map_err(|e| SkillError::Io(e.to_string()))?;
+        validate_skill_size(&content)?;
         let (name, description) = parse_frontmatter(&content)?;
         if name != directory_name {
             return Err(SkillError::InvalidName(format!(
@@ -265,7 +343,8 @@ impl SkillCatalog {
 
 /// Parse đúng hai field scalar `name` và `description` trong frontmatter.
 fn parse_frontmatter(content: &str) -> Result<(String, String), SkillError> {
-    let mut lines = content.lines();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut lines = lines.iter().copied();
     if lines.next().map(str::trim) != Some("---") {
         return Err(SkillError::InvalidFrontmatter(
             "phải bắt đầu bằng `---`".to_string(),
@@ -274,7 +353,7 @@ fn parse_frontmatter(content: &str) -> Result<(String, String), SkillError> {
     let mut name = None;
     let mut description = None;
     let mut closed = false;
-    for line in lines {
+    for line in lines.by_ref() {
         let line = line.trim();
         if line == "---" {
             closed = true;
@@ -308,11 +387,40 @@ fn parse_frontmatter(content: &str) -> Result<(String, String), SkillError> {
             "thiếu dấu đóng `---`".to_string(),
         ));
     }
+    if !lines.any(|line| !line.trim().is_empty()) {
+        return Err(SkillError::MissingBody);
+    }
     let name = name.ok_or(SkillError::MissingField("name"))?;
     let description = description.ok_or(SkillError::MissingField("description"))?;
     validate_name(&name)?;
     let description = normalize_description(&description)?;
     Ok((name, description))
+}
+
+pub(crate) fn render_skill(
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<String, SkillError> {
+    let description = normalize_description(description)?;
+    if body.trim().is_empty() {
+        return Err(SkillError::MissingBody);
+    }
+    let description_yaml =
+        serde_json::to_string(&description).map_err(|error| SkillError::Io(error.to_string()))?;
+    let content = format!("---\nname: {name}\ndescription: {description_yaml}\n---\n\n{body}\n");
+    validate_skill_size(&content)?;
+    Ok(content)
+}
+
+pub(crate) fn validate_skill_size(content: &str) -> Result<(), SkillError> {
+    let length = content.chars().count();
+    if length > MAX_SKILL_CHARS {
+        return Err(SkillError::InvalidFrontmatter(format!(
+            "SKILL.md dài {length} ký tự, tối đa {MAX_SKILL_CHARS}"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_scalar(raw: &str) -> Result<String, SkillError> {

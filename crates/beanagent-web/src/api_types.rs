@@ -370,18 +370,26 @@ pub struct TaskUpdateRequest {
     pub enabled: bool,
 }
 
-/// Skill nháp ở milestone sau.
+/// Một skill nháp do learning loop đề xuất.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SkillDraftDto {
-    /// ID nháp.
+    /// ID nháp ngẫu nhiên.
     pub id: String,
     /// Tên skill.
     pub name: String,
-    /// Nội dung diff hoặc nội dung nháp.
+    /// `new` hoặc `update`.
+    pub kind: String,
+    /// Description của skill được đề xuất.
+    pub description: String,
+    /// Nội dung đầy đủ với skill mới, unified diff với skill sửa.
     pub content: String,
+    /// Lý do reflection đưa ra.
+    pub reason: String,
     /// Trạng thái duyệt.
     pub status: String,
+    /// Timestamp tạo RFC3339 UTC.
+    pub created_at: String,
 }
 
 /// Danh sách skill nháp.
@@ -391,6 +399,12 @@ pub struct SkillDraftListResponse {
     /// Các nháp.
     pub drafts: Vec<SkillDraftDto>,
 }
+
+/// Empty JSON body for draft approve/reject; the draft id is in the path.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct SkillDraftDecisionRequest {}
 
 /// Kết quả duyệt/từ chối skill nháp.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

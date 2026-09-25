@@ -19,6 +19,7 @@
 
 pub mod agent;
 pub mod context;
+mod learning;
 pub mod prompt;
 pub mod router;
 pub mod run_io;
