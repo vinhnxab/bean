@@ -26,6 +26,10 @@ fn config() -> Config {
     config.agent.max_steps = 6;
     config.security.tool_timeout_seconds = 5;
     config
+        .agent
+        .allowed_users
+        .extend(["telegram:42".to_string(), "telegram:99".to_string()]);
+    config
 }
 
 async fn router_with(
@@ -779,4 +783,61 @@ async fn outbox_retries_with_backoff_then_succeeds() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn stop_command_cancels_only_the_sender_session_in_shared_chat() {
+    let store = Arc::new(MemoryStore::new());
+    let provider = Arc::new(SlowProvider {
+        delay: Duration::from_millis(500),
+        finished: Notify::new(),
+    });
+    let (_temp, router) = router_with(
+        store.clone(),
+        provider.clone(),
+        vec![],
+        RouterOptions::default(),
+    )
+    .await;
+    let mut events = router.events();
+    let run_42 = router
+        .submit(Incoming::new(
+            "telegram",
+            "group-1",
+            "telegram:42",
+            "việc của 42",
+        ))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let run_99 = router
+        .submit(Incoming::new(
+            "telegram",
+            "group-1",
+            "telegram:99",
+            "việc của 99",
+        ))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let stop_42 = router
+        .submit(Incoming::new("telegram", "group-1", "telegram:42", "/stop"))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        next_event(&mut events, &stop_42).await,
+        RunEvent::Final { text, .. } if text.contains("dừng run")
+    ));
+    assert!(matches!(
+        next_event(&mut events, &run_42).await,
+        RunEvent::Error { code, .. } if code == "cancelled"
+    ));
+    assert_eq!(
+        router.active_run("telegram", "group-1"),
+        Some(run_99.clone())
+    );
+
+    assert_eq!(wait_final(&mut events, &run_99).await, "xong");
+    assert_eq!(router.active_run("telegram", "group-1"), None);
 }

@@ -488,13 +488,20 @@ async fn status(State(state): State<WebState>, jar: CookieJar) -> ApiResult<Json
         .usage(&today)
         .await
         .map_err(|_| ApiFailure::internal())?;
+    let mut channels = Vec::with_capacity(2);
+    if state.config.web.enabled {
+        channels.push("web".to_string());
+    }
+    if state.config.telegram.enabled {
+        channels.push("telegram".to_string());
+    }
     Ok(Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         model: state.config.llm.model.clone(),
         daily_token_budget: state.config.security.daily_token_budget,
         tokens_used: u64::from(usage.total()),
         uptime_seconds: state.started_at.elapsed().as_secs(),
-        channels: vec!["web".into()],
+        channels,
     }))
 }
 

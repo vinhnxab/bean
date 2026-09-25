@@ -1,6 +1,6 @@
 //! BeanAgent — binary duy nhất (agents.md mục 4).
 //!
-//! Ba lệnh: `chat` (REPL trên terminal), `serve` (web + Telegram + scheduler),
+//! Ba lệnh: `chat` (REPL trên terminal), `serve` (web + Telegram),
 //! `auth` (tiện ích xác thực giao diện web).
 #![forbid(unsafe_code)]
 

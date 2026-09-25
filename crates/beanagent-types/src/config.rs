@@ -644,6 +644,19 @@ impl Config {
                     "telegram.enabled = true nhưng telegram.allowed_user_ids rỗng — allowlist là bắt buộc (mục 13)",
                 ));
             }
+            for user_id in &self.telegram.allowed_user_ids {
+                let identity = format!("telegram:{user_id}");
+                if !self
+                    .agent
+                    .allowed_users
+                    .iter()
+                    .any(|allowed| allowed == &identity)
+                {
+                    return Err(invalid(format!(
+                        "telegram user {user_id} phải có `{identity}` trong agent.allowed_users để Router cho phép"
+                    )));
+                }
+            }
             if self.telegram.token_env.trim().is_empty() {
                 return Err(invalid(
                     "telegram.token_env rỗng — cần TÊN biến môi trường chứa bot token",
@@ -711,7 +724,27 @@ impl Config {
         self.resolve_secrets_with(|name| std::env::var(name).ok())
     }
 
-    /// Đọc optional API key cho `web_search` từ biến môi trường được cấu hình.
+    /// Read only the Telegram bot token from its configured environment variable.
+    ///
+    /// This is separate from [`Config::resolve_secrets`] so `serve --fake-llm`
+    /// can start Telegram without requiring an unused LLM API key.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::MissingEnv`] when Telegram is enabled and its
+    /// configured environment variable is absent or blank.
+    pub fn resolve_telegram_token(&self) -> Result<Option<SecretString>, ConfigError> {
+        if !self.telegram.enabled {
+            return Ok(None);
+        }
+        let token = read_required(
+            &|name: &str| std::env::var(name).ok(),
+            "telegram.token_env",
+            &self.telegram.token_env,
+        )?;
+        Ok(Some(token))
+    }
+
+    /// Read optional API key for `web_search` from biến môi trường được cấu hình.
     ///
     /// Trả `None` khi nhóm `web` tắt, provider không cần key (SearXNG), hoặc biến chưa
     /// được đặt. Việc thiếu key không chặn khởi động; `web_search` sẽ báo rõ khi được gọi.

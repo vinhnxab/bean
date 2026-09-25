@@ -33,7 +33,11 @@ fn example_file_parses_and_validates() {
     assert_eq!(config.agent.max_steps, 25);
     assert_eq!(
         config.agent.allowed_users,
-        vec!["web:admin".to_string(), "cli:local".to_string()]
+        vec![
+            "web:admin".to_string(),
+            "cli:local".to_string(),
+            "telegram:123456789".to_string(),
+        ]
     );
     assert_eq!(config.llm.provider.as_str(), "anthropic");
     assert_eq!(config.llm.model, "claude-sonnet-5");
@@ -109,7 +113,10 @@ fn invalid_semantic_values_are_rejected() {
         ("[web]\nsession_ttl_hours = 0\n", "session_ttl_hours"),
         ("[web]\npublic_origin = \"ftp://x\"\n", "public_origin"),
         ("[web]\nbind = \"0.0.0.0:7878\"\n", "allow_remote"),
-        ("[telegram]\nenabled = true\n", "allowed_user_ids"),
+        (
+            "[telegram]\nenabled = true\nallowed_user_ids = [42]\n",
+            "agent.allowed_users",
+        ),
         ("[[mcp_servers]]\nname = \"a b\"\ncommand = \"x\"\n", "name"),
         ("[[mcp_servers]]\nname = \"s\"\ncommand = \"\"\n", "command"),
     ];

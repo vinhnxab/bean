@@ -85,6 +85,7 @@ fn telegram_token_only_required_when_enabled() {
 
     config.telegram.enabled = true;
     config.telegram.allowed_user_ids = vec![42];
+    config.agent.allowed_users.push("telegram:42".into());
     let err = config
         .resolve_secrets_with(env_from(&[("ANTHROPIC_API_KEY", "k")]))
         .unwrap_err();

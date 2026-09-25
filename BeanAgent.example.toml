@@ -11,7 +11,7 @@ max_steps = 25
 context_budget_tokens = 100000
 timezone = "Asia/Ho_Chi_Minh"
 # Lớp kiểm tra thứ hai ở lõi, ngoài allowlist của từng kênh (mục 10).
-allowed_users = ["web:admin", "cli:local"]
+allowed_users = ["web:admin", "cli:local", "telegram:123456789"]
 
 [data]
 dir = "~/.BeanAgent"                 # sqlite, audit log, auth.toml

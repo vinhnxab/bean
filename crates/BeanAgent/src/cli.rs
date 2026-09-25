@@ -24,7 +24,7 @@ pub enum Command {
     /// REPL trên terminal (không cần web, không cần Node).
     Chat(ChatArgs),
 
-    /// Chạy web + Telegram + scheduler trong một tiến trình.
+    /// Chạy web + Telegram trong một tiến trình.
     Serve(ServeArgs),
 
     /// Tiện ích xác thực cho giao diện web.

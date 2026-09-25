@@ -74,6 +74,9 @@ fn make_config(data: &Path, workspace: &Path, origin: &str) -> Config {
     config.web.public_origin = origin.to_string();
     config.web.session_ttl_hours = 1;
     config.agent.allowed_users = vec!["web:admin".into()];
+    config.telegram.enabled = true;
+    config.telegram.allowed_user_ids = vec![42];
+    config.agent.allowed_users.push("telegram:42".into());
     config
 }
 
@@ -206,6 +209,23 @@ async fn unauthenticated_and_forbidden_requests_are_json() {
         forbidden.headers().get(header::CONTENT_TYPE).unwrap(),
         "application/json"
     );
+}
+
+#[tokio::test]
+async fn authenticated_status_lists_web_and_telegram_channels() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, _store) = fixture(origin, vec![]).await;
+    let token = login(&app, origin).await;
+    let response = app
+        .oneshot(get_request("/api/status", origin, Some(&token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status["channels"], serde_json::json!(["web", "telegram"]));
 }
 
 #[tokio::test]

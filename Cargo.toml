@@ -65,6 +65,9 @@ http-body-util = "0.1.5"
 mime_guess = "2.0.5"
 tokio-tungstenite = "0.30.0"
 
+# Telegram long polling (teloxide 0.17; Rustls, không OpenSSL).
+teloxide = { version = "0.17.0", default-features = false, features = ["rustls"] }
+
 anyhow = "1.0.104"
 async-trait = "0.1.89"
 clap = { version = "4.6.7", features = ["derive", "env"] }

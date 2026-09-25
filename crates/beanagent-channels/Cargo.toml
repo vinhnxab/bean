@@ -11,3 +11,20 @@ description = "Adapter kênh ngoài (Telegram, sau: Discord, Slack)"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+beanagent-core.workspace = true
+beanagent-types.workspace = true
+secrecy.workspace = true
+teloxide.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+beanagent-llm.workspace = true
+beanagent-security.workspace = true
+beanagent-tools.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

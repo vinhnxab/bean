@@ -746,7 +746,7 @@ impl Router {
                 }
             }
             "/stop" => {
-                self.cancel(&incoming.channel, &incoming.chat_id).await;
+                self.cancel_session(session).await;
                 Ok("Đã yêu cầu dừng run hiện tại.".into())
             }
             "/model" => {
