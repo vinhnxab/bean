@@ -7,4 +7,5 @@
 # Nếu install báo lỗi về một package chưa được duyệt: đọc tên package, tự đánh giá,
 # rồi thêm vào đây với `true` (cho phép) hoặc `false` (chặn có chủ ý) và ghi lý do.
 strictDepBuilds: true
-allowBuilds: {}
+allowBuilds:
+  msw: true # postinstall tạo browser mock artifact; package test được duyệt tường minh.

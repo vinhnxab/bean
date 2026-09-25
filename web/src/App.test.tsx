@@ -1,23 +1,37 @@
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 
 import App from "@/App";
 import { I18nProvider } from "@/i18n";
+import { testServer } from "@/test/server";
 
-/**
- * Test khói của M1: trang trống render được, dùng từ điển tiếng Việt mặc định
- * (agents.md mục 21 M1: "một test Vitest tối thiểu cho web").
- */
-describe("App", () => {
-  it("hiển thị tiêu đề và thông báo khung M1 bằng tiếng Việt", () => {
-    render(
+function renderApp() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <App />
-      </I18nProvider>,
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe("App", () => {
+  it("chuyển về trang đăng nhập khi API trả 401", async () => {
+    window.history.pushState({}, "", "/");
+    testServer.use(
+      http.get("/api/auth/me", () =>
+        HttpResponse.json({ code: "unauthorized", message: "no" }, { status: 401 }),
+      ),
     );
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("BeanAgent");
-    expect(screen.getByText(/Trợ lý AI cá nhân/)).toBeInTheDocument();
-    expect(screen.getByText(/Khung giao diện M1/)).toBeInTheDocument();
+    renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /Đăng nhập BeanAgent/ })).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Mật khẩu")).toBeInTheDocument();
   });
 });
