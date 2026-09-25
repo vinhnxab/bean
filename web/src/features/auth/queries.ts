@@ -6,8 +6,18 @@ export type AuthUser = AuthMeResponse;
 
 export const queryKeys = {
   auth: ["auth", "me"] as const,
-  sessions: ["sessions", { archived: false }] as const,
+  /** Prefix dùng để invalidate mọi biến thể danh sách session. */
+  sessions: ["sessions"] as const,
+  sessionList: (q: string, archived: boolean) => ["sessions", { q, archived }] as const,
   messages: (sessionId: number) => ["messages", sessionId] as const,
+  memoryFiles: ["memory-files"] as const,
+  memoryFile: (name: string) => ["memory-files", name] as const,
+  memories: (q: string) => ["memories", { q }] as const,
+  skills: ["skills"] as const,
+  skill: (name: string) => ["skills", name] as const,
+  tasks: ["tasks"] as const,
+  audit: ["audit"] as const,
+  status: ["status"] as const,
 };
 
 export function useAuth() {

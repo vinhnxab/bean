@@ -110,8 +110,10 @@ getrandom = "0.3.4"
 walkdir = "2.5.0"
 # Pattern regex cho tool `grep`.
 regex = "1.13.1"
-# RFC3339 timestamps + "Current time" trong system prompt (mục 19). Cron ở M13 dùng crate khác.
+# RFC3339 timestamps + "Current time" trong system prompt (mục 19).
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# Cron parser cho REST metadata của tác vụ; scheduler tick thực sự thuộc M13.
+croner = "4.0.0"
 
 # --- M4: security (phiên bản đã xác nhận qua index.crates.io 2026-09-22) ---
 # Path jail (mục 15.1): cap-std dùng openat2 RESOLVE_BENEATH trên Linux (fallback đi từng

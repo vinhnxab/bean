@@ -1,11 +1,15 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
-
+import { AuditPage } from "@/features/audit/AuditPage";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { ChatIndexPage } from "@/features/chat/ChatIndexPage";
 import { ChatLayout } from "@/features/chat/ChatLayout";
 import { ChatPage } from "@/features/chat/ChatPage";
 import { RealtimeProvider } from "@/features/chat/RealtimeProvider";
+import { MemoryPage } from "@/features/memory/MemoryPage";
+import { SkillsPage } from "@/features/skills/SkillsPage";
+import { StatusPage } from "@/features/status/StatusPage";
+import { TasksPage } from "@/features/tasks/TasksPage";
 
 export default function App() {
   return (
@@ -22,6 +26,12 @@ export default function App() {
           >
             <Route index element={<ChatIndexPage />} />
             <Route path="sessions/:sessionId" element={<ChatPage />} />
+            <Route path="memory" element={<MemoryPage />} />
+            <Route path="skills" element={<SkillsPage />} />
+            <Route path="skills/:name" element={<SkillsPage />} />
+            <Route path="tasks" element={<TasksPage />} />
+            <Route path="audit" element={<AuditPage />} />
+            <Route path="status" element={<StatusPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

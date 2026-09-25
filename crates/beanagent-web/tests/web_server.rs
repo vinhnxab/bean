@@ -378,6 +378,75 @@ async fn rest_session_access_is_owner_only() {
 }
 
 #[tokio::test]
+async fn rest_task_crud_validates_cron_and_updates_store() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, store) = fixture(origin, vec![]).await;
+    let token = login(&app, origin).await;
+    let host = "127.0.0.1:7878";
+
+    let create = Request::builder()
+        .method("POST")
+        .uri("/api/tasks")
+        .header(header::HOST, host)
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("beanagent_session={token}"))
+        .body(Body::from(
+            r#"{"cron":"0 9 * * *","prompt":"daily summary","channel":"web","chat_id":"web:admin","allowed_tools":[],"enabled":true}"#,
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(create).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let tasks = store.list_tasks().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].prompt, "daily summary");
+    assert!(!tasks[0].next_run.is_empty());
+
+    let toggle = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/tasks/{}", tasks[0].id))
+        .header(header::HOST, host)
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("beanagent_session={token}"))
+        .body(Body::from(r#"{"enabled":false}"#))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(toggle).await.unwrap().status(),
+        StatusCode::OK
+    );
+    assert!(!store.list_tasks().await.unwrap()[0].enabled);
+
+    let invalid = Request::builder()
+        .method("POST")
+        .uri("/api/tasks")
+        .header(header::HOST, host)
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("beanagent_session={token}"))
+        .body(Body::from(
+            r#"{"cron":"not a cron","prompt":"x","channel":"web","chat_id":"web:admin","allowed_tools":[],"enabled":true}"#,
+        ))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(invalid).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    let delete = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/tasks/{}", tasks[0].id))
+        .header(header::HOST, host)
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("beanagent_session={token}"))
+        .body(Body::from("{}"))
+        .unwrap();
+    assert_eq!(app.oneshot(delete).await.unwrap().status(), StatusCode::OK);
+    assert!(store.list_tasks().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn sqlite_stores_only_hashed_session_tokens_and_rejects_expired_tokens() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");

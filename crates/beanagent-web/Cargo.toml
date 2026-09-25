@@ -42,6 +42,9 @@ toml.workspace = true
 tokio = { workspace = true, features = ["net", "rt-multi-thread", "macros", "sync", "time"] }
 tokio-util.workspace = true
 tracing.workspace = true
+# Cron parser chỉ dùng để validate/tính next_run cho API M11; worker scheduler thuộc M13.
+croner.workspace = true
+
 getrandom.workspace = true
 mime_guess.workspace = true
 url.workspace = true

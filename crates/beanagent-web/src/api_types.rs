@@ -350,6 +350,15 @@ pub struct TaskListResponse {
     pub tasks: Vec<TaskDto>,
 }
 
+/// Request bật/tắt một tác vụ định kỳ.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct TaskUpdateRequest {
+    /// Tác vụ có được bật hay không.
+    pub enabled: bool,
+}
+
 /// Skill nháp ở milestone sau.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]

@@ -20,4 +20,21 @@ export const testServer = setupServer(
       { status: 201 },
     ),
   ),
+  http.get("/api/status", () =>
+    HttpResponse.json({
+      version: "0.1.0",
+      model: "fake-model",
+      daily_token_budget: 1000,
+      tokens_used: 0,
+      uptime_seconds: 0,
+      channels: ["web"],
+    }),
+  ),
+  http.get("/api/memory/files/:name", ({ params }) =>
+    HttpResponse.json({ name: String(params.name), content: "" }),
+  ),
+  http.get("/api/memories", () => HttpResponse.json({ memories: [] })),
+  http.get("/api/skills", () => HttpResponse.json({ skills: [] })),
+  http.get("/api/tasks", () => HttpResponse.json({ tasks: [] })),
+  http.get("/api/audit", () => HttpResponse.json({ entries: [] })),
 );

@@ -1,6 +1,7 @@
 //! Axum application, REST, WebSocket và WebChannel cho M9.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,9 @@ use axum::routing::{any, delete, get, patch, post};
 use axum::{Json, Router as AxumRouter};
 use axum_extra::extract::cookie::CookieJar;
 use beanagent_core::{Channel, Decision, Incoming, Router};
-use beanagent_memory::{MemoryRecord, MessageRecord, SessionSummary, Store};
+use beanagent_memory::{
+    MemoryRecord, MessageRecord, NewScheduledTask, ScheduledTask, SessionSummary, Store,
+};
 use beanagent_security::AuditLog;
 use beanagent_skills::SkillCatalog;
 use beanagent_tools::WorkspaceFs;
@@ -26,6 +29,7 @@ use url::Url;
 
 use crate::api_types::*;
 use crate::auth::{AuthError, AuthService, WEB_USER};
+use croner::Cron;
 
 /// Kích thước request HTTP tối đa.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -366,6 +370,40 @@ fn memory_dto(memory: MemoryRecord) -> MemoryDto {
         tags: memory.tags,
         created_at: memory.created_at,
     }
+}
+
+fn task_dto(task: ScheduledTask) -> TaskDto {
+    TaskDto {
+        id: task.id,
+        cron: task.cron,
+        prompt: task.prompt,
+        channel: task.channel,
+        chat_id: task.chat_id,
+        allowed_tools: task.allowed_tools,
+        next_run: task.next_run,
+        enabled: task.enabled,
+    }
+}
+
+/// Parse cron và tính lần chạy kế tiếp UTC. M11 chỉ cung cấp metadata; M13 mới tick.
+fn next_task_run(cron: &str) -> ApiResult<String> {
+    let pattern = Cron::from_str(cron).map_err(|_| {
+        ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_cron",
+            "biểu thức cron không hợp lệ",
+        )
+    })?;
+    let now = chrono::Utc::now();
+    let next: chrono::DateTime<chrono::Utc> =
+        pattern.find_next_occurrence(&now, false).map_err(|_| {
+            ApiFailure::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_cron",
+                "không tìm thấy lần chạy kế tiếp",
+            )
+        })?;
+    Ok(next.to_rfc3339())
 }
 
 /// Đăng nhập; không trả token trong JSON, chỉ đặt cookie.
@@ -715,6 +753,102 @@ async fn get_skill(
     }))
 }
 
+async fn list_tasks(
+    State(state): State<WebState>,
+    jar: CookieJar,
+) -> ApiResult<Json<TaskListResponse>> {
+    let _ = require_user(&state, &jar).await?;
+    let tasks = state
+        .store
+        .list_tasks()
+        .await
+        .map_err(|_| ApiFailure::internal())?
+        .into_iter()
+        .map(task_dto)
+        .collect();
+    Ok(Json(TaskListResponse { tasks }))
+}
+
+async fn create_task(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Json(request): Json<TaskRequest>,
+) -> ApiResult<(StatusCode, Json<TaskDto>)> {
+    let _ = require_user(&state, &jar).await?;
+    let cron = request.cron.trim().to_string();
+    let prompt = request.prompt.trim().to_string();
+    let channel = request.channel.trim().to_string();
+    let chat_id = request.chat_id.trim().to_string();
+    if cron.is_empty() || prompt.is_empty() || channel.is_empty() || chat_id.is_empty() {
+        return Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_task",
+            "cron, prompt, channel và chat_id không được để trống",
+        ));
+    }
+    if cron.len() > 256 || prompt.len() > 16_000 || channel.len() > 64 || chat_id.len() > 256 {
+        return Err(ApiFailure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_task",
+            "một trường của tác vụ quá dài",
+        ));
+    }
+    let allowed_tools = request
+        .allowed_tools
+        .into_iter()
+        .map(|tool| tool.trim().to_string())
+        .filter(|tool| !tool.is_empty())
+        .collect();
+    let next_run = next_task_run(&cron)?;
+    let task = state
+        .store
+        .create_task(NewScheduledTask {
+            cron,
+            prompt,
+            channel,
+            chat_id,
+            allowed_tools,
+            next_run,
+            enabled: request.enabled.unwrap_or(true),
+        })
+        .await
+        .map_err(|_| ApiFailure::internal())?;
+    Ok((StatusCode::CREATED, Json(task_dto(task))))
+}
+
+async fn update_task(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(id): Path<u64>,
+    Json(request): Json<TaskUpdateRequest>,
+) -> ApiResult<Json<TaskDto>> {
+    let _ = require_user(&state, &jar).await?;
+    let task = state
+        .store
+        .set_task_enabled(id, request.enabled)
+        .await
+        .map_err(|_| ApiFailure::internal())?
+        .ok_or_else(ApiFailure::not_found)?;
+    Ok(Json(task_dto(task)))
+}
+
+async fn delete_task(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(id): Path<u64>,
+) -> ApiResult<Json<DeleteResponse>> {
+    let _ = require_user(&state, &jar).await?;
+    let deleted = state
+        .store
+        .delete_task(id)
+        .await
+        .map_err(|_| ApiFailure::internal())?;
+    if !deleted {
+        return Err(ApiFailure::not_found());
+    }
+    Ok(Json(DeleteResponse { deleted }))
+}
+
 async fn not_implemented(State(state): State<WebState>, jar: CookieJar) -> ApiResult<Response> {
     let _ = require_user(&state, &jar).await?;
     Ok((
@@ -771,11 +905,8 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/skills/drafts", get(not_implemented))
         .route("/skills/drafts/{id}/approve", post(not_implemented))
         .route("/skills/drafts/{id}/reject", post(not_implemented))
-        .route("/tasks", get(not_implemented).post(not_implemented))
-        .route(
-            "/tasks/{id}",
-            patch(not_implemented).delete(not_implemented),
-        )
+        .route("/tasks", get(list_tasks).post(create_task))
+        .route("/tasks/{id}", patch(update_task).delete(delete_task))
         .route("/audit", get(list_audit))
         .route("/ws", any(ws_handler))
         .fallback(api_not_found)

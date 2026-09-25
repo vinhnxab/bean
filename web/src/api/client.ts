@@ -1,13 +1,28 @@
 import type {
+  AuditListResponse,
   AuthMeResponse,
   CreateSessionRequest,
+  DeleteResponse,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  MemoryFileRequest,
+  MemoryFileResponse,
+  MemoryListResponse,
   MessageDto,
   MessageListResponse,
+  OkResponse,
   SessionDto,
   SessionListResponse,
+  SessionQuery,
+  SkillDetail,
+  SkillListResponse,
+  StatusResponse,
+  TaskDto,
+  TaskListResponse,
+  TaskRequest,
+  TaskUpdateRequest,
+  UpdateSessionRequest,
 } from "@/api/bindings";
 import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
 
@@ -32,7 +47,7 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 }
 
 type RequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
   /** Đăng nhập sai cần hiện lỗi tại form, không tự điều hướng. */
@@ -82,9 +97,7 @@ async function requestJson<T>(
     }
     throw parseApiError(payload, response.status);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
+  if (response.status === 204) return undefined as T;
   try {
     return (await response.json()) as T;
   } catch {
@@ -92,14 +105,19 @@ async function requestJson<T>(
   }
 }
 
-function withQuery(path: string, query: Record<string, string | number | boolean | null>): string {
+function withQuery(
+  path: string,
+  query: Record<string, string | number | boolean | null | undefined>,
+): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value !== null) params.set(key, String(value));
+    if (value !== null && value !== undefined) params.set(key, String(value));
   }
   const encoded = params.toString();
   return encoded ? `${path}?${encoded}` : path;
 }
+
+export type SessionListOptions = Partial<SessionQuery>;
 
 export const api = {
   me: (signal?: AbortSignal) => requestJson<AuthMeResponse>("/api/auth/me", { signal }),
@@ -113,11 +131,24 @@ export const api = {
 
   logout: () => requestJson<LogoutResponse>("/api/auth/logout", { method: "POST", body: {} }),
 
-  listSessions: (signal?: AbortSignal) =>
-    requestJson<SessionListResponse>(withQuery("/api/sessions", { archived: false, limit: 100 }), { signal }),
+  listSessions: (query: SessionListOptions = {}, signal?: AbortSignal) =>
+    requestJson<SessionListResponse>(
+      withQuery("/api/sessions", {
+        q: query.q ?? null,
+        archived: query.archived ?? false,
+        limit: query.limit ?? 100,
+      }),
+      { signal },
+    ),
 
   createSession: (request: CreateSessionRequest) =>
     requestJson<SessionDto>("/api/sessions", { method: "POST", body: request }),
+
+  updateSession: (id: number, request: UpdateSessionRequest) =>
+    requestJson<OkResponse>(`/api/sessions/${id}`, { method: "PATCH", body: request }),
+
+  deleteSession: (id: number) =>
+    requestJson<DeleteResponse>(`/api/sessions/${id}`, { method: "DELETE", body: {} }),
 
   listMessages: (sessionId: number, before: number | null, signal?: AbortSignal) =>
     requestJson<MessageListResponse>(
@@ -127,4 +158,38 @@ export const api = {
 
   getMessage: (messageId: number, signal?: AbortSignal) =>
     requestJson<MessageDto>(`/api/messages/${messageId}`, { signal }),
+
+  getMemoryFile: (name: "MEMORY" | "USER", signal?: AbortSignal) =>
+    requestJson<MemoryFileResponse>(`/api/memory/files/${name}`, { signal }),
+
+  putMemoryFile: (name: "MEMORY" | "USER", request: MemoryFileRequest) =>
+    requestJson<MemoryFileResponse>(`/api/memory/files/${name}`, {
+      method: "PUT",
+      body: request,
+    }),
+
+  listMemories: (query = "", signal?: AbortSignal) =>
+    requestJson<MemoryListResponse>(withQuery("/api/memories", { q: query, limit: 100 }), { signal }),
+
+  deleteMemory: (id: number) =>
+    requestJson<DeleteResponse>(`/api/memories/${id}`, { method: "DELETE", body: {} }),
+
+  listSkills: (signal?: AbortSignal) => requestJson<SkillListResponse>("/api/skills", { signal }),
+
+  getSkill: (name: string, signal?: AbortSignal) =>
+    requestJson<SkillDetail>(`/api/skills/${encodeURIComponent(name)}`, { signal }),
+
+  listTasks: (signal?: AbortSignal) => requestJson<TaskListResponse>("/api/tasks", { signal }),
+
+  createTask: (request: TaskRequest) => requestJson<TaskDto>("/api/tasks", { method: "POST", body: request }),
+
+  updateTask: (id: number, request: TaskUpdateRequest) =>
+    requestJson<TaskDto>(`/api/tasks/${id}`, { method: "PATCH", body: request }),
+
+  deleteTask: (id: number) => requestJson<DeleteResponse>(`/api/tasks/${id}`, { method: "DELETE", body: {} }),
+
+  listAudit: (before: number | null = null, signal?: AbortSignal) =>
+    requestJson<AuditListResponse>(withQuery("/api/audit", { before, limit: 25 }), { signal }),
+
+  status: (signal?: AbortSignal) => requestJson<StatusResponse>("/api/status", { signal }),
 };
