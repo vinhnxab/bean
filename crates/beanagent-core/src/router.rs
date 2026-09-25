@@ -1366,6 +1366,18 @@ impl RunIo for RouterIo {
         });
     }
 
+    fn on_text_delta(&self, text: &str, index: u32, reset: bool) {
+        self.with_router(|router| {
+            router.emit(RunEvent::TextDelta {
+                session_id: self.session_id,
+                run_id: self.run_id.clone(),
+                text: text.to_string(),
+                index,
+                reset,
+            });
+        });
+    }
+
     fn on_tool_start(&self, id: &str, tool: &str, risk: Risk, summary: &str, args: &str) {
         self.with_router(|router| {
             router.emit(RunEvent::ToolStart {

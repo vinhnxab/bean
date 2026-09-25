@@ -14,7 +14,8 @@ use beanagent_llm::{
     ChatRequest, LlmError, LlmProvider, build_anthropic_body, parse_anthropic_response,
 };
 use beanagent_types::llm::StopReason;
-use beanagent_types::{Message, ToolCall, ToolSpec};
+use beanagent_types::{LlmDelta, Message, ToolCall, ToolSpec};
+use futures_util::StreamExt;
 
 const API_KEY: &str = "k-anthropic-test";
 
@@ -228,6 +229,59 @@ async fn chat_sends_expected_request_and_parses_reply() {
     assert_eq!(resp.text.as_deref(), Some("xin chào lại"));
     assert_eq!(resp.stop, StopReason::EndTurn);
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn chat_stream_parses_sse_text_usage_and_finish() {
+    let server = MockServer::start().await;
+    let sse = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Xin\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" chào 🦀\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+    );
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(body_partial_json(json!({"stream": true})))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse, "text/event-stream"))
+        .mount(&server)
+        .await;
+
+    let provider = provider_for(&server);
+    let messages = [Message::user("xin chào")];
+    let mut stream = provider.chat_stream(request(&messages, &[])).await.unwrap();
+    let mut deltas = Vec::new();
+    while let Some(item) = stream.next().await {
+        deltas.push(item.unwrap());
+    }
+    let text = deltas
+        .iter()
+        .filter_map(|delta| match delta {
+            LlmDelta::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(text, "Xin chào 🦀");
+    assert!(deltas.iter().any(|delta| matches!(
+        delta,
+        LlmDelta::Usage { usage } if usage.input_tokens == 3 && usage.output_tokens == 2
+    )));
+    assert!(deltas.iter().any(|delta| matches!(
+        delta,
+        LlmDelta::Stop {
+            reason: StopReason::EndTurn
+        }
+    )));
 }
 
 #[tokio::test]

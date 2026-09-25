@@ -18,12 +18,13 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use beanagent_types::llm::{LlmResponse, StopReason, Usage};
+use beanagent_types::llm::{LlmDelta, LlmResponse, LlmToolCallDelta, StopReason, Usage};
 use beanagent_types::message::Role;
 use beanagent_types::{ToolCall, ToolSpec};
 
 use crate::schema::sanitize_tool_schema;
-use crate::{ChatRequest, LlmError, LlmProvider, http, retry};
+use crate::stream::{SseEvent, SseEventParser, decode_sse};
+use crate::{ChatRequest, LlmError, LlmProvider, LlmStream, http, retry};
 
 /// Giá trị header `anthropic-version` hiện hành (docs.anthropic.com).
 const API_VERSION: &str = "2023-06-01";
@@ -68,6 +69,45 @@ impl AnthropicProvider {
             client: http::build_client(http::DEFAULT_TIMEOUT)?,
         })
     }
+
+    async fn open_stream(&self, body: Value) -> Result<reqwest::Response, LlmError> {
+        let endpoint = self.endpoint.clone();
+        let client = self.client.clone();
+        let api_key = self.api_key.clone();
+        retry::retry_with_backoff(retry::BASE_DELAY, retry::MAX_RETRIES, move || {
+            let body = body.clone();
+            let api_key = api_key.clone();
+            let endpoint = endpoint.clone();
+            let client = client.clone();
+            async move {
+                let response = client
+                    .post(&endpoint)
+                    .header("x-api-key", api_key.expose_secret())
+                    .header("anthropic-version", API_VERSION)
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(http::to_transport_error)?;
+                let status = response.status();
+                let retry_after = http::parse_retry_after(response.headers());
+                if status.as_u16() == 429 {
+                    return Err(LlmError::RateLimited { retry_after });
+                }
+                if !status.is_success() {
+                    let text = response
+                        .text()
+                        .await
+                        .map_err(|error| LlmError::Transport(error.to_string()))?;
+                    return Err(LlmError::HttpStatus {
+                        status: status.as_u16(),
+                        body: http::truncate_body(&text),
+                    });
+                }
+                Ok(response)
+            }
+        })
+        .await
+    }
 }
 
 /// `{base}` + `/v1/messages`. Chấp nhận cả ba dạng `base_url` mà người dùng hay viết:
@@ -88,6 +128,10 @@ fn endpoint_url(base_url: Option<&str>) -> String {
 impl LlmProvider for AnthropicProvider {
     async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
         self.chat_with_model(req, &self.model.clone()).await
+    }
+
+    async fn chat_stream(&self, req: ChatRequest<'_>) -> Result<LlmStream, LlmError> {
+        self.chat_stream_with_model(req, &self.model.clone()).await
     }
 
     async fn chat_with_model(
@@ -137,9 +181,189 @@ impl LlmProvider for AnthropicProvider {
         .await
     }
 
+    async fn chat_stream_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        model: &str,
+    ) -> Result<LlmStream, LlmError> {
+        let mut body = build_request_body(&req, model)?;
+        body["stream"] = Value::Bool(true);
+        let response = self.open_stream(body).await?;
+        Ok(Box::pin(decode_sse(
+            response,
+            AnthropicStreamParser::default(),
+        )))
+    }
+
     fn name(&self) -> &'static str {
         "anthropic"
     }
+}
+
+#[derive(Debug, Default)]
+struct AnthropicStreamParser {
+    usage: Usage,
+    stop: Option<StopReason>,
+    done: bool,
+    has_text_output: bool,
+}
+
+impl AnthropicStreamParser {
+    fn parse_value(&mut self, value: &Value) -> Result<Vec<LlmDelta>, LlmError> {
+        let event_type = value
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| LlmError::Decode("event Anthropic thiếu type".to_string()))?;
+        let mut deltas = Vec::new();
+        match event_type {
+            "message_start" => {
+                self.update_usage(value.pointer("/message/usage"), &mut deltas);
+            }
+            "content_block_start" => {
+                let block = value.get("content_block").unwrap_or(&Value::Null);
+                match block.get("type").and_then(Value::as_str) {
+                    Some("text") => {
+                        if self.has_text_output {
+                            deltas.push(LlmDelta::Text {
+                                text: "\n".to_string(),
+                            });
+                        }
+                        if let Some(text) = block.get("text").and_then(Value::as_str)
+                            && !text.is_empty()
+                        {
+                            self.has_text_output = true;
+                            deltas.push(LlmDelta::Text {
+                                text: text.to_string(),
+                            });
+                        }
+                    }
+                    Some("tool_use") => {
+                        let index = stream_index(value)?;
+                        deltas.push(LlmDelta::ToolCall(LlmToolCallDelta {
+                            index,
+                            id: block.get("id").and_then(Value::as_str).map(str::to_string),
+                            name: block
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                            arguments_delta: None,
+                        }));
+                    }
+                    Some("thinking") | Some("redacted_thinking") | None => {}
+                    Some(other) => {
+                        tracing::debug!(
+                            content_type = other,
+                            "bỏ qua Anthropic content block chưa biết"
+                        );
+                    }
+                }
+            }
+            "content_block_delta" => {
+                let index = stream_index(value)?;
+                let delta = value.get("delta").unwrap_or(&Value::Null);
+                match delta.get("type").and_then(Value::as_str) {
+                    Some("text_delta") => {
+                        if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                            self.has_text_output |= !text.is_empty();
+                            deltas.push(LlmDelta::Text {
+                                text: text.to_string(),
+                            });
+                        }
+                    }
+                    Some("input_json_delta") => {
+                        let arguments_delta = delta
+                            .get("partial_json")
+                            .and_then(Value::as_str)
+                            .filter(|text| !text.is_empty())
+                            .map(str::to_string);
+                        deltas.push(LlmDelta::ToolCall(LlmToolCallDelta {
+                            index,
+                            id: None,
+                            name: None,
+                            arguments_delta,
+                        }));
+                    }
+                    Some("thinking_delta" | "signature_delta") | None => {}
+                    Some(other) => {
+                        tracing::debug!(delta_type = other, "bỏ qua Anthropic delta chưa biết");
+                    }
+                }
+            }
+            "message_delta" => {
+                self.update_usage(value.get("usage"), &mut deltas);
+                if let Some(reason) = value.pointer("/delta/stop_reason").and_then(Value::as_str) {
+                    self.stop = Some(map_stop_reason(Some(reason)));
+                    deltas.push(LlmDelta::Stop {
+                        reason: self.stop.unwrap_or(StopReason::Other),
+                    });
+                }
+            }
+            "message_stop" => {
+                self.done = true;
+                if self.stop.is_none() {
+                    return Err(LlmError::Decode(
+                        "event Anthropic message_stop thiếu stop_reason".to_string(),
+                    ));
+                }
+            }
+            "ping" => {}
+            "error" => {
+                let message = value
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("lỗi không có message");
+                return Err(LlmError::Decode(format!(
+                    "provider Anthropic gửi lỗi trong stream: {message}"
+                )));
+            }
+            other => {
+                tracing::debug!(event_type = other, "bỏ qua Anthropic event chưa biết");
+            }
+        }
+        Ok(deltas)
+    }
+
+    fn update_usage(&mut self, raw: Option<&Value>, deltas: &mut Vec<LlmDelta>) {
+        let Some(raw) = raw else { return };
+        if let Some(tokens) = raw.get("input_tokens").and_then(Value::as_u64) {
+            self.usage.input_tokens = u32::try_from(tokens).unwrap_or(u32::MAX);
+        }
+        if let Some(tokens) = raw.get("output_tokens").and_then(Value::as_u64) {
+            self.usage.output_tokens = u32::try_from(tokens).unwrap_or(u32::MAX);
+        }
+        deltas.push(LlmDelta::Usage { usage: self.usage });
+    }
+}
+
+impl SseEventParser for AnthropicStreamParser {
+    fn parse_event(&mut self, event: SseEvent) -> Result<Vec<LlmDelta>, LlmError> {
+        let value: Value = serde_json::from_str(&event.data).map_err(|error| {
+            LlmError::Decode(format!("event Anthropic không phải JSON hợp lệ: {error}"))
+        })?;
+        self.parse_value(&value)
+    }
+
+    fn is_done(&self) -> bool {
+        self.done && self.stop.is_some()
+    }
+
+    fn finish(&mut self) -> Result<(), LlmError> {
+        if self.done && self.stop.is_some() {
+            Ok(())
+        } else {
+            Err(LlmError::Decode(
+                "stream Anthropic kết thúc trước message_stop/stop_reason".to_string(),
+            ))
+        }
+    }
+}
+
+fn stream_index(value: &Value) -> Result<usize, LlmError> {
+    value
+        .get("index")
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+        .ok_or_else(|| LlmError::Decode("event Anthropic thiếu index hợp lệ".to_string()))
 }
 
 /// Dựng body request. `Role::Tool` liên tiếp được ghép thành **một** message `user`

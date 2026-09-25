@@ -49,6 +49,51 @@ impl StopReason {
     }
 }
 
+/// Một phần tool call nhận được từ stream.
+///
+/// `arguments_delta` là **một đoạn JSON**, không phải JSON hoàn chỉnh. Agent loop
+/// gom theo `index` trước khi parse thành [`ToolCall`](crate::message::ToolCall).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct LlmToolCallDelta {
+    /// Vị trí tool call trong danh sách của provider.
+    pub index: usize,
+    /// ID có thể chỉ xuất hiện ở chunk đầu.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Tên function có thể chỉ xuất hiện ở chunk đầu.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Đoạn JSON arguments tăng dần.
+    #[serde(default)]
+    pub arguments_delta: Option<String>,
+}
+
+/// Một delta trung lập từ LLM streaming.
+///
+/// Provider chỉ cần phân tích SSE riêng; agent loop chỉ biết enum này nên không phụ
+/// thuộc wire format của Anthropic/OpenAI.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LlmDelta {
+    /// Văn bản mới sinh.
+    Text {
+        /// Đoạn text có thể ghép trực tiếp.
+        text: String,
+    },
+    /// Tool call mới hoặc phần bổ sung của một tool call.
+    ToolCall(LlmToolCallDelta),
+    /// Lý do provider kết thúc lượt sinh.
+    Stop {
+        /// Stop reason đã chuẩn hoá.
+        reason: StopReason,
+    },
+    /// Usage cập nhật. Giá trị là snapshot tích luỹ, không phải delta phải cộng.
+    Usage {
+        /// Snapshot token usage.
+        usage: Usage,
+    },
+}
+
 /// Kết quả một lượt gọi LLM.
 ///
 /// `Default` sinh ra response "rỗng": không text, không tool call, `stop = Other`

@@ -512,6 +512,13 @@ pub enum ServerMsg {
         run_id: String,
         text: String,
     },
+    TextDelta {
+        session_id: i64,
+        run_id: String,
+        text: String,
+        index: u32,
+        reset: bool,
+    },
     ToolStart {
         session_id: i64,
         run_id: String,

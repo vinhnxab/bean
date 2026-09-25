@@ -24,6 +24,7 @@ mod http;
 mod openai_compat;
 mod retry;
 mod schema;
+mod stream;
 
 pub use anthropic::AnthropicProvider;
 pub use error::LlmError;
@@ -42,9 +43,12 @@ pub use openai_compat::{
     build_request_body as build_openai_body, parse_response as parse_openai_response,
 };
 
-use async_trait::async_trait;
-use beanagent_types::{LlmResponse, Message, ToolSpec};
 use std::fmt;
+use std::pin::Pin;
+
+use async_trait::async_trait;
+use beanagent_types::{LlmDelta, LlmResponse, Message, ToolSpec};
+use futures_core::Stream;
 
 /// Yêu cầu gửi tới provider cho một lượt gọi (agents.md mục 5).
 #[derive(Debug, Clone, Copy)]
@@ -59,6 +63,9 @@ pub struct ChatRequest<'a> {
     pub max_tokens: u32,
 }
 
+/// Stream delta do provider sở hữu; mỗi item có thể lỗi nếu kết nối giữa chừng hỏng.
+pub type LlmStream = Pin<Box<dyn Stream<Item = Result<LlmDelta, LlmError>> + Send + 'static>>;
+
 /// Nhà cung cấp LLM.
 ///
 /// `Debug` là bắt buộc để mọi chỗ giữ `Arc<dyn LlmProvider>` đều in được mà **không lộ
@@ -71,6 +78,18 @@ pub trait LlmProvider: Send + Sync + fmt::Debug {
     /// Trả [`LlmError`] khi mạng/cấu hình/parse lỗi. Lỗi tool **không** đi qua đường này
     /// (nó được biến thành message `Tool` với `is_error = true` trong agent loop).
     async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError>;
+
+    /// Thực hiện một lượt chat streaming.
+    ///
+    /// Mặc định gom một response non-stream thành các delta tối thiểu. Provider HTTP M17
+    /// override để đọc SSE; provider/test cũ chỉ implement [`LlmProvider::chat`] vẫn chạy.
+    ///
+    /// # Errors
+    /// Giống [`LlmProvider::chat`].
+    async fn chat_stream(&self, req: ChatRequest<'_>) -> Result<LlmStream, LlmError> {
+        let response = self.chat(req).await?;
+        Ok(response_to_stream(response))
+    }
 
     /// Chat bằng model override cho request này. Mặc định giữ provider hiện tại;
     /// provider HTTP override để `/model` áp dụng cho run kế tiếp.
@@ -85,6 +104,46 @@ pub trait LlmProvider: Send + Sync + fmt::Debug {
         self.chat(req).await
     }
 
+    /// Chat streaming bằng model override cho request này.
+    ///
+    /// # Errors
+    /// Giống [`LlmProvider::chat_stream`].
+    async fn chat_stream_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        model: &str,
+    ) -> Result<LlmStream, LlmError> {
+        if model.is_empty() {
+            return self.chat_stream(req).await;
+        }
+        let response = self.chat_with_model(req, model).await?;
+        Ok(response_to_stream(response))
+    }
+
     /// Tên provider, dùng cho log và `/api/status`.
     fn name(&self) -> &'static str;
+}
+
+fn response_to_stream(response: LlmResponse) -> LlmStream {
+    use futures_util::stream;
+
+    let mut deltas = Vec::new();
+    if let Some(text) = response.text.filter(|text| !text.is_empty()) {
+        deltas.push(Ok(LlmDelta::Text { text }));
+    }
+    for (index, call) in response.tool_calls.into_iter().enumerate() {
+        deltas.push(Ok(LlmDelta::ToolCall(beanagent_types::LlmToolCallDelta {
+            index,
+            id: Some(call.id),
+            name: Some(call.name),
+            arguments_delta: Some(call.args.to_string()),
+        })));
+    }
+    deltas.push(Ok(LlmDelta::Usage {
+        usage: response.usage,
+    }));
+    deltas.push(Ok(LlmDelta::Stop {
+        reason: response.stop,
+    }));
+    Box::pin(stream::iter(deltas))
 }

@@ -20,11 +20,12 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use beanagent_types::ToolCall;
-use beanagent_types::llm::{LlmResponse, StopReason, Usage};
+use beanagent_types::llm::{LlmDelta, LlmResponse, LlmToolCallDelta, StopReason, Usage};
 use beanagent_types::message::Role;
 
 use crate::schema::sanitize_tool_schema;
-use crate::{ChatRequest, LlmError, LlmProvider, http, retry};
+use crate::stream::{SseEvent, SseEventParser, decode_sse};
+use crate::{ChatRequest, LlmError, LlmProvider, LlmStream, http, retry};
 
 /// Endpoint chính thức (đã gồm `/v1`); ghi đè bằng `llm.base_url`.
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -77,6 +78,46 @@ impl OpenAiCompatProvider {
             client: http::build_client(http::DEFAULT_TIMEOUT)?,
         })
     }
+
+    async fn open_stream(&self, body: Value) -> Result<reqwest::Response, LlmError> {
+        let endpoint = self.endpoint.clone();
+        let client = self.client.clone();
+        let api_key = self.api_key.clone();
+        retry::retry_with_backoff(retry::BASE_DELAY, retry::MAX_RETRIES, move || {
+            let body = body.clone();
+            let api_key = api_key.clone();
+            let endpoint = endpoint.clone();
+            let client = client.clone();
+            async move {
+                let mut request = client.post(&endpoint);
+                if let Some(key) = &api_key {
+                    request = request.bearer_auth(key.expose_secret());
+                }
+                let response = request
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(http::to_transport_error)?;
+                let status = response.status();
+                let retry_after = http::parse_retry_after(response.headers());
+                if status.as_u16() == 429 {
+                    return Err(LlmError::RateLimited { retry_after });
+                }
+                if !status.is_success() {
+                    let text = response
+                        .text()
+                        .await
+                        .map_err(|error| LlmError::Transport(error.to_string()))?;
+                    return Err(LlmError::HttpStatus {
+                        status: status.as_u16(),
+                        body: error_body(&text),
+                    });
+                }
+                Ok(response)
+            }
+        })
+        .await
+    }
 }
 
 /// `{base}` + `/chat/completions`; nếu `base_url` đã trỏ thẳng tới `…/chat/completions`
@@ -94,6 +135,10 @@ fn endpoint_url(base_url: Option<&str>) -> String {
 impl LlmProvider for OpenAiCompatProvider {
     async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
         self.chat_with_model(req, &self.model.clone()).await
+    }
+
+    async fn chat_stream(&self, req: ChatRequest<'_>) -> Result<LlmStream, LlmError> {
+        self.chat_stream_with_model(req, &self.model.clone()).await
     }
 
     async fn chat_with_model(
@@ -144,8 +189,130 @@ impl LlmProvider for OpenAiCompatProvider {
         .await
     }
 
+    async fn chat_stream_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        model: &str,
+    ) -> Result<LlmStream, LlmError> {
+        let mut body = build_request_body(&req, model)?;
+        body["stream"] = Value::Bool(true);
+        body["stream_options"] = json!({ "include_usage": true });
+        let response = self.open_stream(body).await?;
+        Ok(Box::pin(decode_sse(
+            response,
+            OpenAiStreamParser::default(),
+        )))
+    }
+
     fn name(&self) -> &'static str {
         "openai_compat"
+    }
+}
+
+#[derive(Debug, Default)]
+struct OpenAiStreamParser {
+    usage: Usage,
+    stop: Option<StopReason>,
+    done: bool,
+}
+
+impl SseEventParser for OpenAiStreamParser {
+    fn parse_event(&mut self, event: SseEvent) -> Result<Vec<LlmDelta>, LlmError> {
+        if event.data.trim() == "[DONE]" {
+            if self.stop.is_none() {
+                return Err(LlmError::Decode(
+                    "stream OpenAI-compat kết thúc bằng [DONE] nhưng thiếu finish_reason"
+                        .to_string(),
+                ));
+            }
+            self.done = true;
+            return Ok(Vec::new());
+        }
+        let chunk: Value = serde_json::from_str(&event.data).map_err(|error| {
+            LlmError::Decode(format!(
+                "chunk OpenAI-compat không phải JSON hợp lệ: {error}"
+            ))
+        })?;
+        if let Some(error) = chunk.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("lỗi không có message");
+            return Err(LlmError::Decode(format!(
+                "provider OpenAI-compat gửi lỗi trong stream: {message}"
+            )));
+        }
+
+        let mut deltas = Vec::new();
+        if let Some(raw_usage) = chunk.get("usage").filter(|usage| !usage.is_null()) {
+            if let Some(tokens) = raw_usage.get("prompt_tokens").and_then(Value::as_u64) {
+                self.usage.input_tokens = u32::try_from(tokens).unwrap_or(u32::MAX);
+            }
+            if let Some(tokens) = raw_usage.get("completion_tokens").and_then(Value::as_u64) {
+                self.usage.output_tokens = u32::try_from(tokens).unwrap_or(u32::MAX);
+            }
+            deltas.push(LlmDelta::Usage { usage: self.usage });
+        }
+
+        let Some(choices) = chunk.get("choices").and_then(Value::as_array) else {
+            return Ok(deltas);
+        };
+        let Some(choice) = choices.first() else {
+            return Ok(deltas);
+        };
+        let delta = choice.get("delta").unwrap_or(&Value::Null);
+        if let Some(text) = delta.get("content").and_then(Value::as_str) {
+            deltas.push(LlmDelta::Text {
+                text: text.to_string(),
+            });
+        }
+        if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
+            for call in calls {
+                let index = call
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .and_then(|index| usize::try_from(index).ok())
+                    .ok_or_else(|| {
+                        LlmError::Decode("tool call stream thiếu index hợp lệ".to_string())
+                    })?;
+                let function = call.get("function").unwrap_or(&Value::Null);
+                let arguments_delta = function
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_string);
+                deltas.push(LlmDelta::ToolCall(LlmToolCallDelta {
+                    index,
+                    id: call.get("id").and_then(Value::as_str).map(str::to_string),
+                    name: function
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    arguments_delta,
+                }));
+            }
+        }
+        if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+            self.stop = Some(map_finish_reason(Some(reason)));
+            deltas.push(LlmDelta::Stop {
+                reason: self.stop.unwrap_or(StopReason::Other),
+            });
+        }
+        Ok(deltas)
+    }
+
+    fn is_done(&self) -> bool {
+        self.done && self.stop.is_some()
+    }
+
+    fn finish(&mut self) -> Result<(), LlmError> {
+        if self.done && self.stop.is_some() {
+            Ok(())
+        } else {
+            Err(LlmError::Decode(
+                "stream OpenAI-compat kết thúc trước finish_reason/[DONE]".to_string(),
+            ))
+        }
     }
 }
 

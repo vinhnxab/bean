@@ -65,7 +65,18 @@ export function parseServerMessage(raw: unknown): ServerMsg | null {
       case "queued":
         return hasNumber(raw, "session_id") && hasString(raw, "run_id") && hasNumber(raw, "position");
       case "text":
-        return hasNumber(raw, "session_id") && hasString(raw, "run_id") && hasString(raw, "text");
+      case "text_delta":
+        return (
+          hasNumber(raw, "session_id") &&
+          hasString(raw, "run_id") &&
+          hasString(raw, "text") &&
+          (raw.type === "text" ||
+            (hasNumber(raw, "index") &&
+              typeof raw.index === "number" &&
+              Number.isInteger(raw.index) &&
+              raw.index >= 0 &&
+              typeof raw.reset === "boolean"))
+        );
       case "tool_start":
         return (
           hasNumber(raw, "session_id") &&

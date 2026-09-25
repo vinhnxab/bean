@@ -44,6 +44,66 @@ describe("chat event state", () => {
     ).toBeNull();
   });
 
+  it("ghép delta, giữ text khi reconnect và refetch Final", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().applyServerMessage({
+      type: "text_delta",
+      session_id: 1,
+      run_id: "run-1",
+      text: "",
+      index: 0,
+      reset: true,
+    });
+    useChatStore.getState().applyServerMessage({
+      type: "text_delta",
+      session_id: 1,
+      run_id: "run-1",
+      text: "Xin",
+      index: 1,
+      reset: false,
+    });
+    useChatStore
+      .getState()
+      .applySync({ type: "sync", running: [{ session_id: 1, run_id: "run-1" }], pending_confirms: [] }, true);
+    expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Xin");
+
+    useChatStore.getState().applyServerMessage({
+      type: "text_delta",
+      session_id: 1,
+      run_id: "run-1",
+      text: " chào",
+      index: 2,
+      reset: false,
+    });
+    expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Xin chào");
+
+    useChatStore.getState().applyServerMessage({
+      type: "text_delta",
+      session_id: 1,
+      run_id: "run-0",
+      text: "delta cũ",
+      index: 0,
+      reset: true,
+    });
+    expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Xin chào");
+
+    useChatStore.getState().applyServerMessage({
+      type: "text_delta",
+      session_id: 1,
+      run_id: "run-1",
+      text: "Lần sau",
+      index: 0,
+      reset: true,
+    });
+    expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Lần sau");
+
+    const final = useChatStore
+      .getState()
+      .applyServerMessage({ type: "final", session_id: 1, run_id: "run-1", message_id: 42 });
+    expect(final).toEqual({ sessionId: 1, messageId: 42, runId: "run-1" });
+    expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("");
+  });
+
   it("bỏ event trùng theo run_id và chấp nhận Notification không có run_id", () => {
     useChatStore.getState().reset();
     expect(parseServerMessage({ type: "notification", session_id: 1, message_id: 3 })).not.toBeNull();

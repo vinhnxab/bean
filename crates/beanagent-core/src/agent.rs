@@ -12,7 +12,10 @@ use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
 use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 use beanagent_security::untrusted::contains_untrusted_block;
 use beanagent_tools::{ToolCtx, ToolError};
-use beanagent_types::{Config, Message, ToolCall, ToolSpec};
+use beanagent_types::{
+    Config, LlmDelta, LlmResponse, Message, StopReason, ToolCall, ToolSpec, Usage,
+};
+use futures_util::StreamExt;
 use tokio::time::timeout;
 
 use crate::run_io::{Decision, RunIo};
@@ -21,6 +24,74 @@ const MAX_TOOL_OUTPUT_CHARS: usize = 20_000;
 const CANCELLED_MSG: &str = "[bị người dùng huỷ]";
 const CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 type RepeatKey = (String, String);
+
+#[derive(Debug, Default)]
+struct StreamResponseBuilder {
+    text: String,
+    text_delta_index: u32,
+    emitted_text: bool,
+    tool_calls: std::collections::BTreeMap<usize, (Option<String>, Option<String>, String)>,
+    stop: Option<StopReason>,
+    usage: Usage,
+}
+
+impl StreamResponseBuilder {
+    fn push(&mut self, delta: LlmDelta, io: &dyn RunIo) {
+        match delta {
+            LlmDelta::Text { text } => {
+                io.on_text_delta(&text, self.text_delta_index, !self.emitted_text);
+                self.emitted_text = true;
+                self.text_delta_index = self.text_delta_index.saturating_add(1);
+                self.text.push_str(&text);
+            }
+            LlmDelta::ToolCall(call) => {
+                let entry = self.tool_calls.entry(call.index).or_default();
+                if call.id.is_some() {
+                    entry.0 = call.id;
+                }
+                if call.name.is_some() {
+                    entry.1 = call.name;
+                }
+                if let Some(arguments) = call.arguments_delta {
+                    entry.2.push_str(&arguments);
+                }
+            }
+            LlmDelta::Stop { reason } => self.stop = Some(reason),
+            LlmDelta::Usage { usage } => self.usage = usage,
+        }
+    }
+
+    fn finish(self) -> Result<LlmResponse, AgentError> {
+        let stop = self.stop.ok_or_else(|| {
+            AgentError::Llm("provider streaming kết thúc mà không có stop reason".to_string())
+        })?;
+        let mut tool_calls = Vec::with_capacity(self.tool_calls.len());
+        for (index, (id, name, arguments)) in self.tool_calls {
+            let id = id.ok_or_else(|| {
+                AgentError::Llm(format!("tool call stream index {index} thiếu id"))
+            })?;
+            let name = name.ok_or_else(|| {
+                AgentError::Llm(format!("tool call stream index {index} thiếu name"))
+            })?;
+            let args = if arguments.trim().is_empty() {
+                serde_json::json!({})
+            } else {
+                serde_json::from_str(&arguments).map_err(|error| {
+                    AgentError::Llm(format!(
+                        "arguments của tool call stream index {index} không phải JSON hợp lệ: {error}"
+                    ))
+                })?
+            };
+            tool_calls.push(ToolCall::new(id, name, args));
+        }
+        Ok(LlmResponse {
+            text: (!self.text.is_empty()).then_some(self.text),
+            tool_calls,
+            stop,
+            usage: self.usage,
+        })
+    }
+}
 
 /// Tham số cho [`run_turn`]: gộp lại thành struct để tránh quá nhiều tham số hàm
 /// (clippy `too_many_arguments`).
@@ -192,12 +263,28 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             tools: &tool_specs,
             max_tokens: config.llm.max_tokens,
         };
-        let chat = llm.chat_with_model(req, &config.llm.model);
-        let resp = tokio::select! {
+        let mut stream = tokio::select! {
             biased;
             _ = cancel.cancelled() => return Err(AgentError::Cancelled),
-            response = chat => response?,
+            stream = llm.chat_stream_with_model(req, &config.llm.model) => stream?,
         };
+        // Reset ngay khi bắt đầu từng lượt LLM, kể cả response chỉ gọi tool và không có text.
+        io.on_text_delta("", 0, true);
+        let mut streamed = StreamResponseBuilder {
+            text_delta_index: 1,
+            emitted_text: true,
+            ..StreamResponseBuilder::default()
+        };
+        loop {
+            let item = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(AgentError::Cancelled),
+                item = stream.next() => item,
+            };
+            let Some(item) = item else { break };
+            streamed.push(item?, io.as_ref());
+        }
+        let resp = streamed.finish()?;
 
         let usage = record_usage(store, &usage_day, resp.usage).await?;
         let used = u64::from(usage.total());
@@ -229,8 +316,8 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 transcript,
             });
         }
-        // Text "suy nghĩ" của model khi vẫn còn gọi tool — phát cho kênh hiển thị.
-        io.on_text(&resp.text.clone().unwrap_or_default());
+        // Text "suy nghĩ" của model khi vẫn còn gọi tool đã được phát theo từng delta
+        // trong vòng stream; không phát lại toàn bộ để tránh UI nhân đôi văn bản.
 
         let mut repeated_tool: Option<String> = None;
 

@@ -32,7 +32,7 @@ pub enum RunEvent {
         /// Vị trí trong hàng đợi, bắt đầu từ 1.
         position: u32,
     },
-    /// Văn bản model phát trước khi gọi tool.
+    /// Văn bản model phát trước khi gọi tool (snapshot non-stream cũ).
     Text {
         /// Session của run.
         session_id: SessionId,
@@ -40,6 +40,19 @@ pub enum RunEvent {
         run_id: RunId,
         /// Nội dung text.
         text: String,
+    },
+    /// Một phần văn bản mới sinh; client cùng run phải nối theo thứ tự nhận.
+    TextDelta {
+        /// Session của run.
+        session_id: SessionId,
+        /// Run phát sự kiện.
+        run_id: RunId,
+        /// Phần text mới, chưa phải snapshot đầy đủ.
+        text: String,
+        /// Delta index tăng trong một lượt LLM.
+        index: u32,
+        /// `true` khi text phải thay snapshot cũ thay vì nối vào nó.
+        reset: bool,
     },
     /// Tool call bắt đầu.
     ToolStart {

@@ -27,6 +27,12 @@ pub trait RunIo: Send + Sync + 'static {
     /// Hiển thị văn bản cho người dùng (tin nhắn streaming, final answer...).
     fn on_text(&self, text: &str);
 
+    /// Nhận một phần văn bản. `index` đếm lại từ 0 cho mỗi lượt gọi LLM; client dùng
+    /// `index == 0` để thay snapshot cũ thay vì nối vào text của bước trước.
+    fn on_text_delta(&self, delta: &str, _index: u32, _reset: bool) {
+        self.on_text(delta);
+    }
+
     /// Thông báo bắt đầu chạy tool.
     fn on_tool_start(&self, id: &str, tool: &str, risk: Risk, summary: &str, args: &str);
 

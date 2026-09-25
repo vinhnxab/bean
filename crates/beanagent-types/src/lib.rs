@@ -13,7 +13,7 @@ pub mod tool;
 
 pub use config::{Config, ConfigError, ResolvedSecrets};
 pub use ids::{ConfirmId, RunId, SessionId};
-pub use llm::{LlmResponse, StopReason, Usage};
+pub use llm::{LlmDelta, LlmResponse, LlmToolCallDelta, StopReason, Usage};
 pub use message::{Message, Role, ToolCall};
 pub use router::{ConfirmOutcome, Outbound, OutboundAction, OutboundKind, RunEvent};
 pub use tool::{Risk, ToolSpec};

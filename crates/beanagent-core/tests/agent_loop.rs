@@ -14,7 +14,10 @@ use beanagent_core::{RunTurnArgs, run_turn};
 use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
 use beanagent_security::CapWorkspace;
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
-use beanagent_types::{Config, LlmResponse, Risk, Role, SessionId, ToolCall, ToolSpec, Usage};
+use beanagent_types::{
+    Config, LlmDelta, LlmResponse, LlmToolCallDelta, Risk, Role, SessionId, StopReason, ToolCall,
+    ToolSpec, Usage,
+};
 use tokio_util::sync::CancellationToken;
 
 /// Provider dựng sẵn: trả lần lượt danh sách response; hết thì lỗi (không panic).
@@ -31,6 +34,49 @@ impl LlmProvider for ScriptProvider {
             .get(i)
             .cloned()
             .ok_or_else(|| LlmError::FakeScript(format!("hết kịch bản tại lượt {i}")))
+    }
+
+    async fn chat_stream(
+        &self,
+        _req: ChatRequest<'_>,
+    ) -> Result<beanagent_llm::LlmStream, LlmError> {
+        use beanagent_types::LlmDelta;
+        use futures_util::stream;
+
+        let i = self.cursor.fetch_add(1, Ordering::SeqCst);
+        let response = self
+            .responses
+            .get(i)
+            .cloned()
+            .ok_or_else(|| LlmError::FakeScript(format!("hết kịch bản tại lượt {i}")))?;
+        let deltas = response
+            .text
+            .filter(|text| !text.is_empty())
+            .map(|text| vec![LlmDelta::Text { text }])
+            .unwrap_or_default();
+        let finish = vec![
+            LlmDelta::Usage {
+                usage: response.usage,
+            },
+            LlmDelta::Stop {
+                reason: response.stop,
+            },
+        ];
+        let calls = response
+            .tool_calls
+            .into_iter()
+            .enumerate()
+            .map(|(index, call)| {
+                LlmDelta::ToolCall(beanagent_types::LlmToolCallDelta {
+                    index,
+                    id: Some(call.id),
+                    name: Some(call.name),
+                    arguments_delta: Some(call.args.to_string()),
+                })
+            });
+        let items: Vec<Result<LlmDelta, LlmError>> =
+            calls.chain(deltas).chain(finish).map(Ok).collect();
+        Ok(Box::pin(stream::iter(items)))
     }
 
     fn name(&self) -> &'static str {
@@ -312,6 +358,103 @@ async fn runs_tool_then_final_answer() {
     let events = io.events();
     assert!(events.iter().any(|e| e.starts_with("start:probe:")));
     assert!(events.iter().any(|e| e.starts_with("end:probe:true:")));
+}
+
+#[tokio::test]
+async fn streaming_deltas_are_emitted_and_assembled_into_tool_call() {
+    struct StreamProvider {
+        calls: AtomicUsize,
+    }
+    impl std::fmt::Debug for StreamProvider {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("StreamProvider")
+                .field("calls", &self.calls)
+                .finish()
+        }
+    }
+    #[async_trait]
+    impl LlmProvider for StreamProvider {
+        async fn chat(&self, _request: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
+            Ok(LlmResponse::text_only("không dùng"))
+        }
+        async fn chat_stream_with_model(
+            &self,
+            _request: ChatRequest<'_>,
+            _model: &str,
+        ) -> Result<beanagent_llm::LlmStream, LlmError> {
+            use futures_util::stream;
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let first = vec![
+                    Ok(LlmDelta::Text {
+                        text: "đang kiểm tra".into(),
+                    }),
+                    Ok(LlmDelta::ToolCall(LlmToolCallDelta {
+                        index: 0,
+                        id: Some("c-stream".into()),
+                        name: Some("probe".into()),
+                        arguments_delta: Some("{\"x\":".into()),
+                    })),
+                    Ok(LlmDelta::ToolCall(LlmToolCallDelta {
+                        index: 0,
+                        id: None,
+                        name: None,
+                        arguments_delta: Some("1}".into()),
+                    })),
+                    Ok(LlmDelta::Stop {
+                        reason: StopReason::ToolUse,
+                    }),
+                ];
+                return Ok(Box::pin(stream::iter(first)));
+            }
+            let second = vec![
+                Ok(LlmDelta::Text {
+                    text: "xong".into(),
+                }),
+                Ok(LlmDelta::Stop {
+                    reason: StopReason::EndTurn,
+                }),
+            ];
+            Ok(Box::pin(stream::iter(second)))
+        }
+        fn name(&self) -> &'static str {
+            "stream"
+        }
+    }
+
+    let (probe, _ws, reg) = probe(Risk::Safe, false);
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let provider = StreamProvider {
+        calls: AtomicUsize::new(0),
+    };
+    let out = run_turn(RunTurnArgs {
+        store: &store,
+        registry: &reg,
+        llm: &provider,
+        config: &cfg(5),
+        session: SessionId::new(1),
+        user_text: "stream".into(),
+        io: Arc::new(io.clone()),
+        cancel: io.cancel.clone(),
+        session_policy: None,
+        audit: None,
+        channel: "cli",
+        skills_index: "",
+    })
+    .await
+    .unwrap();
+    assert_eq!(out, "xong");
+    assert_eq!(probe.count(), 1);
+    let history = store.history(SessionId::new(1), None, 0).await.unwrap();
+    let assistant_with_tool = history
+        .iter()
+        .find(|message| !message.tool_calls.is_empty())
+        .unwrap();
+    assert_eq!(assistant_with_tool.text.as_deref(), Some("đang kiểm tra"));
+    assert_eq!(
+        assistant_with_tool.tool_calls[0].args,
+        serde_json::json!({"x": 1})
+    );
 }
 
 /// 3. Dừng ở `max_steps`: mỗi bước đều phát tool call thì dừng đúng số bước.

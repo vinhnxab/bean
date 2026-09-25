@@ -117,17 +117,25 @@ fn chat_without_provider_reports_missing_env_var_clearly() {
 /// không cần mạng ngoài (agents.md mục 21 M2: "chat với provider thật, 1 lượt, không tool").
 #[tokio::test]
 async fn chat_with_openai_compat_provider_round_trip() {
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, ResponseTemplate};
 
     let server = wiremock::MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .and(header("Authorization", "Bearer test-key-123"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{ "message": { "role": "assistant", "content": "Chào bạn, tôi là BeanAgent." }, "finish_reason": "stop" }],
-            "usage": { "prompt_tokens": 9, "completion_tokens": 7 }
+        .and(body_partial_json(serde_json::json!({
+            "stream": true,
+            "stream_options": { "include_usage": true }
         })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Chào bạn, tôi là BeanAgent.\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":7}}\n\n",
+                "data: [DONE]\n\n"
+            ),
+            "text/event-stream",
+        ))
         .mount(&server)
         .await;
 

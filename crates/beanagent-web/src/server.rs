@@ -1428,6 +1428,19 @@ fn map_run_event(event: RunEvent) -> Option<ServerMsg> {
             run_id: run_id.as_str().into(),
             text,
         },
+        RunEvent::TextDelta {
+            session_id,
+            run_id,
+            text,
+            index,
+            reset,
+        } => ServerMsg::TextDelta {
+            session_id: session_id.get(),
+            run_id: run_id.as_str().into(),
+            text,
+            index,
+            reset,
+        },
         RunEvent::ToolStart {
             session_id,
             run_id,

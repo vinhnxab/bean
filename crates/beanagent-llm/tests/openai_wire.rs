@@ -6,7 +6,7 @@
 
 use secrecy::SecretString;
 use serde_json::{Value, json};
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use beanagent_llm::{
@@ -14,7 +14,8 @@ use beanagent_llm::{
     parse_openai_response,
 };
 use beanagent_types::llm::StopReason;
-use beanagent_types::{Message, ToolCall, ToolSpec};
+use beanagent_types::{LlmDelta, Message, ToolCall, ToolSpec};
+use futures_util::StreamExt;
 
 const API_KEY: &str = "k-openai-test";
 
@@ -217,6 +218,54 @@ async fn chat_sends_bearer_and_parses_reply() {
     let resp = provider.chat(request(&messages, &[])).await.unwrap();
     assert_eq!(resp.text.as_deref(), Some("xin chào lại"));
     assert_eq!(resp.stop, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn chat_stream_parses_sse_text_usage_and_done() {
+    let server = MockServer::start().await;
+    let sse = concat!(
+        "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Xin\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\" chào\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n",
+        "data: [DONE]\n\n"
+    );
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(body_partial_json(json!({
+            "stream": true,
+            "stream_options": {"include_usage": true}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse, "text/event-stream"))
+        .mount(&server)
+        .await;
+
+    let provider = provider_for(&server);
+    let messages = [Message::user("xin chào")];
+    let mut stream = provider.chat_stream(request(&messages, &[])).await.unwrap();
+    let mut deltas = Vec::new();
+    while let Some(item) = stream.next().await {
+        deltas.push(item.unwrap());
+    }
+    let text = deltas
+        .iter()
+        .filter_map(|delta| match delta {
+            LlmDelta::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(text, "Xin chào");
+    assert!(deltas.iter().any(|delta| matches!(
+        delta,
+        LlmDelta::Usage { usage } if usage.input_tokens == 3 && usage.output_tokens == 2
+    )));
+    assert!(deltas.iter().any(|delta| matches!(
+        delta,
+        LlmDelta::Stop {
+            reason: StopReason::EndTurn
+        }
+    )));
 }
 
 #[tokio::test]

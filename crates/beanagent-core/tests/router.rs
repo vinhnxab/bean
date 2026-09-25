@@ -15,8 +15,8 @@ use beanagent_llm::{ChatRequest, FakeProvider, LlmError, LlmProvider};
 use beanagent_security::{AuditLog, CapWorkspace};
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use beanagent_types::{
-    Config, ConfirmOutcome, LlmResponse, Outbound, OutboundKind, Risk, RunEvent, RunId, SessionId,
-    ToolCall, ToolSpec,
+    Config, ConfirmOutcome, LlmDelta, LlmResponse, Outbound, OutboundKind, Risk, RunEvent, RunId,
+    SessionId, ToolCall, ToolSpec,
 };
 use tokio::sync::{Notify, Semaphore, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -87,6 +87,7 @@ fn event_uses_run(event: &RunEvent, run_id: &RunId) -> bool {
     match event {
         RunEvent::Queued { run_id: id, .. }
         | RunEvent::Text { run_id: id, .. }
+        | RunEvent::TextDelta { run_id: id, .. }
         | RunEvent::ToolStart { run_id: id, .. }
         | RunEvent::ToolEnd { run_id: id, .. }
         | RunEvent::ConfirmRequest { run_id: id, .. }
@@ -297,6 +298,74 @@ async fn queue_runs_one_at_a_time_and_marks_later_runs() {
     assert_eq!(wait_final(&mut events, &first).await, "thứ nhất");
     assert_eq!(wait_final(&mut events, &second).await, "thứ hai");
     assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn router_forwards_text_delta_with_reset_marker() {
+    struct StreamProvider;
+    impl std::fmt::Debug for StreamProvider {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("StreamProvider")
+        }
+    }
+    #[async_trait]
+    impl LlmProvider for StreamProvider {
+        async fn chat(&self, _request: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
+            Ok(LlmResponse::text_only("unused"))
+        }
+        async fn chat_stream_with_model(
+            &self,
+            _request: ChatRequest<'_>,
+            _model: &str,
+        ) -> Result<beanagent_llm::LlmStream, LlmError> {
+            use futures_util::stream;
+            Ok(Box::pin(stream::iter([
+                Ok(LlmDelta::Text {
+                    text: "từng phần".into(),
+                }),
+                Ok(beanagent_types::LlmDelta::Stop {
+                    reason: beanagent_types::StopReason::EndTurn,
+                }),
+            ])))
+        }
+        fn name(&self) -> &'static str {
+            "stream"
+        }
+    }
+
+    let store = Arc::new(MemoryStore::new());
+    let (_temp, router) = router_with(
+        store,
+        Arc::new(StreamProvider),
+        vec![],
+        RouterOptions::default(),
+    )
+    .await;
+    let mut events = router.events();
+    let run = router
+        .submit(Incoming::new("cli", "local", "cli:local", "stream"))
+        .await
+        .unwrap();
+    let delta = loop {
+        let event = next_event(&mut events, &run).await;
+        if let RunEvent::TextDelta {
+            text, index, reset, ..
+        } = event
+        {
+            break (text, index, reset);
+        }
+    };
+    assert_eq!(delta, ("".to_string(), 0, true));
+    assert!(matches!(
+        next_event(&mut events, &run).await,
+        RunEvent::TextDelta {
+            text,
+            index: 1,
+            reset: false,
+            ..
+        } if text == "từng phần"
+    ));
+    assert_eq!(wait_final(&mut events, &run).await, "từng phần");
 }
 
 #[tokio::test]

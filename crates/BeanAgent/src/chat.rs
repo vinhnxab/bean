@@ -300,6 +300,7 @@ fn event_run_id(event: &RunEvent) -> &RunId {
     match event {
         RunEvent::Queued { run_id, .. }
         | RunEvent::Text { run_id, .. }
+        | RunEvent::TextDelta { run_id, .. }
         | RunEvent::ToolStart { run_id, .. }
         | RunEvent::ToolEnd { run_id, .. }
         | RunEvent::ConfirmRequest { run_id, .. }
@@ -322,6 +323,8 @@ fn render_event(event: RunEvent, expected: &RunId) -> CliEventAction {
             print!("{text}");
             CliEventAction::Ignore
         }
+        // CLI giữ hành vi in một lần ở Final; Web mới dùng từng delta.
+        RunEvent::TextDelta { .. } => CliEventAction::Ignore,
         RunEvent::ToolStart {
             tool,
             summary,

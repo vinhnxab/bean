@@ -13,6 +13,8 @@ workspace = true
 [dependencies]
 beanagent-types.workspace = true
 async-trait.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 secrecy.workspace = true

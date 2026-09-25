@@ -567,6 +567,7 @@ fn event_run_id(event: &RunEvent) -> &RunId {
     match event {
         RunEvent::Queued { run_id, .. }
         | RunEvent::Text { run_id, .. }
+        | RunEvent::TextDelta { run_id, .. }
         | RunEvent::ToolStart { run_id, .. }
         | RunEvent::ToolEnd { run_id, .. }
         | RunEvent::ConfirmRequest { run_id, .. }
@@ -934,6 +935,9 @@ impl TelegramChannel {
                     self.send_chat_text(target.chat_id, &text).await;
                 }
             }
+            // Streaming token chỉ dành cho Web UI. Telegram chờ Final để tránh gửi
+            // hàng trăm tin nhắn và vẫn nhận đúng một tin đầy đủ.
+            RunEvent::TextDelta { .. } => {}
             RunEvent::ToolStart { tool, summary, .. } => {
                 if let Some(target) = self.run_target(&run_id) {
                     self.send_chat_text(target.chat_id, &format!("🔧 {tool}: {summary}"))

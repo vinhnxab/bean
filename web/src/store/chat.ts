@@ -61,7 +61,8 @@ function runFor(state: ChatState, sessionId: number, update: Partial<SessionRunS
   return { ...(state.runsBySession[sessionId] ?? idleRun()), ...update };
 }
 
-function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): string {
+function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): string | null {
+  if (message.type === "text_delta") return null;
   switch (message.type) {
     case "queued":
       return `${message.type}:${message.run_id}`;
@@ -113,6 +114,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       runsBySession: {
         ...state.runsBySession,
         [sessionId]: runFor(state, sessionId, {
+          runId: null,
           status: "submitting",
           queuePosition: null,
           streamText: "",
@@ -139,7 +141,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           runs[Number(sessionId)] = idleRun();
       }
       for (const item of message.running) {
-        runs[item.session_id] = runFor(state, item.session_id, { runId: item.run_id, status: "running" });
+        const previous = runs[item.session_id];
+        runs[item.session_id] = {
+          ...(previous ?? idleRun()),
+          runId: item.run_id,
+          status: "running",
+          streamText: previous?.runId === item.run_id ? previous.streamText : "",
+          liveTools: previous?.runId === item.run_id ? previous.liveTools : {},
+          error: null,
+        };
       }
       const confirms = { ...state.confirmsById };
       if (reconcile) {
@@ -160,11 +170,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }),
 
   applyServerMessage: (message) => {
-    const key = eventKey(message);
-    if (get().seenEventKeys[key]) return null;
+    const key = message.type === "text_delta" ? null : eventKey(message);
+    if (key && get().seenEventKeys[key]) return null;
     let effect: RefreshEffect = null;
     set((state) => {
-      const seenEventKeys = rememberEvent(state.seenEventKeys, key);
+      const seenEventKeys = key ? rememberEvent(state.seenEventKeys, key) : state.seenEventKeys;
       const runs = { ...state.runsBySession };
       const confirms = { ...state.confirmsById };
       switch (message.type) {
@@ -185,6 +195,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
           effect = { sessionId: message.session_id, messageId: null, runId: message.run_id };
           break;
+        case "text_delta": {
+          const run = runFor(state, message.session_id);
+          if (run.runId !== null && run.runId !== message.run_id) break;
+          runs[message.session_id] = {
+            ...run,
+            runId: message.run_id,
+            status: "running",
+            queuePosition: null,
+            streamText: message.reset ? message.text : run.streamText + message.text,
+          };
+          break;
+        }
         case "tool_start": {
           const run = runFor(state, message.session_id, {
             runId: message.run_id,
@@ -263,6 +285,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...runFor(state, sessionId, { error: message.message, status: "idle" }),
               runId: null,
               queuePosition: null,
+              streamText: "",
+              liveTools: {},
             };
           }
           break;

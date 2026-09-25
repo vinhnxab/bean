@@ -98,5 +98,25 @@ describe("ChatSocket", () => {
     });
     expect(parseServerMessage({ type: "notification", session_id: 1 })).toBeNull();
     expect(parseServerMessage({ type: "script" })).toBeNull();
+    expect(
+      parseServerMessage({
+        type: "text_delta",
+        session_id: 1,
+        run_id: "r",
+        text: "x",
+        index: 0,
+        reset: true,
+      }),
+    ).not.toBeNull();
+    expect(
+      parseServerMessage({
+        type: "text_delta",
+        session_id: 1,
+        run_id: "r",
+        text: "x",
+        index: -1,
+        reset: true,
+      }),
+    ).toBeNull();
   });
 });
