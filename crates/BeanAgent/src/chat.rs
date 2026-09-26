@@ -27,6 +27,7 @@ use beanagent_core::{
     schedule_tools,
 };
 use beanagent_llm::{FakeProvider, LlmProvider};
+use beanagent_marketing::{PublishClient, marketing_draft, marketing_publish};
 use beanagent_scan::{ScanScope, ScannerCmd, security_scan};
 use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
@@ -305,6 +306,26 @@ pub(crate) async fn build_registry(
         registry
             .register(security_scan(scope, scan_sandbox, ScannerCmd::default()))
             .context("đăng ký tool security_scan thất bại")?;
+    }
+    // (M24) Domain marketing. Chỉ đăng ký khi `marketing.enabled`; credential đọc từ
+    // biến môi trường RIÊNG (validate chặn dùng chung với LLM/search/Telegram).
+    if config.marketing.enabled {
+        let key = config
+            .resolve_marketing_key()
+            .context("đọc credential marketing thất bại")?;
+        let client = PublishClient::new(&config.marketing, key);
+        if !client.is_configured() {
+            tracing::warn!(
+                "marketing đang bật nhưng thiếu [marketing].base_url hoặc biến credential — \
+                 marketing_publish sẽ ở CHẾ ĐỘ STUB, KHÔNG đăng được gì"
+            );
+        }
+        registry
+            .register(marketing_publish(client))
+            .context("đăng ký tool marketing_publish thất bại")?;
+        registry
+            .register(marketing_draft())
+            .context("đăng ký tool marketing_draft thất bại")?;
     }
     let mcp = McpRuntime::load(&config.mcp_servers, &mut registry).await;
     Ok(BuiltRegistry { registry, mcp })

@@ -138,6 +138,7 @@ fn role(name: &str, tags: &[&str], forbid: &[&str]) -> RoleConfig {
     RoleConfig {
         name: name.into(),
         tool_tags: tags.iter().map(|s| (*s).to_string()).collect(),
+        allowed_tool_tags: vec![],
         forbid_tags: forbid.iter().map(|s| (*s).to_string()).collect(),
         context_budget_tokens: None,
         daily_token_budget: None,
@@ -463,6 +464,7 @@ async fn two_projects_do_not_mix_memory_md() {
             ws.as_deref(),
             "",
             config.agent.context_budget_tokens,
+            &perms.role,
         )
         .await
         .unwrap();

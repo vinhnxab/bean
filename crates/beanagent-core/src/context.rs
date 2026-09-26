@@ -65,6 +65,8 @@ pub async fn build_with_skills(
         workspace,
         skills_index,
         config.agent.context_budget_tokens,
+        // Không có role ở đường cũ ⇒ không chèn hướng dẫn riêng nào.
+        "",
     )
     .await
 }
@@ -81,6 +83,7 @@ pub async fn build_for_project(
     workspace: Option<&dyn WorkspaceFs>,
     skills_index: &str,
     context_budget: u32,
+    role: &str,
 ) -> Result<TurnContext, StoreError> {
     build_full(
         store,
@@ -89,6 +92,7 @@ pub async fn build_for_project(
         workspace,
         skills_index,
         context_budget,
+        role,
     )
     .await
 }
@@ -101,13 +105,14 @@ async fn build_full(
     workspace: Option<&dyn WorkspaceFs>,
     skills_index: &str,
     context_budget: u32,
+    role: &str,
 ) -> Result<TurnContext, StoreError> {
     let memory_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, MEMORY_FILE));
     let user_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, USER_FILE));
     let summary = store.summary(session).await?.unwrap_or_default();
 
     let mut system =
-        crate::prompt::system_prompt(&config.agent, skills_index, &memory_md, &user_md);
+        crate::prompt::system_prompt(&config.agent, skills_index, &memory_md, &user_md, role);
     if !summary.trim().is_empty() {
         system.push_str("\n\n# Conversation summary\n");
         system.push_str(summary.trim());

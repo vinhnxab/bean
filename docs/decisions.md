@@ -481,3 +481,19 @@ gọi tool `security_scan` **thật** (script in `22/tcp open ssh`) rồi khẳn
 đúng channel, có `message_id` thật trong DB; `failed_alert_goes_to_outbox_instead_of_being_lost`;
 `alert_sink_is_none_when_not_configured`. Cộng 4 test ở `crates/beanagent-scan/tests/scan.rs`
 cho ranh giới mức nghiêm trọng và việc lỗi gửi không làm hỏng tool.
+
+## 15. Marketing (D15.x — 2026-09-26)
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D15.1 | Tách domain làm ở phía **role** (`allowed_tool_tags`), không phải gắn tag vào tool | `Plan.md` M24 đòi role `marketing` thấy `web_fetch` mà **không** thấy `write_file`/`run_shell`. Gắn `required_tags` vào `web_fetch` sẽ *giấu nó khỏi mọi role khác* — hồi qui cho cài đặt đang chạy. Danh sách trắng ở role giải quyết cả hai: marketing bị giới hạn, các role cũ không đổi gì. | Thêm một khái niệm RBAC. Bù lại, `allowed_tool_tags` rỗng = đúng hành vi M21. |
+| D15.2 | Thêm `Tool::also_visible_to` (mặc định rỗng) | `allowed_tool_tags` một mình sẽ ẩn luôn `web_fetch` khỏi marketing. Method này *mở thêm* một lối cho tool untagged mà vốn bị ẩn, và rỗng ở **mọi** tool nên không đổi hành vi cấu hình cũ. | Tool untagged phải khai `also_visible_to` mới hiện với role giới hạn. |
+| D15.3 | Credential publish phải **riêng**, kiểm ở `validate_marketing` | Quyền API "chỉ post" không được dùng lại key có quyền rộng hơn. Chỉ ghi trong README thì một lần copy-paste config là đã vi phạm mà không ai chặn. | Trùng với LLM/search/Telegram ⇒ **không khởi động** được. |
+| D15.4 | `marketing_publish` khai `Risk::Dangerous` **cứng trong code** | `Plan.md` M24: "BẮT BUỘC luôn Dangerous — không cho phép trong phiên dù cấu hình nói gì, kiểm tra cứng ở code". Đăng bài là hành động **không hoàn tác**. | `Policy::decide` trả `allow_in_session: false` ⇒ không có tuỳ chọn đó, kể cả khi đã duyệt trước đó. |
+| D15.5 | `marketing_draft` = `Confirm`, **không** có đường gọi mạng | Ghi file trong workspace đã jail thì đọc/xoá được, nên không cần `Dangerous`. Quan trọng hơn: tool này **không tồn tại** đường HTTP nào — bảo đảm ở tầng code chứ không phải lời hứa trong `description`. | Mọi việc lên xuống mạng nằm sau `marketing_publish` + một bước xác nhận. |
+| D15.6 | `SafeHttpClient::post_bearer` thêm mới, **không** tái dùng đường nào khác | `fetch` chỉ có GET. Thêm hàm riêng thay vì mở rộng `fetch` để không làm nongỏ chỗ kiểm SSRF cho request có body. | Mọi kiểm tra của `fetch_bearer` (validate URL, resolver, redirect từng bước, giới hạn body) được nhân bản nguyên vẹn. |
+| D15.7 | `marketing.enabled` mà thiếu biến credential ⇒ **lỗi lúc khởi động**, không phải stub | Khác hẳn M22a (billing) vốn cho stub im lặng: đăng bài không hoàn tác được, nên "tưởng đã cấu hình" là nguy hiểm. | Thiếu biến là thấy ngay, không phải lúc chạy. |
+
+**Bằng chứng:** `crates/beanagent-marketing/tests/marketing.rs` (13 test) — đủ ba yêu cầu kiểm thử
+bắt buộc của M24: marketing không thấy/gọi được tool ngoài tag, `marketing_publish` luôn
+Confirm kể cả sau allow-in-session, `marketing_draft` không có network call.

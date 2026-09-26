@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
-use crate::rbac::{NO_ACCESS_ROLE, RolePermissions};
+use crate::rbac::{NO_ACCESS_ROLE, RolePermissions, WILDCARD_TAG};
 
 /// Tên file cấu hình mặc định ở gốc workspace.
 pub const DEFAULT_CONFIG_FILE: &str = "BeanAgent.toml";
@@ -135,6 +135,10 @@ pub const BILLING_TOOL_GROUP: &str = "billing";
 
 /// Tag RBAC của domain tài chính (M22a).
 pub const BILLING_TAG: &str = "billing-read";
+
+// Tag RBAC của domain marketing (M24) định nghĩa ở `rbac.rs`; re-export ở đây để các
+// tool import cùng chỗ với `INFRA_SCAN_TAG`/`BILLING_TAG`.
+pub use crate::rbac::{MARKETING_DRAFT_TAG, MARKETING_PUBLISH_TAG, MARKETING_READ_TAG};
 
 /// Tag RBAC của domain quét bảo mật (M23).
 ///
@@ -266,6 +270,36 @@ impl ScanSandboxConfig {
     }
 }
 
+/// Cấu hình domain marketing (M24).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MarketingConfig {
+    /// Bật nhóm tool marketing.
+    pub enabled: bool,
+    /// Tên biến môi trường chứa API key **riêng** của nền tảng publish.
+    ///
+    /// `validate()` từ chối trùng với `llm.api_key_env` / `tools.web_search.api_key_env` /
+    /// `telegram.token_env` — cùng mẫu với M22a: quyền "chỉ post" phải là credential riêng,
+    /// không dùng lại key có quyền rộng hơn.
+    pub api_key_env: String,
+    /// Endpoint nhận nội dung để đăng (JSON). Rỗng ⇒ **chế độ stub**: không gọi mạng.
+    pub base_url: Option<String>,
+    /// Trường JSON chứa nội dung trong body, ví dụ `"text"`.
+    pub text_field: String,
+}
+
+impl Default for MarketingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "MARKETING_POST_ONLY_KEY".to_string(),
+            base_url: None,
+            // `text` là tên trường phổ biến nhất; vẫn cấu hình được nếu provider khác.
+            text_field: "text".to_string(),
+        }
+    }
+}
+
 /// Cấu hình domain `security-scan` (M23).
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -339,6 +373,17 @@ pub struct RoleConfig {
     /// review — kiểm tra ở tầng code, không dựa vào model tự kiểm tra.
     #[serde(default)]
     pub forbid_tags: Vec<String>,
+    /// **Danh sách trắng tag**: role này chỉ thấy tool mang ít nhất một tag trong đây.
+    ///
+    /// Mặc định **rỗng ⇒ không áp dụng** (mọi role đã cấp quyền đều thấy tool untagged) —
+    /// nên thêm trường này không đổi hành vi của cấu hình cũ nào.
+    ///
+    /// Cơ chế này sinh ra ở M24 để **tách domain**: role `marketing` phải thấy
+    /// `web_fetch`/`web_search` mà **không** thấy `write_file`/`run_shell`/tool `infra-*`.
+    /// Không thể làm bằng `tool_tags` vì gắn tag vào một tool untagged sẽ *giấu nó khỏi mọi
+    /// role khác* — hồi quy cho các cài đặt đang chạy (D15.1).
+    #[serde(default)]
+    pub allowed_tool_tags: Vec<String>,
     /// Ghi đè `agent.context_budget_tokens` cho riêng role này (M21.7).
     #[serde(default)]
     pub context_budget_tokens: Option<u32>,
@@ -352,6 +397,16 @@ impl RoleConfig {
     #[must_use]
     pub fn tag_set(&self) -> BTreeSet<String> {
         self.tool_tags
+            .iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .collect()
+    }
+
+    /// Tập `allowed_tool_tags` đã chuẩn hoá (danh sách trắng tách domain — M24).
+    #[must_use]
+    pub fn allowed_tag_set(&self) -> BTreeSet<String> {
+        self.allowed_tool_tags
             .iter()
             .map(|tag| tag.trim().to_string())
             .filter(|tag| !tag.is_empty())
@@ -655,6 +710,8 @@ pub struct Config {
     pub infra_scope: Vec<ScanScopeEntry>,
     /// `[security_scan]` — domain quét bảo mật (M23).
     pub security_scan: SecurityScanConfig,
+    /// `[marketing]` — domain marketing (M24).
+    pub marketing: MarketingConfig,
     /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
     /// ánh xạ tới `agent.workspace`.
     pub projects: Vec<ProjectConfig>,
@@ -758,6 +815,7 @@ impl Config {
         self.validate_core()?;
         self.validate_rbac()?;
         self.validate_billing()?;
+        self.validate_marketing()?;
         self.validate_infra_scope()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
@@ -799,7 +857,9 @@ impl Config {
             return RolePermissions::deny_all(NO_ACCESS_ROLE);
         };
         match self.role(role_name) {
-            Some(role) => RolePermissions::from_tags(&role.name, role.tag_set()),
+            Some(role) => {
+                RolePermissions::restricted_to(&role.name, role.tag_set(), role.allowed_tag_set())
+            }
             None => {
                 tracing::error!(user_id, role = %role_name,
                     "user_roles trỏ tới role không tồn tại — dùng no-access");
@@ -895,6 +955,24 @@ impl Config {
                     "role `{name}`.context_budget_tokens tối thiểu 1000"
                 )));
             }
+            // (M24) Danh sách trắng phải chứa ít nhất một tag mà role thực sự được cấp,
+            // nếu không thì role đó bị chặn khỏi MỌI tool (kể cả untagged) mà không ai
+            // hỏi — cấu hình im lặng, rất dễ quên.
+            let allowed = role.allowed_tag_set();
+            if !allowed.is_empty() && !allowed.iter().any(|tag| granted.contains(tag)) {
+                return Err(invalid(format!(
+                    "role `{name}` khai allowed_tool_tags nhưng tool_tags không chứa tag nào \
+                     trong đó — role sẽ không thấy tool nào"
+                )));
+            }
+            // Wildcard `*` trong danh sách trắng là mâu thuẫn: nó đã là "mọi quyền" ở
+            // `tool_tags`, thêm vào đây chỉ làm mờ ý nghĩa.
+            if allowed.iter().any(|tag| tag == WILDCARD_TAG) {
+                return Err(invalid(format!(
+                    "role `{name}`: không cần `{WILDCARD_TAG}` trong allowed_tool_tags — \
+                     tag đó đã bỏ qua danh sách trắng; bỏ hẳn trường này nếu không giới hạn"
+                )));
+            }
         }
         for (user, role) in &self.agent.user_roles {
             if self.role(role).is_none() {
@@ -945,6 +1023,36 @@ impl Config {
                     "[billing].api_key_env không được trùng với {field} (`{env}`): credential đọc billing phải RIÊNG, quyền tối thiểu chỉ đọc billing"
                 )));
             }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[marketing]` (M24).
+    fn validate_marketing(&self) -> Result<(), ConfigError> {
+        let env = self.marketing.api_key_env.trim();
+        if env.is_empty() {
+            return Err(invalid("[marketing].api_key_env không được để trống"));
+        }
+        // (D15.3) Credential phải RIÊNG: quyền "chỉ post" không được dùng lại key có
+        // quyền rộng hơn (LLM, search, Telegram). Cùng mẫu với M22a — kiểm ở tầng load
+        // config, không dựa vào kỷ luật vận hành.
+        for (other, what) in [
+            (self.llm.api_key_env.trim(), "llm.api_key_env"),
+            (
+                self.tools.web_search.api_key_env.trim(),
+                "tools.web_search.api_key_env",
+            ),
+            (self.telegram.token_env.trim(), "telegram.token_env"),
+        ] {
+            if !other.is_empty() && other == env {
+                return Err(invalid(format!(
+                    "[marketing].api_key_env trùng với {what} — M24 yêu cầu credential riêng, \
+                     quyền tối thiểu chỉ post"
+                )));
+            }
+        }
+        if self.marketing.text_field.trim().is_empty() {
+            return Err(invalid("[marketing].text_field không được để trống"));
         }
         Ok(())
     }
@@ -1292,6 +1400,26 @@ impl Config {
             &|name: &str| std::env::var(name).ok(),
             "billing.api_key_env",
             &self.billing.api_key_env,
+        )?;
+        Ok(Some(key))
+    }
+
+    /// Đọc credential publish của marketing (M24).
+    ///
+    /// Giống [`Self::resolve_billing_key`]: marketing bật mà thiếu biến thì **báo lỗi lúc
+    /// khởi động**, không âm thầm chạy stub — vì `marketing_publish` là hành động không hoàn
+    /// tác, người vận hành phải biết chắc là mình đã cấu hình.
+    ///
+    /// # Errors
+    /// [`ConfigError::MissingEnv`] kể marketing bật mà biến `api_key_env` thiếu/rỗng.
+    pub fn resolve_marketing_key(&self) -> Result<Option<SecretString>, ConfigError> {
+        if !self.marketing.enabled {
+            return Ok(None);
+        }
+        let key = read_required(
+            &|name: &str| std::env::var(name).ok(),
+            "marketing.api_key_env",
+            &self.marketing.api_key_env,
         )?;
         Ok(Some(key))
     }

@@ -32,6 +32,7 @@ fn finance_config() -> Config {
             name: "finance-readonly".into(),
             tool_tags: vec!["billing-read".into()],
             forbid_tags: vec![],
+            allowed_tool_tags: vec![],
             context_budget_tokens: None,
             daily_token_budget: None,
         }],

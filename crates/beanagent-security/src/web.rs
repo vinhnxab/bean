@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 
 use beanagent_tools::{Tool, ToolCtx, ToolError, TypedTool};
 use beanagent_types::Risk;
+use beanagent_types::config::MARKETING_READ_TAG;
 use beanagent_types::config::{WebSearchConfig, WebSearchProvider};
 use schemars::JsonSchema;
 use secrecy::{ExposeSecret, SecretString};
@@ -65,7 +66,11 @@ pub fn web_fetch(client: Arc<SafeHttpClient>) -> Arc<dyn Tool> {
         )
         // `fetch_page` tự bọc `wrap_untrusted_limited` (kể cả nhánh lỗi), nên chỉ khai
         // báo cờ chứ không để `TypedTool` bọc lần hai (mục 15.4).
-        .declares_untrusted(),
+        .declares_untrusted()
+        // (M24) Mở cho vai trò marketing: `web_fetch` là untagged nên vẫn hiện với mọi
+        // role như cũ — `also_visible_to` chỉ *thêm* lối cho role giới hạn theo danh sách
+        // trắng, không hạn chế ai (xem `Tool::also_visible_to`).
+        .also_visible_to([MARKETING_READ_TAG]),
     )
 }
 
@@ -575,7 +580,9 @@ fn web_search_with_client(client: Arc<SearchClient>) -> Arc<dyn Tool> {
             },
         )
         // Handler đã tự bọc `wrap_untrusted_limited` — chỉ khai báo cờ (mục 15.4).
-        .declares_untrusted(),
+        .declares_untrusted()
+        // (M24) Mở cho vai trò marketing; untagged nên vẫn hiện với mọi role như cũ.
+        .also_visible_to([MARKETING_READ_TAG]),
     )
 }
 

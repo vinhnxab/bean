@@ -7,6 +7,7 @@ members = [
   "crates/beanagent-core",
   "crates/beanagent-llm",
   "crates/beanagent-memory",
+  "crates/beanagent-marketing",
   "crates/beanagent-scan",
   "crates/beanagent-security",
   "crates/beanagent-skills",
@@ -45,6 +46,7 @@ todo = "deny"
 beanagent-types = { path = "crates/beanagent-types" }
 beanagent-billing = { path = "crates/beanagent-billing" }
 beanagent-llm = { path = "crates/beanagent-llm" }
+beanagent-marketing = { path = "crates/beanagent-marketing" }
 beanagent-scan = { path = "crates/beanagent-scan" }
 beanagent-security = { path = "crates/beanagent-security" }
 beanagent-tools = { path = "crates/beanagent-tools" }

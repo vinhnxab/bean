@@ -250,6 +250,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             workspace.as_deref(),
             skills_index,
             config.context_budget_for(permissions),
+            &permissions.role,
         )
         .await?;
         let system = ctx.system;

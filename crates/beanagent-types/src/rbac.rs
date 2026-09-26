@@ -52,7 +52,24 @@ pub struct RolePermissions {
     pub tags: BTreeSet<String>,
     /// `true` ⇒ deny-all: không thấy tool nào, kể cả untagged (role `no-access`).
     pub deny_all: bool,
+    /// Danh sách trắng tag: role này chỉ thấy tool mang **ít nhất một** tag trong đây.
+    ///
+    /// **Rỗng ⇒ không áp dụng** (hành vi M21: mọi role đã cấp quyền đều thấy tool untagged).
+    /// Cơ chế này sinh ra ở M24 để *tách domain*: role `marketing` phải **không** thấy
+    /// `write_file`/`run_shell`/tool `infra-*`, nhưng việc gắn `required_tags` vào các tool
+    /// untagged sẽ làm mất chúng cho **mọi** role khác (hồi quy) — nên tách domain phải
+    /// làm ở phía *role*, không phải phía tool (D15.1).
+    pub allowed_tool_tags: BTreeSet<String>,
 }
+
+/// Tag RBAC của domain marketing (M24) — đọc web (dùng chung `web_fetch`/`web_search`).
+pub const MARKETING_READ_TAG: &str = "marketing-read";
+
+/// Tag RBAC của domain marketing (M24) — lưu bản nháp, **không** gọi API ngoài.
+pub const MARKETING_DRAFT_TAG: &str = "marketing-draft";
+
+/// Tag RBAC của domain marketing (M24) — đăng thật, luôn `Dangerous`.
+pub const MARKETING_PUBLISH_TAG: &str = "marketing-publish";
 
 impl RolePermissions {
     /// Quyền **deny-all** — tương đương role `no-access`.
@@ -62,6 +79,7 @@ impl RolePermissions {
             role: role.to_string(),
             tags: BTreeSet::new(),
             deny_all: true,
+            allowed_tool_tags: BTreeSet::new(),
         }
     }
 
@@ -74,6 +92,7 @@ impl RolePermissions {
             role: role.to_string(),
             tags,
             deny_all: false,
+            allowed_tool_tags: BTreeSet::new(),
         }
     }
 
@@ -88,6 +107,25 @@ impl RolePermissions {
             role: role.to_string(),
             tags,
             deny_all: false,
+            allowed_tool_tags: BTreeSet::new(),
+        }
+    }
+
+    /// Dựng quyền **giới hạn theo danh sách trắng tag** (M24).
+    ///
+    /// Dùng cho vai trò cần *tách domain*: chỉ thấy tool mang tag trong `allowed_tool_tags`,
+    /// kể cả khi tool đó untagged. Rỗng ⇒ hành vi M21 (không giới hạn).
+    #[must_use]
+    pub fn restricted_to(
+        role: &str,
+        tags: BTreeSet<String>,
+        allowed_tool_tags: BTreeSet<String>,
+    ) -> Self {
+        Self {
+            role: role.to_string(),
+            tags,
+            deny_all: false,
+            allowed_tool_tags,
         }
     }
 
@@ -99,15 +137,32 @@ impl RolePermissions {
 
     /// **Điểm kiểm tra RBAC duy nhất** (ràng buộc M21.3).
     ///
-    /// `required` là `Tool::required_tags` của tool; rỗng nghĩa là tool không nhạy cảm.
+    /// * `required` — `Tool::required_tags`: tag mà role phải giữ **ít nhất một** để thấy
+    ///   tool. Rỗng ⇒ tool untagged, ai đã cấp quyền cũng thấy (hành vi M21).
+    /// * `extra` — `Tool::also_visible_to`: tag **bổ sung** cho tool untagged mà vẫn muốn
+    ///   một role cụ thể thấy (M24: `web_fetch` cho `marketing`). Mọi tool hiện có đều rỗng
+    ///   ⇒ thêm cơ chế này **không** đổi hành vi của bất kỳ cấu hình cũ nào.
+    ///
+    /// Thứ tự áp dụng: deny-all → toàn quyền → **danh sách trắng tag của role** → tag yêu cầu.
     #[must_use]
-    pub fn allows(&self, required: &[&str]) -> bool {
+    pub fn allows(&self, required: &[&str], extra: &[&str]) -> bool {
         // Bất biến an toàn mặc định: `no-access` không thấy gì, kể cả tool untagged.
         if self.deny_all {
             return false;
         }
         if self.allows_all() {
             return true;
+        }
+        // (M24) Chế độ tách domain: chỉ tool có tag nằm trong danh sách trắng mới thấy.
+        // Tool untagged mà không khai `also_visible_to` sẽ bị ẩn — đúng mục tiêu M24.
+        if !self.allowed_tool_tags.is_empty() {
+            let permitted = required
+                .iter()
+                .chain(extra.iter())
+                .any(|tag| self.allowed_tool_tags.contains(*tag));
+            if !permitted {
+                return false;
+            }
         }
         if required.is_empty() {
             return true;
@@ -141,39 +196,39 @@ mod tests {
     #[test]
     fn deny_all_role_sees_nothing_even_untagged() {
         let perms = RolePermissions::deny_all("no-access");
-        assert!(!perms.allows(&[]), "tool untagged phải bị chặn");
-        assert!(!perms.allows(&["dev-write"]));
+        assert!(!perms.allows(&[], &[]), "tool untagged phải bị chặn");
+        assert!(!perms.allows(&["dev-write"], &[]));
         assert!(!perms.allows_all());
     }
 
     #[test]
     fn wildcard_sees_everything() {
         let perms = RolePermissions::unrestricted("admin");
-        assert!(perms.allows(&[]));
-        assert!(perms.allows(&["dev-write"]));
-        assert!(perms.allows(&["billing-read"]));
+        assert!(perms.allows(&[], &[]));
+        assert!(perms.allows(&["dev-write"], &[]));
+        assert!(perms.allows(&["billing-read"], &[]));
         assert!(perms.allows_all());
     }
 
     #[test]
     fn untagged_tools_are_visible_to_any_granted_role() {
         let perms = from_tags("qa", &["dev-read", "test-run"]);
-        assert!(perms.allows(&[]), "tool chat thường phải dùng được");
+        assert!(perms.allows(&[], &[]), "tool chat thường phải dùng được");
     }
 
     #[test]
     fn tagged_tool_needs_matching_tag() {
         let qa = from_tags("qa", &["dev-read", "test-run"]);
-        assert!(qa.allows(&["dev-read"]));
+        assert!(qa.allows(&["dev-read"], &[]));
         assert!(
-            !qa.allows(&["dev-write"]),
+            !qa.allows(&["dev-write"], &[]),
             "four-eyes: qa không được thấy tool dev-write"
         );
 
         let finance = from_tags("finance-readonly", &["billing-read"]);
-        assert!(finance.allows(&["billing-read"]));
+        assert!(finance.allows(&["billing-read"], &[]));
         assert!(
-            !finance.allows(&["infra-read"]),
+            !finance.allows(&["infra-read"], &[]),
             "tách domain billing khỏi infra"
         );
     }
@@ -185,15 +240,15 @@ mod tests {
         let dev = from_tags("developer", &["dev-write"]);
         let sec = from_tags("security-scan", &["infra-scan"]);
         let qa = from_tags("qa", &["dev-read", "test-run"]);
-        assert!(dev.allows(&required));
-        assert!(sec.allows(&required));
-        assert!(!qa.allows(&required));
+        assert!(dev.allows(&required, &[]));
+        assert!(sec.allows(&required, &[]));
+        assert!(!qa.allows(&required, &[]));
     }
 
     #[test]
     fn usage_scope_is_the_role_name() {
         let perms = from_tags("developer", &["dev-write"]);
         assert_eq!(perms.usage_scope(), "developer");
-        assert!(RolePermissions::unrestricted(WILDCARD_TAG).allows(&[]));
+        assert!(RolePermissions::unrestricted(WILDCARD_TAG).allows(&[], &[]));
     }
 }

@@ -1,0 +1,30 @@
+[package]
+name = "beanagent-marketing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Domain marketing: doc web, luu ban nhap, dang that len nen tang (M24)"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+beanagent-security.workspace = true
+beanagent-tools.workspace = true
+beanagent-types.workspace = true
+schemars.workspace = true
+secrecy.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+secrecy.workspace = true
+tokio-util.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

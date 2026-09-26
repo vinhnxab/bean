@@ -90,7 +90,7 @@ Nếu một thiết kế buộc phải phá 1 trong 3 điều trên, coding agen
 
 ## 5. Roadmap milestone cuối cùng, theo thứ tự
 
-**M21 → M22 → M22a → M23 → M24**. Bảo vệ vật lý và kiến trúc B: để backlog, không có số milestone.
+**M21 → M22 → M22a → M23 → M24 ✅**. Toàn bộ roadmap đã hoàn thành. Bảo vệ vật lý và kiến trúc B: để backlog, không có số milestone.
 
 ### 5.0 — M18 (Discord adapter): **ĐÃ LOẠI BỎ** (2026-09-26)
 
@@ -211,7 +211,7 @@ Test: target ngoài scope bị từ chối dù model "quyết" chạy; output sc
 dẫn injection không khiến agent hành động thêm mà không hỏi lại. make check xanh.
 ```
 
-### M24 — Marketing agent
+### M24 — Marketing agent — ✅ ĐÃ XONG
 
 ```
 Thêm role "marketing" theo RBAC đã có (M21). Domain tách biệt hoàn toàn khỏi infra/dev/finance.

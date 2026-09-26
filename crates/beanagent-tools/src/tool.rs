@@ -67,6 +67,24 @@ pub trait Tool: Send + Sync {
         Vec::new()
     }
 
+    /// Tag RBAC **bổ sung**: cho phép một role cụ thể thấy tool này mà không cần mở
+    /// `required_tags` (M24).
+    ///
+    /// # Vì sao cần, khi đã có `required_tags`?
+    ///
+    /// `required_tags` là **cổng chặn**: gắn tag vào `web_fetch` sẽ *giấu nó khỏi mọi role
+    /// khác* — hồi quy cho các cài đặt đang chạy. Nhưng M24 đòi role `marketing` được thấy
+    /// `web_fetch` mà **không** thấy `write_file`/`run_shell`. Hai yêu cầu đó không thể
+    /// cùng đúng với một cơ chế.
+    ///
+    /// Vì vậy tách domain làm ở phía **role** (`RolePermissions::allowed_tool_tags` — danh
+    /// sách trắng), còn method này chỉ *mở thêm* một lối cho tool untagged vốn bị ẩn.
+    ///
+    /// Mặc định `&[]` ở **mọi** tool ⇒ thêm cơ chế này không đổi hành vi cấu hình cũ nào.
+    fn also_visible_to(&self) -> Vec<&str> {
+        Vec::new()
+    }
+
     /// Thực thi tool.
     ///
     /// # Errors

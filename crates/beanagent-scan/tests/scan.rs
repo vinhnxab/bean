@@ -249,7 +249,7 @@ fn only_roles_with_infra_scan_tag_see_the_tool() {
     let sec_role =
         RolePermissions::from_tags("security-scan", BTreeSet::from(["infra-scan".to_string()]));
     assert!(
-        sec_role.allows(&tool.required_tags()),
+        sec_role.allows(&tool.required_tags(), &[]),
         "role có tag infra-scan phải thấy tool quét"
     );
 
@@ -261,14 +261,14 @@ fn only_roles_with_infra_scan_tag_see_the_tool() {
     ] {
         let perms = RolePermissions::from_tags(role, tags);
         assert!(
-            !perms.allows(&tool.required_tags()),
+            !perms.allows(&tool.required_tags(), &[]),
             "role {role} không được thấy/cọp tool quét bảo mật"
         );
     }
 
     // `no-access` là deny-all: không thấy tool nào.
     let anon = RolePermissions::deny_all("no-access");
-    assert!(!anon.allows(&tool.required_tags()));
+    assert!(!anon.allows(&tool.required_tags(), &[]));
 }
 
 /// M23: tool là `Dangerous` ⇒ **không có** tuỳ chọn "cho phép trong phiên" (mục 7.2).

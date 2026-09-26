@@ -78,6 +78,7 @@ pub struct TypedTool<P, F, Fut> {
     risk_fn: Option<Arc<dyn Fn(&Value) -> Risk + Send + Sync>>,
     marks_untrusted: bool,
     required_tags: Vec<&'static str>,
+    also_visible_to: Vec<&'static str>,
     handler: F,
     _phantom: PhantomData<fn(P) -> Fut>,
 }
@@ -149,6 +150,17 @@ where
         self
     }
 
+    /// Mở thêm tag **bổ sung** để tool untagged vẫn hiện với một role cụ thể (M24).
+    #[must_use]
+    pub fn also_visible_to<I, S>(mut self, tags: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<&'static str>,
+    {
+        self.also_visible_to = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
     fn build(
         name: &str,
         default_risk: Risk,
@@ -162,6 +174,7 @@ where
             risk_fn,
             marks_untrusted: false,
             required_tags: Vec::new(),
+            also_visible_to: Vec::new(),
             handler,
             _phantom: PhantomData,
         }
@@ -223,6 +236,10 @@ where
 
     fn required_tags(&self) -> Vec<&str> {
         self.required_tags.to_vec()
+    }
+
+    fn also_visible_to(&self) -> Vec<&str> {
+        self.also_visible_to.to_vec()
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {

@@ -94,6 +94,17 @@ forbid_tags = ["dev-write"]           # four-eyes: agent review không được 
 # context_budget_tokens = 200000       # ghi đè agent.context_budget_tokens cho role này
 # daily_token_budget = 1000000         # ngân sách token/ngày RIÊNG của role này (M21.7)
 
+# M24 — Marketing. TÁCH BIỆT hoàn toàn khỏi infra/dev/finance.
+#
+# `allowed_tool_tags` là danh sách TRẮNG: role này chỉ thấy tool mang tag marketing-*
+# (rỗng ở role khác = không giới hạn, giữ nguyên hành vi cũ). Nhờ vậy marketing thấy
+# `web_fetch`/`web_search` (mở thêm bằng `also_visible_to`) mà KHÔNG thấy `write_file`,
+# `run_shell` hay bất kỳ tool `infra-*`/`billing-*` nào.
+[[roles]]
+name = "marketing"
+tool_tags = ["marketing-read", "marketing-draft", "marketing-publish"]
+allowed_tool_tags = ["marketing-read", "marketing-draft", "marketing-publish"]
+
 # ---------------------------------------------------------------------------
 # M21 — Project profile. `default` là project dự phòng, ánh xạ tới
 # agent.workspace; mỗi project có MEMORY.md/USER.md và thư mục làm việc riêng.
@@ -178,6 +189,26 @@ timeout_seconds = 60
 # [security_scan]
 # alert_channel = "telegram"
 # alert_chat_id = "123456789"
+
+# ---------------------------------------------------------------------------
+# M24 — Domain marketing. Mặc định TẮT.
+#
+# `marketing_publish` là hành động KHÔNG HOÀN TÁC: nó LUÔN là Dangerous (khai cứng trong
+# code, không đọc từ cấu hình) nên không bao giờ có tuỳ chọn "cho phép trong phiên" —
+# dù cấu hình có gì. Chỉ nên bật khi bạn thực sự muốn agent đăng thay bạn.
+#
+# Credential PHẢI là biến RIÊNG, quyền API tối thiểu CHỈ POST — KHÔNG dùng lại key có
+# quyền rộng hơn. `validate()` sẽ KHÔNG CHO KHỞI ĐỘNG nếu `api_key_env` trùng với
+# `llm.api_key_env`, `tools.web_search.api_key_env` hay `telegram.token_env`.
+#
+# Bật `enabled` mà thiếu biến credential ⇒ BeanAgent báo lỗi ngay lúc khởi động,
+# không âm thầm chạy chế độ stub (khác `billing`, vì đăng bài không hoàn tác được).
+#
+# [marketing]
+# enabled = true
+# api_key_env = "MARKETING_POST_ONLY_KEY"
+# base_url = "https://api.example-social.com/v2/posts"   # endpoint JSON nhận nội dung
+# text_field = "text"                                   # tên trường chứa nội dung
 
 [web]
 enabled = true

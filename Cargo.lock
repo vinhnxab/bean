@@ -13,6 +13,7 @@ dependencies = [
  "beanagent-channels",
  "beanagent-core",
  "beanagent-llm",
+ "beanagent-marketing",
  "beanagent-memory",
  "beanagent-scan",
  "beanagent-security",
@@ -390,6 +391,25 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+]
+
+[[package]]
+name = "beanagent-marketing"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "beanagent-security",
+ "beanagent-tools",
+ "beanagent-types",
+ "schemars 1.2.2",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
