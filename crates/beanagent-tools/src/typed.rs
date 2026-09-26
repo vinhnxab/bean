@@ -76,6 +76,7 @@ pub struct TypedTool<P, F, Fut> {
     spec: ToolSpec,
     default_risk: Risk,
     risk_fn: Option<Arc<dyn Fn(&Value) -> Risk + Send + Sync>>,
+    marks_untrusted: bool,
     handler: F,
     _phantom: PhantomData<fn(P) -> Fut>,
 }
@@ -102,6 +103,33 @@ where
         Self::build(name, Risk::Safe, Some(Arc::new(risk_fn)), handler)
     }
 
+    /// Khai báo tool trả nội dung từ **nguồn ngoài lõi** (mục 15.4).
+    ///
+    /// `TypedTool::call` sẽ tự động bọc output bằng
+    /// [`crate::untrusted::wrap_bounded`] và bật `ctx.untrusted_seen` — tác giả tool
+    /// không thể quên một trong hai việc, và [`Tool::marks_untrusted`] trả `true`.
+    ///
+    /// ```ignore
+    /// let tool = TypedTool::new("read_file", Risk::Safe, handler).untrusted();
+    /// ```
+    #[must_use]
+    pub const fn untrusted(mut self) -> Self {
+        self.marks_untrusted = true;
+        self
+    }
+
+    /// Chỉ **khai báo** là nguồn ngoài lõi mà không để `TypedTool` tự bọc.
+    ///
+    /// Dùng cho tool đã tự bọc thẻ bằng tay ở trong `handler` (kể cả nhánh lỗi) —
+    /// hiện là `web_fetch`/`web_search` với `wrap_untrusted_limited`. Agent loop vẫn
+    /// bật `untrusted_seen` từ khai báo này; khác [`Self::untrusted`] ở chỗ không bọc
+    /// lần hai.
+    #[must_use]
+    pub const fn declares_untrusted(mut self) -> Self {
+        self.marks_untrusted = true;
+        self
+    }
+
     fn build(
         name: &str,
         default_risk: Risk,
@@ -113,6 +141,7 @@ where
             spec: typed_spec::<P>(name),
             default_risk,
             risk_fn,
+            marks_untrusted: false,
             handler,
             _phantom: PhantomData,
         }
@@ -168,8 +197,24 @@ where
         format!("{}: {summary}", self.name)
     }
 
+    fn marks_untrusted(&self) -> bool {
+        self.marks_untrusted
+    }
+
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
         let params: P = deserialize_params(args, &self.spec.parameters)?;
-        (self.handler)(ctx, params).await
+        let output = (self.handler)(ctx, params).await?;
+        if !self.marks_untrusted {
+            return Ok(output);
+        }
+        // (mục 15.4) Nội dung từ nguồn ngoài lõi: bật cờ cho **cả lượt** trước, rồi bọc
+        // thẻ. Cờ bật ở đây nên kể cả khi `handler` nội bộ có bỏ sót, agent loop vẫn
+        // biết lượt này đã đọc dữ liệu không tin cậy.
+        ctx.untrusted_seen
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(crate::untrusted::wrap_bounded(
+            &output,
+            crate::untrusted::MAX_WRAPPED_OUTPUT_CHARS,
+        ))
     }
 }

@@ -2,6 +2,12 @@
 //!
 //! Mọi I/O đều đi qua [`crate::WorkspaceFs`] (M4: `CapWorkspace` trên cap-std) —
 //! không có thao tác `std::fs` trực tiếp nào trong đây.
+//!
+//! **Nội dung không tin cậy (mục 15.4):** `read_file`, `grep`, `glob`, `list_dir` đều
+//! trả văn bản mà kẻ tấn công kiểm soát được (file trong workspace), nên cả bốn tool
+//! khai báo `.untrusted()` — [`TypedTool::call`] tự bọc `<untrusted_content>` và bật
+//! cờ `untrusted_seen` cho cả lượt, khiến mọi tool `Confirm` trở lên phải hỏi lại.
+//! `write_file`/`edit_file` chỉ trả về thông báo do chính agent tạo ra nên không bọc.
 use std::sync::Arc;
 
 use beanagent_types::Risk;
@@ -16,17 +22,20 @@ use super::params::*;
 
 /// Tool đọc file (Safe).
 pub fn read_file() -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "read_file",
-        Risk::Safe,
-        |ctx: &ToolCtx, p: ReadFileParams| {
-            let ws = ctx.workspace.clone();
-            let path = p.path.clone();
-            let offset = p.offset;
-            let limit = p.limit;
-            async move { read_capped(ws, &path, offset, limit).await }
-        },
-    ))
+    Arc::new(
+        TypedTool::new(
+            "read_file",
+            Risk::Safe,
+            |ctx: &ToolCtx, p: ReadFileParams| {
+                let ws = ctx.workspace.clone();
+                let path = p.path.clone();
+                let offset = p.offset;
+                let limit = p.limit;
+                async move { read_capped(ws, &path, offset, limit).await }
+            },
+        )
+        .untrusted(),
+    )
 }
 
 async fn read_capped(
@@ -54,10 +63,8 @@ async fn read_capped(
 
 /// Tool liệt kê thư mục (Safe).
 pub fn list_dir() -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "list_dir",
-        Risk::Safe,
-        |ctx: &ToolCtx, p: ListDirParams| {
+    Arc::new(
+        TypedTool::new("list_dir", Risk::Safe, |ctx: &ToolCtx, p: ListDirParams| {
             let ws = ctx.workspace.clone();
             let path = p.path.clone();
             async move {
@@ -65,16 +72,15 @@ pub fn list_dir() -> Arc<dyn Tool> {
                 let entries = ws.list_dir(rel)?;
                 serde_json::to_string(&entries).map_err(|e| ToolError::Internal(e.to_string()))
             }
-        },
-    ))
+        })
+        .untrusted(),
+    )
 }
 
 /// Tool tìm file theo glob (Safe).
 pub fn glob() -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "glob",
-        Risk::Safe,
-        |ctx: &ToolCtx, p: GlobParams| {
+    Arc::new(
+        TypedTool::new("glob", Risk::Safe, |ctx: &ToolCtx, p: GlobParams| {
             let ws = ctx.workspace.clone();
             let pattern = p.pattern.clone();
             let limit = p.limit;
@@ -82,16 +88,15 @@ pub fn glob() -> Arc<dyn Tool> {
                 let paths = ws.glob(&pattern, limit)?;
                 serde_json::to_string(&paths).map_err(|e| ToolError::Internal(e.to_string()))
             }
-        },
-    ))
+        })
+        .untrusted(),
+    )
 }
 
 /// Tool tìm regex (Safe).
 pub fn grep() -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "grep",
-        Risk::Safe,
-        |ctx: &ToolCtx, p: GrepParams| {
+    Arc::new(
+        TypedTool::new("grep", Risk::Safe, |ctx: &ToolCtx, p: GrepParams| {
             let ws = ctx.workspace.clone();
             let pattern = p.pattern.clone();
             let rel = p.rel.clone();
@@ -100,8 +105,9 @@ pub fn grep() -> Arc<dyn Tool> {
                 let matches = ws.grep(&pattern, rel.as_deref(), limit)?;
                 serde_json::to_string(&matches).map_err(|e| ToolError::Internal(e.to_string()))
             }
-        },
-    ))
+        })
+        .untrusted(),
+    )
 }
 
 /// Tool ghi file (Confirm).

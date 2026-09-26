@@ -28,6 +28,23 @@ pub trait Tool: Send + Sync {
         self.spec().name
     }
 
+    /// Tool này có trả **nội dung từ nguồn ngoài lõi** (web, file, output lệnh, email,
+    /// MCP) không — mục 15.4?
+    ///
+    /// Mặc định `false`. Tool trả `true` **phải** thỏa hai điều kiện:
+    ///
+    /// 1. output trả về được bọc trong `<untrusted_content>` bằng
+    ///    [`crate::untrusted::wrap`] hoặc [`crate::untrusted::wrap_bounded`]
+    ///    (tự bọc trong `call`, hoặc dùng builder `TypedTool::untrusted`);
+    /// 2. tool tự bật `ctx.untrusted_seen` (theo đúng cách `web_fetch` đang làm).
+    ///
+    /// Agent loop còn dùng cờ này như **lưới an toàn thứ hai**: kể cả khi tool quên
+    /// bật cờ, `run_turn` vẫn bật được từ khai báo ở đây. Nhờ vậy tool mới quên bọc sẽ
+    /// bị test hồi quy phát hiện, thay vì hỏng âm thầm.
+    fn marks_untrusted(&self) -> bool {
+        false
+    }
+
     /// Thực thi tool.
     ///
     /// # Errors

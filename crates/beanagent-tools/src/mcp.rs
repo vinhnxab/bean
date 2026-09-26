@@ -442,6 +442,13 @@ impl Tool for McpTool {
         )
     }
 
+    /// MCP luôn là nguồn ngoài lõi (mục 15.4/16): kết quả **và cả lỗi** đều đã bọc
+    /// `<untrusted_content>` trong `call`, nên khai báo `true` để agent loop bật cờ
+    /// ngay cả khi `call` trả `Err` trước khi tới chỗ bọc.
+    fn marks_untrusted(&self) -> bool {
+        true
+    }
+
     async fn call(&self, ctx: &ToolCtx, args: serde_json::Value) -> Result<String, ToolError> {
         let serde_json::Value::Object(arguments) = args else {
             return Err(ToolError::InvalidArgs(format!(

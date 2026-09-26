@@ -71,8 +71,28 @@ fn version_flag_works() {
 
 #[test]
 fn serve_without_auth_fails_closed_and_auth_requires_tty() {
+    // M15.7: `serve` phải từ chối bật web khi chưa có `auth.toml`.
+    //
+    // Test phải **hermetic**: nếu dùng `data.dir` mặc định thì nó phụ thuộc máy đang
+    // chạy — máy đã `auth set-password` ⇒ `serve` đi qua bước kiểm tra auth rồi mới fail
+    // ở API key (assertion sai), và máy có sẵn `ANTHROPIC_API_KEY` ⇒ `serve` chạy thật
+    // rồi treo. Vì vậy: `data.dir` tạm + API key giả do test tự cấp.
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("BeanAgent.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "[agent]\nworkspace = \"{}\"\n\n[data]\ndir = \"{}\"\n\n[llm]\napi_key_env = \"BEANAGENT_TEST_KEY\"\n",
+            dir.path().join("workspace").display(),
+            dir.path().join("data").display(),
+        ),
+    )
+    .unwrap();
+    let config_arg = format!("--config={}", config_path.display());
+
     let serve = Command::new(bin())
-        .arg("serve")
+        .args(["serve", &config_arg])
+        .env("BEANAGENT_TEST_KEY", "test-key-dummy")
         .output()
         .expect("chạy serve thất bại");
     assert!(!serve.status.success());
@@ -83,7 +103,7 @@ fn serve_without_auth_fails_closed_and_auth_requires_tty() {
     );
 
     let auth = Command::new(bin())
-        .args(["auth", "set-password"])
+        .args(["auth", "set-password", &config_arg])
         .output()
         .expect("chạy auth thất bại");
     assert!(!auth.status.success());

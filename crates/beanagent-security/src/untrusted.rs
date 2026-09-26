@@ -1,7 +1,8 @@
 //! Module này chỉ tái xuất implementation chung từ `beanagent_tools::untrusted`, nhờ đó MCP
 //! (M14) dùng cùng thuật toán escape mà không tạo phụ thuộc vòng giữa tools và security.
 pub use beanagent_tools::untrusted::{
-    CLOSE_TAG, OPEN_TAG, UntrustedFlag, contains_untrusted_block, escape_closing_tags, wrap,
+    CLOSE_TAG, MAX_WRAPPED_OUTPUT_CHARS, OPEN_TAG, UntrustedFlag, contains_untrusted_block,
+    escape_closing_tags, wrap, wrap_bounded,
 };
 
 #[cfg(test)]

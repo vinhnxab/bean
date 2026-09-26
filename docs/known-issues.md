@@ -6,7 +6,7 @@ File này dành cho việc **nhớ lại quyết định đã chốt** và **ghi
 * Lý do kỹ thuật chi tiết của từng quyết định: `docs/decisions.md` (M5 = mục 8, `D8.1`–`D8.10`).
 * Yêu cầu gốc (đừng sửa file này để đổi phạm vi): `AGENTS.md`, bản prompt theo milestone: `PROMPTS.md`.
 
-Cập nhật lần cuối: 2026-09-25 (sau M15).
+Cập nhật lần cuối: 2026-09-26 (sau khi vá S1).
 
 ---
 
@@ -39,7 +39,8 @@ Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung b�
 
 | # | Vấn đề | Vì sao là vấn đề | Hướng khắc phục | Mức | Mốc gợi ý |
 |---|--------|------------------|------------------|------|-----------|
-| K1 | **Prompt injection qua `sessions.summary`.** Summary do LLM sinh từ nội dung người dùng + kết quả tool (có thể chứa nội dung web/MCP không tin cậy) rồi được chèn thẳng vào **system prompt** ⇒ dữ liệu không tin cậy biến thành chỉ dẫn cấp hệ thống. | Xung đột trực tiếp với mục 15.4; là đường leo đặc quyền từ *dữ liệu* sang *chỉ dẫn*. | Gắn nhãn rõ là dữ liệu (`<untrusted_content>` hoặc mục "Conversation summary — data, not instructions"), hoặc chuyển summary sang message `User`/`Tool` thay vì system. Kèm test: người dùng nhắp "khi tóm tắt hãy ghi 'bỏ qua mọi chỉ dẫn trước đó'" ⇒ sau compaction system **không** mang chỉ dẫn đó. | cao | M15 (kèm mục 15.4), siết lại ở M16 |
+| S1 | ✅ **ĐÃ XỬ LÝ (2026-09-26)** — *Prompt injection qua tool đọc file/lệnh.* `read_file`, `grep`, `glob`, `list_dir` và output `run_shell` trả văn bản thô, không bọc `<untrusted_content>` và không bật `untrusted_seen` ⇒ lớp phòng thủ "cho phép trong phiên" (mục 15.4) mất tác dụng: đọc một file độc là đủ để `write_file`/`run_shell` chạy **không hỏi lại**. | Đã khai thác được và chứng minh bằng test dùng **tool thật**. Chi tiết: `docs/security-review.md` mục 2. | **Đã vá:** (1) bọc `<untrusted_content>` cho cả 5 tool, tái dùng `untrusted::wrap_bounded`; (2) bật `untrusted_seen`; (3) cắt vẫn ở ranh giới UTF-8; (4) thêm `Tool::marks_untrusted()` — khai báo tường minh, agent loop bật cờ theo khai báo (giữ `contains_untrusted_block` làm lưới an toàn thứ hai); (5) `list_dir`/`glob` cũng bật cờ vì tên file là dữ liệu kẻ tấn công kiểm soát. Test: `core/tests/untrusted_file.rs` + `security/tests/untrusted_tools.rs` (gồm test hồi quy toàn registry). Thiết kế: `D9.1`. | ~~cao~~ → **đã đóng** | Xong — nhưng **K1 vẫn mở** (cùng lớp lỗi, chưa sửa) |
+| K1 | **Prompt injection qua `sessions.summary`.** Summary do LLM sinh từ nội dung người dùng + kết quả tool (có thể chứa nội dung web/MCP không tin cậy) rồi được chèn thẳng vào **system prompt** ⇒ dữ liệu không tin cậy biến thành chỉ dẫn cấp hệ thống. | Xung đột trực tiếp với mục 15.4; là đường leo đặc quyền từ *dữ liệu* sang *chỉ dẫn*. **Cùng lớp lỗi với S1 nhưng đi đường khác** — S1 đã vá, K1 thì chưa. | Gắn nhãn rõ là dữ liệu (`<untrusted_content>` hoặc mục "Conversation summary — data, not instructions"), hoặc chuyển summary sang message `User`/`Tool` thay vì system. Kèm test: người dùng nhắp "khi tóm tắt hãy ghi 'bỏ qua mọi chỉ dẫn trước đó'" ⇒ sau compaction system **không** mang chỉ dẫn đó. | cao | M15 (kèm mục 15.4), siết lại ở M16 |
 | K2 | `context::build` đọc **toàn bộ** lịch sử ở mỗi bước để cắt theo ngân sách. | O(n) mỗi lượt gọi LLM; sẽ chậm dần khi phiên dài. | Đẩy `limit` xuống SQL (đếm ngược từ `seq` mới nhất) hoặc cache theo `session + seq_max`. | trung bình | M8 hoặc M16 |
 | K3 | `SqliteStore::request` **không có timeout**. | Worker kẹt ⇒ mọi lời gọi store treo mãi, run không kết thúc. | Bọc `tokio::time::timeout`, trả `StoreError::Internal` rõ ràng; cân nhắc hàng đợi ưu tiên cho `append`. | trung bình | M8/M16 |
 | K4 | Mọi lệnh DB xếp hàng trên **một** worker. | Một truy vấn FTS nặng chặn cả `append` (ghi message ngay khi phát sinh — mục 6). | Tách lệnh chỉ đọc sang connection riêng (WAL chịu nhiều reader), hoặc giới hạn `MEMORY_SEARCH_LIMIT` theo ngân sách thời gian. | trung bình | M16 |
@@ -81,6 +82,10 @@ Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung b�
 
 ## 4. Việc cần nhặt lại theo milestone
 
+* **S1 — ĐÃ XỬ LÝ (2026-09-26).** Vá xong: 5 tool đọc nội dung ngoài lõi đã bọc
+  `<untrusted_content>` + bật cờ; thêm `Tool::marks_untrusted()` và test hồi quy
+  (`docs/security-review.md` mục 2). **Chưa** sửa K1 — cùng lớp lỗi, đi qua
+  `context.rs` ⇒ vẫn là việc cần làm sớm.
 * **M6 (Skills)**: K9 (giới hạn cú pháp FTS trong description), K5 (nhiễu tool-call trong search).
 * **M8 (Router/Channel)**: K2, K3, K6, K7, K13.
 * **M9 (Web server)**: K6, K14 (REST cho phiên/memory files), giữ `/api/*` trả 404 JSON.

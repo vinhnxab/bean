@@ -34,5 +34,11 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: false,
+    // jsdom được dựng lại cho từng test file (~10s với 12 file), nên mặc định
+    // `testTimeout` 5s của Vitest làm các test nặng chập chờn fail giả ("Test timed out
+    // in 5000ms") tuỳ theo tải máy. Nới timeout và giới hạn worker để `make check`
+    // ổn định. `maxWorkers` là option top-level (Vitest 4+ đã bỏ `poolOptions`).
+    testTimeout: 30_000,
+    maxWorkers: 4,
   },
 });

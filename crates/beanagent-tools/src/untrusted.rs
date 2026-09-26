@@ -88,6 +88,34 @@ pub fn wrap(content: &str) -> String {
     format!("{OPEN_TAG}\n{}\n{CLOSE_TAG}", escape_closing_tags(content))
 }
 
+/// Trần cứng cho một tool result **đã bọc thẻ**.
+///
+/// Nhỏ hơn trần 20.000 ký tự của agent loop (`agent::MAX_TOOL_OUTPUT_CHARS`) để bảo đảm
+/// thẻ đóng luôn còn sau khi cắt: nếu bọc rồi mới cắt ở đúng ngưỡng agent loop, phần bị cắt
+/// có thể nằm giữa khối và làm mất `</untrusted_content>`.
+pub const MAX_WRAPPED_OUTPUT_CHARS: usize = 19_000;
+
+/// Bọc nội dung không tin cậy với **trần cứng**: escape thẻ đóng, cắt ở ranh giới ký tự
+/// UTF-8 nếu vượt `max_chars`, và luôn kết thúc bằng đúng một thẻ đóng.
+///
+/// Dùng cho mọi tool đọc nội dung từ nguồn ngoài lõi (web, file, output lệnh, MCP) —
+/// mục 15.4. Hàm này **không** thay đổi thuật toán cắt: vẫn gọi
+/// [`crate::text::truncate_chars`] nên không bao giờ cắt giữa codepoint (mục 22.9).
+#[must_use]
+pub fn wrap_bounded(content: &str, max_chars: usize) -> String {
+    const TRUNCATION_NOTE: &str = "\n[Đã cắt nội dung không tin cậy]";
+    let escaped = escape_closing_tags(content);
+    let wrapper_overhead = OPEN_TAG.chars().count() + CLOSE_TAG.chars().count() + 2; // + 2 ký tự newline
+    let available = max_chars.saturating_sub(wrapper_overhead);
+    if escaped.chars().count() <= available {
+        return wrap(&escaped);
+    }
+    // Cắt sao cho cả ghi chú cắt nằm trong hạn mức, vẫn ở ranh giới ký tự UTF-8.
+    let keep = available.saturating_sub(TRUNCATION_NOTE.chars().count());
+    let (body, _) = crate::text::truncate_chars(&escaped, keep).unwrap_or((escaped.as_str(), 0));
+    format!("{OPEN_TAG}\n{body}{TRUNCATION_NOTE}\n{CLOSE_TAG}")
+}
+
 /// Một tool result có chứa khối `<untrusted_content>` không (để lõi bật cờ).
 #[must_use]
 pub fn contains_untrusted_block(output: &str) -> bool {

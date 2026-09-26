@@ -26,29 +26,34 @@ pub struct RunShellParams {
 #[must_use]
 pub fn run_shell(sandbox: Arc<Sandbox>) -> Arc<dyn Tool> {
     let base_risk = sandbox.base_risk();
-    Arc::new(TypedTool::new(
-        "run_shell",
-        base_risk,
-        move |_ctx: &beanagent_tools::ToolCtx, p: RunShellParams| {
-            let sandbox = sandbox.clone();
-            let cancel = _ctx.cancel.clone();
-            async move {
-                if p.command.trim().is_empty() {
-                    return Err(ToolError::InvalidArgs(
-                        "command rỗng — cần một câu lệnh để chạy".to_string(),
-                    ));
+    Arc::new(
+        TypedTool::new(
+            "run_shell",
+            base_risk,
+            move |_ctx: &beanagent_tools::ToolCtx, p: RunShellParams| {
+                let sandbox = sandbox.clone();
+                let cancel = _ctx.cancel.clone();
+                async move {
+                    if p.command.trim().is_empty() {
+                        return Err(ToolError::InvalidArgs(
+                            "command rỗng — cần một câu lệnh để chạy".to_string(),
+                        ));
+                    }
+                    // Sandbox có timeout riêng theo cấu hình để kill container khi hết giờ;
+                    // agent loop cũng bọc `tool_timeout_seconds` bên ngoài (mục 6).
+                    let timeout = std::time::Duration::from_secs(sandbox.timeout_seconds());
+                    let outcome = sandbox
+                        .run(&p.command, timeout, &cancel)
+                        .await
+                        .map_err(|e| ToolError::Io(e.to_string()))?;
+                    Ok(format_outcome(&outcome))
                 }
-                // Sandbox có timeout riêng theo cấu hình để kill container khi hết giờ;
-                // agent loop cũng bọc `tool_timeout_seconds` bên ngoài (mục 6).
-                let timeout = std::time::Duration::from_secs(sandbox.timeout_seconds());
-                let outcome = sandbox
-                    .run(&p.command, timeout, &cancel)
-                    .await
-                    .map_err(|e| ToolError::Io(e.to_string()))?;
-                Ok(format_outcome(&outcome))
-            }
-        },
-    ))
+            },
+        )
+        // Mục 15.4: stdout/stderr là dữ liệu ngoài lõi (lệnh trong sandbox có thể in ra
+        // nội dung file do kẻ tấn công kiểm soát) — bọc thẻ + bật cờ `untrusted_seen`.
+        .untrusted(),
+    )
 }
 
 /// Định dạng output gửi lại cho model: exit code + stdout + stderr (đã cắt bên trong

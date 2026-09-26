@@ -171,8 +171,11 @@ backup để giảm bề mặt lộ dữ liệu.
 
 - Agent có thể đọc/ghi workspace và gọi tool; file bị capability jail, nhưng host shell
   (`sandbox.mode = "host"`) hoặc Docker socket là quyền tương đương root.
-- Nội dung web/file/MCP là untrusted và có thể chứa prompt injection; system prompt và UI
-  không được xem nội dung đó là chỉ dẫn đáng tin.
+- Nội dung web/file/email/MCP là untrusted và có thể chứa prompt injection; system prompt và
+  UI không được xem nội dung đó là chỉ dẫn đáng tin. Mọi tool đọc nội dung từ nguồn ngoài lõi
+  (`web_fetch`, `web_search`, `read_file`, `grep`, `glob`, `list_dir`, output `run_shell`, MCP)
+  đều bọc `<untrusted_content>`; sau khi đọc trong một lượt, mọi tool Confirm/Dangerous bắt
+  buộc hỏi lại và mất tuỳ chọn "cho phép trong phiên".
 - `web_fetch` chặn SSRF cơ bản, nhưng proxy/DNS riêng và endpoint nội bộ cần review thêm.
 - Web đã có auth, CSRF/Origin, CSP, rate limit; BeanAgent không cung cấp TLS, quota
   nhiều người dùng, sandbox kernel-level hoặc bảo mật tương đương VM.

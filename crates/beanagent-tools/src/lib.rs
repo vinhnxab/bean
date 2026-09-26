@@ -38,7 +38,8 @@ pub use text::{compile_regex, truncate_chars};
 pub use tool::Tool;
 pub use typed::{TypedTool, deserialize_params, typed_spec};
 pub use untrusted::{
-    CLOSE_TAG as UNTRUSTED_CLOSE_TAG, OPEN_TAG as UNTRUSTED_OPEN_TAG, UntrustedFlag,
-    contains_untrusted_block, escape_closing_tags, wrap as wrap_untrusted,
+    CLOSE_TAG as UNTRUSTED_CLOSE_TAG, MAX_WRAPPED_OUTPUT_CHARS, OPEN_TAG as UNTRUSTED_OPEN_TAG,
+    UntrustedFlag, contains_untrusted_block, escape_closing_tags, wrap as wrap_untrusted,
+    wrap_bounded,
 };
 pub use workspace::{DirEntryInfo, GrepMatch, WorkspaceFs};

@@ -739,7 +739,9 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 2. **Output tool quá dài** làm nổ context; luôn cắt và cho model cách đọc tiếp.
 3. **Vòng lặp vô hạn** do model gọi lại đúng lệnh vừa lỗi.
 4. **Description tool mơ hồ** khiến model dùng sai tool.
-5. **Nội dung web/email/MCP là nguồn prompt injection chính**: bọc `<untrusted_content>`.
+5. **Nội dung web/file/email/MCP là nguồn prompt injection chính**: bọc `<untrusted_content>`.
+   Áp dụng cho MỌI tool trả nội dung từ nguồn bên ngoài lõi — bao gồm `read_file`, `grep`,
+   `glob`, `list_dir`, output `run_shell` — không chỉ `web_fetch`/`web_search`/MCP. Xem mục 15.4.
 6. **Múi giờ cron:** lưu UTC, parse cron theo múi giờ người dùng.
 
 **Rust**

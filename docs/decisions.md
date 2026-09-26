@@ -251,3 +251,56 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   đúng chỗ đó. Vì Anthropic từ chối `messages: []`, `run_turn` giữ một lưới an toàn: lịch sử
   rỗng thì gửi lại tin người dùng của lượt đó. Test hồi quy:
   `system_prompt_is_sent_once_via_system_field` trong `core/tests/agent_loop.rs`.
+
+---
+
+## 9. Quyết định riêng của lượt vá S1 (mục 15.4 — nội dung không tin cậy)
+
+Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`grep`/`glob`/
+`list_dir` và output `run_shell` trả văn bản thô, nên cờ `untrusted_seen` không bao giờ
+được bật trong lượt chỉ dùng đọc file ⇒ mất hoàn toàn lớp phòng thủ "cho phép trong phiên".
+
+* **D9.1 — `Tool::marks_untrusted()`: khai báo tường minh thay cho quy ước ngầm "tool tự
+  bọc".** Trước đây agent loop suy luận "tool này có bọc không?" bằng cách dò thẻ mở
+  trong output (`contains_untrusted_block`) — logic phụ thuộc vào hành vi bên trong tool
+  nên dễ quên và hỏng **âm thầm**. Nay trait `Tool` có method có giá trị mặc định:
+  ```rust
+  fn marks_untrusted(&self) -> bool { false }
+  ```
+  và agent loop bật cờ theo **khai báo**, cộng thêm `contains_untrusted_block` làm lưới
+  an toàn thứ hai (giữ nguyên để tool tự bọc tay như `web_fetch`/MCP vẫn an toàn kể cả
+  nhánh lỗi).
+
+  **Đánh đổi so với quy ước cũ:**
+  * *Thêm* một method vào trait `Tool` — về mặt kỹ thuật là thay đổi phá vỡ cho implementor
+    bên ngoài, nhưng **có default body** nên không implementor nào (kể cả `FlexTool` trong
+    test) phải sửa; chỉ tool mới muốn khai untrusted mới cần override.
+  * **Không** đổi tool schema gửi model (`make types` xác nhận không có diff) và **không**
+    ảnh hưởng UI.
+  * Đổi lại: tool mới quên bọc sẽ bị **test hồi quy** bắt (danh sách tường minh trong
+    `security/tests/untrusted_tools.rs::every_external_source_tool_declares_marks_untrusted`)
+    thay vì hỏng lặng lẽ.
+
+* **D9.2 — Hai builder trên `TypedTool`.** `.untrusted()` = khai báo **và** tự bọc output
+  bằng `untrusted::wrap_bounded` + bật cờ (dùng cho file và `run_shell` — tác giả không
+  thể quên một trong hai việc). `.declares_untrusted()` = **chỉ** khai báo, dùng cho
+  `web_fetch`/`web_search` vì chúng đã tự bọc bằng `wrap_untrusted_limited` (kể cả nhánh
+  lỗi) — tránh bọc hai lần.
+
+* **D9.3 — `wrap_bounded` + trần 19.000.** Hàm bọc dùng chung đặt trần nhỏ hơn trần 20.000
+  của agent loop để `truncate_output` không cắt mất `</untrusted_content>`. Thuật toán cắt
+  **không viết mới**: vẫn gọi `text::truncate_chars` ⇒ không bao giờ cắt giữa codepoint
+  (mục 22.9).
+
+* **D9.4 — `list_dir`/`glob` cũng bật cờ (an toàn hơn là để sót).** Tên file/thư mục hiếm khi
+  chứa chỉ dẫn thực thi, nhưng tên file **là** dữ liệu kẻ tấn công kiểm soát được
+  (`README.md`, `.git/hooks/…`). Giá bật cờ chỉ là mất tiện lợi "cho phép trong phiên" sau
+  khi liệt kê thư mục — rẻ hơn nhiều so với việc để sót một đường injection.
+
+* **D9.5 — `write_file`/`edit_file`/`memory_*` **không** bọc.** Chúng chỉ trả thông báo do
+  chính agent tạo, không mang nội dung ngoài; bọc thừa làm loãng ngữ cảnh và làm mất ý
+  nghĩa của thẻ. Test `write_file_output_is_not_wrapped` chốt hành vi này.
+
+* **D9.6 — K1 (`sessions.summary`) chưa sửa trong lượt này.** Cùng lớp lỗi nhưng đi đường
+  khác (`context.rs` chèn summary vào system prompt). Chủ dự án yêu cầu tách riêng; xem
+  `docs/known-issues.md` mục K1.

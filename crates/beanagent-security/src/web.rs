@@ -53,15 +53,20 @@ fn default_fetch_chars() -> usize {
 /// Tạo tool `web_fetch` (Safe).
 #[must_use]
 pub fn web_fetch(client: Arc<SafeHttpClient>) -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "web_fetch",
-        Risk::Safe,
-        move |ctx: &ToolCtx, params: WebFetchParams| {
-            let client = Arc::clone(&client);
-            let untrusted_seen = Arc::clone(&ctx.untrusted_seen);
-            async move { fetch_page(client, untrusted_seen, params).await }
-        },
-    ))
+    Arc::new(
+        TypedTool::new(
+            "web_fetch",
+            Risk::Safe,
+            move |ctx: &ToolCtx, params: WebFetchParams| {
+                let client = Arc::clone(&client);
+                let untrusted_seen = Arc::clone(&ctx.untrusted_seen);
+                async move { fetch_page(client, untrusted_seen, params).await }
+            },
+        )
+        // `fetch_page` tự bọc `wrap_untrusted_limited` (kể cả nhánh lỗi), nên chỉ khai
+        // báo cờ chứ không để `TypedTool` bọc lần hai (mục 15.4).
+        .declares_untrusted(),
+    )
 }
 
 async fn fetch_page(
@@ -554,20 +559,24 @@ pub fn web_search(
 }
 
 fn web_search_with_client(client: Arc<SearchClient>) -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "web_search",
-        Risk::Safe,
-        move |ctx: &ToolCtx, params: WebSearchParams| {
-            let client = Arc::clone(&client);
-            let untrusted_seen = Arc::clone(&ctx.untrusted_seen);
-            async move {
-                let hits = client.search(params).await?;
-                let rendered = render_search_results(&client.provider, &hits);
-                untrusted_seen.store(true, Ordering::SeqCst);
-                Ok(wrap_untrusted_limited(&rendered))
-            }
-        },
-    ))
+    Arc::new(
+        TypedTool::new(
+            "web_search",
+            Risk::Safe,
+            move |ctx: &ToolCtx, params: WebSearchParams| {
+                let client = Arc::clone(&client);
+                let untrusted_seen = Arc::clone(&ctx.untrusted_seen);
+                async move {
+                    let hits = client.search(params).await?;
+                    let rendered = render_search_results(&client.provider, &hits);
+                    untrusted_seen.store(true, Ordering::SeqCst);
+                    Ok(wrap_untrusted_limited(&rendered))
+                }
+            },
+        )
+        // Handler đã tự bọc `wrap_untrusted_limited` — chỉ khai báo cờ (mục 15.4).
+        .declares_untrusted(),
+    )
 }
 
 fn render_search_results(provider: &WebSearchProvider, hits: &[SearchHit]) -> String {

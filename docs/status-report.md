@@ -14,6 +14,7 @@
 - **M17(B) — Discord hoặc Slack:** **chưa triển khai**.
 - Cổng chất lượng gần nhất: `make check`, `make audit` và `make e2e` đều xanh; release build và headless build thành công.
 - Điểm yếu lớn nhất còn lại theo `docs/known-issues.md` là **K1: prompt injection qua `sessions.summary`** (mức cao).
+- **S1 — prompt injection qua `read_file`/`grep`/`glob`/`list_dir`/`run_shell` — đã khắc phục (2026-09-26).** Đây là cùng lớp lỗi với K1 nhưng đã có test tái hiện bằng tool thật chứng minh khai thác được. Bản vá: 5 tool đó bọc `<untrusted_content>` + bật `untrusted_seen`, thêm `Tool::marks_untrusted()` và test hồi quy. Chi tiết: `docs/security-review.md` mục 2, `docs/decisions.md` D9.1, `docs/known-issues.md` S1.
 - Chưa nên coi là production-ready hoàn toàn vì chưa có kiểm thử provider thật, Telegram thật, soak test 24 giờ, E2E memory/learning đầy đủ, CI và triển khai thực tế.
 
 ## 2. Trạng thái theo milestone
@@ -178,6 +179,7 @@ cp BeanAgent.example.toml BeanAgent.toml
 
 | Nhóm | Mục | Mức | Tóm tắt |
 |---|---|---:|---|
+| An toàn | S1 | đã đóng | `read_file`/`grep`/`glob`/`list_dir`/output `run_shell` đã bọc `<untrusted_content>` và bật `untrusted_seen`; thêm `Tool::marks_untrusted()` + test hồi quy toàn registry — xem `docs/known-issues.md` S1, `docs/decisions.md` D9.1 |
 | An toàn | K1 | cao | `sessions.summary` có thể chứa dữ liệu không tin cậy nhưng được chèn vào system prompt; cần gắn nhãn untrusted hoặc chuyển khỏi system |
 | Độ bền DB | K2–K4 | trung bình | Context đọc toàn bộ lịch sử; store worker không timeout; một writer có thể bị query FTS chặn |
 | Store semantics | K5–K7 | trung bình | Memory search lẫn message lượt hiện tại; `clear` chưa xoá summary; `MemoryStore`/`SqliteStore` có thể lệch hành vi |
@@ -244,6 +246,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [ ] Telegram bot thật đã smoke test.
 - [ ] Scheduler thật đã kiểm chứng.
 - [ ] MCP server bên thứ ba đã kiểm thử.
+- [x] S1 đã xử lý (2026-09-26).
 - [ ] K1 đã xử lý hoặc chấp nhận rủi ro rõ ràng.
 - [ ] E2E memory và learning đầy đủ.
 - [ ] Soak test 24 giờ.

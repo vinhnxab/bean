@@ -516,9 +516,18 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             };
 
             let output = truncate_output(&output);
-            // (M4, mục 15.4) Tool result chứa khối untrusted → bật cờ cho cả lượt:
+            // (M4, mục 15.4) Bật cờ untrusted cho cả lượt khi tool trả nội dung ngoài lõi:
             // mọi confirm Confirm/Dangerous SAU đây sẽ hỏi lại, không "trong phiên".
-            if contains_untrusted_block(&output) {
+            //
+            // Có hai lớp, cùng dùng để không lệ thuộc vào một quy ước ngầm:
+            // 1. `Tool::marks_untrusted()` — khai báo tường minh của tool. Đây là lớp
+            //    chính: tool mới quên bọc sẽ bị test hồi quy bắt, không hỏng âm thầm.
+            // 2. `contains_untrusted_block` — lưới an toàn cho output thực sự mang thẻ
+            //    (kể cả tool tự bọc tay như `web_fetch`, hoặc lỗi từ MCP đã bọc sẵn).
+            let marks_untrusted = registry
+                .get(&call.name)
+                .is_some_and(|tool| tool.marks_untrusted());
+            if marks_untrusted || contains_untrusted_block(&output) {
                 untrusted_seen.store(true, Ordering::SeqCst);
             }
             // Audit kết quả thực thi (mục 15.8) — lỗi ghi chỉ là cảnh báo, không làm hỏng run.

@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use beanagent_security::CapWorkspace;
+use beanagent_security::untrusted::{CLOSE_TAG, OPEN_TAG};
 use beanagent_tools::ToolCtx;
 use beanagent_tools::ToolRegistry;
 use beanagent_tools::builtin::file_tools;
@@ -88,7 +89,13 @@ async fn read_offset_seeks_correctly() {
     )
     .await
     .unwrap();
-    assert_eq!(part, "DEabc");
+    // Mục 15.4: output của `read_file` được bọc `<untrusted_content>`; phần **bên
+    // trong** thẻ phải đúng 5 ký tự tại offset 3 (không nới lỏng kiểm tra offset).
+    let inner = part
+        .strip_prefix(OPEN_TAG)
+        .and_then(|rest| rest.strip_suffix(CLOSE_TAG))
+        .unwrap_or_default();
+    assert_eq!(inner.trim_matches('\n'), "DEabc", "output: {part}");
 }
 
 #[tokio::test]
