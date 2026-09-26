@@ -304,3 +304,24 @@ Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`g
 * **D9.6 — K1 (`sessions.summary`) chưa sửa trong lượt này.** Cùng lớp lỗi nhưng đi đường
   khác (`context.rs` chèn summary vào system prompt). Chủ dự án yêu cầu tách riêng; xem
   `docs/known-issues.md` mục K1.
+
+## 10. Kênh chat (D10.x)
+
+* **D10.1 — Bỏ hẳn Discord/Slack/WhatsApp; Telegram + web là bộ kênh cuối cùng (2026-09-26).**
+  Chủ dự án quyết bỏ Discord để giữ hệ thống đơn giản. Trước khi quyết định, đã khảo sát 44 bất
+  biến mà adapter Telegram đang đảm bảo; kết luận:
+  * **Discord không có tín hiệu API chặn trùng token.** Telegram trả `409 Conflict`
+    (`ApiError::TerminatedByOtherGetUpdates`) nên D3 chặn được bằng tín hiệu máy chủ. Discord
+    **cho phép nhiều shard với cùng token** ⇒ muốn giữ bất biến "một token/instance" phải tự
+    viết cơ chế claim (ví dụ heartbeat trên đĩa), tức thêm bề mặt lỗi chỉ để thêm một kênh chat.
+  * **Vòng đời interaction khác hẳn.** Discord bắt buộc trả lời interaction trong **3 giây** nếu
+    không `defer`, và interaction **hết hạn ~15 phút**. Telegram không có hai ràng buộc này vì
+    Router tự quản lý hết hạn 300s. Sẽ phải thêm cơ chế `defer` + dọn rác TTL cho bảng confirm.
+  * **Chi phí port lại lớn.** Phải port ~44 bất biến (allowlist 2 lớp, chống giả mạo callback,
+    dedup, rate limit, confirm 3 nút, backoff luỹ thừa, redact secret…) mà M18 vốn đã ghi
+    *"tuỳ chọn, chỉ làm nếu rẻ"* và chưa từng có nhu cầu vận hành thực tế.
+  * **Hệ quả:** roadmap còn `M21 → M22 → M22a → M23 → M24` (`Plan.md` mục 5.0). Không milestone
+    nào phụ thuộc Discord nên việc loại bỏ không ảnh hưởng phạm vi công việc đang dở.
+  * **Bài học để lại:** mọi bất biến an toàn của một adapter **không tự động portable sang nền
+    tảng khác**. Trước khi thêm channel mới phải liệt kê bất biến và đối chiếu từng cái với đặc
+    tính nền tảng đích, đặc biệt là phần *không có tín hiệu API tương đương*.

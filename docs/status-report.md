@@ -11,7 +11,7 @@
 
 - **M1–M16:** phần lớn chức năng theo đặc tả v1 đã được viết, tích hợp và kiểm thử tự động.
 - **M17(A) — streaming token:** đã hoàn thành cho Anthropic và OpenAI-compatible, gồm SSE parser, `TextDelta` qua Router/WebSocket, UI hiện chữ dần và test reconnect/refetch.
-- **M17(B) — Discord hoặc Slack:** **chưa triển khai**.
+- **Kênh chat:** Telegram + web là bộ cuối cùng. **M18 (Discord) đã bị loại bỏ ngày 2026-09-26** — không có trong roadmap (`Plan.md` mục 5.0).
 - Cổng chất lượng gần nhất: `make check`, `make audit` và `make e2e` đều xanh; release build và headless build thành công.
 - Điểm yếu lớn nhất còn lại theo `docs/known-issues.md` là **K1: prompt injection qua `sessions.summary`** (mức cao).
 - **S1 — prompt injection qua `read_file`/`grep`/`glob`/`list_dir`/`run_shell` — đã khắc phục (2026-09-26).** Đây là cùng lớp lỗi với K1 nhưng đã có test tái hiện bằng tool thật chứng minh khai thác được. Bản vá: 5 tool đó bọc `<untrusted_content>` + bật `untrusted_seen`, thêm `Tool::marks_untrusted()` và test hồi quy. Chi tiết: `docs/security-review.md` mục 2, `docs/decisions.md` D9.1, `docs/known-issues.md` S1.
@@ -38,7 +38,7 @@
 | **M15 — Learning loop** | 🟡 Code + fake test | `a9052ba` | Reflection, draft, rate limit, duyệt/bỏ qua UI, REST và Telegram | Thiếu E2E đầy đủ (K18), tín hiệu phàn nàn (K16), audit bền vững (K19), provider thật (K17) |
 | **M16 — Hardening/deploy** | 🟡 Gần hoàn tất | `8e83849` | Token budget, structured logs, graceful shutdown, reconnect, embedded UI, headless build, systemd, Dockerfiles, README, audit, binary E2E | **Chưa soak 24 giờ**; chưa cài systemd production; chưa đẩy image production; chưa chạy Playwright |
 | **M17(A) — Streaming** | ✅ Hoàn thành | `882363d` | SSE Anthropic/OpenAI-compat, gom delta/tool call/usage, `TextDelta` qua WS, UI hiện dần, reconnect giữ text và refetch REST | Chưa kiểm thử thủ công với provider thật do chưa có API key |
-| **M17(B) — Discord/Slack** | ⬜ Chưa làm | — | — | Chưa chọn thư viện, chưa implement `Channel`, allowlist/rate limit/confirm/reconnect |
+| **M18 — Discord adapter** | 🚫 Đã loại bỏ | — | — | Chủ dự án bỏ hẳn 2026-09-26: Discord không có tín hiệu API chặn trùng token (Telegram trả 409) và có vòng đời interaction riêng (3s/15 phút). Xem `Plan.md` mục 5.0 |
 
 **Chú thích:** “🟡” không có nghĩa code chưa tồn tại; đó là trường hợp logic đã triển khai và test xanh nhưng tiêu chí vận hành thực tế hoặc known issue liên quan chưa hoàn tất.
 
@@ -136,9 +136,8 @@ cp BeanAgent.example.toml BeanAgent.toml
 
 ### 6.1. Chưa triển khai
 
-1. **M17(B): Discord hoặc Slack.**
-   - Chưa chọn `serenity`/`twilight`/`slack-morphism`.
-   - Chưa có adapter `Channel`, allowlist, rate limit, tách tin, confirm và reconnect tương ứng.
+1. **Kênh chat thứ ba (M18 Discord).** — **ĐÃ LOẠI BỎ, không phải việc tồn đọng.**
+   Chủ dự án quyết bỏ 2026-09-26. Telegram + web là bộ kênh cuối cùng; xem `Plan.md` mục 5.0.
 
 2. **CI tự động.**
    - Chưa có workflow `.github/workflows` hoặc pipeline tương đương.
@@ -232,7 +231,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 3. **E2E bền vững:** đóng gói K11 và K18; kiểm tra restart, scheduler, learning draft và skill activation.
 4. **Độ bền:** xử lý hoặc ghi nhận rõ K2–K7 trước khi có phiên dài và DB lớn.
 5. **Phát hành:** thêm CI, soak test 24 giờ, Playwright tùy chọn, cài systemd/Docker trên host thật và diễn tập backup/restore.
-6. **Tùy chọn M17(B):** chỉ làm Discord/Slack sau khi chốt thư viện và không sửa Router/API web nếu chưa được cho phép.
+6. **Kênh chat:** không còn việc mở thêm kênh. M18 (Discord) đã bị loại bỏ 2026-09-26.
 
 ## 10. Tiêu chí có thể gọi là “v1 hoàn thành”
 

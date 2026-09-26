@@ -10,7 +10,7 @@ milestone M18 trở đi; 4 file cũ chỉ còn giá trị tham khảo lý do/ph�
 
 ## 0. Tóm tắt quyết định đã chốt hôm nay
 
-- **Kênh**: chỉ Telegram + Web (đã có). Discord cân nhắc nếu rẻ. **Bỏ hẳn Slack và WhatsApp.**
+- **Kênh**: chỉ Telegram + Web (đã có). **Bỏ hẳn Discord, Slack và WhatsApp** (2026-09-26, xem mục 5.0).
 - **S1**: bạn tự vá, theo prompt đã soạn ở `va-S1-va-cap-nhat-tai-lieu.md`. Mọi milestone hạ
   tầng chạm Nhóm 2 trở lên (quét chủ động) hoặc developer-mode cho dự án ngoài đều **chờ S1 vá
   xong** mới bật.
@@ -90,31 +90,29 @@ Nếu một thiết kế buộc phải phá 1 trong 3 điều trên, coding agen
 
 ## 5. Roadmap milestone cuối cùng, theo thứ tự
 
-**M18 → M21 → M22 → M22a → M23 (chờ S1) → M24**. WhatsApp/Slack: loại khỏi roadmap. Bảo vệ vật
-lý và kiến trúc B: để backlog, không có số milestone.
+**M21 → M22 → M22a → M23 → M24**. Bảo vệ vật lý và kiến trúc B: để backlog, không có số milestone.
 
-### M18 — Discord adapter (tuỳ chọn, chỉ làm nếu rẻ)
+### 5.0 — M18 (Discord adapter): **ĐÃ LOẠI BỎ** (2026-09-26)
 
-```
-Thêm Discord làm channel adapter mới, đi qua Router hiện có — KHÔNG tạo luồng xử lý riêng.
-Trước khi code: đọc lại Router/Channel trait hiện tại và adapter Telegram, liệt kê lại cho tôi
-các bất biến Telegram đang đảm bảo (allowlist, reconnect/backoff, xác nhận Confirm/Dangerous,
-một token/instance) trước khi thiết kế Discord. Chờ tôi duyệt danh sách đó rồi mới code.
+Chủ dự án quyết **bỏ hẳn Discord** khỏi hệ thống để giữ đơn giản. M18 không bao giờ được code.
 
-Việc cần làm:
-1. Adapter Discord dùng thư viện Rust trưởng thành (serenity hoặc twilight — nêu lý do chọn).
-2. Danh tính map vào agent.allowed_users với tiền tố discord:<id>, tách biệt hoàn toàn khỏi
-   telegram:<id>.
-3. Cơ chế Confirm/Dangerous dùng Discord button component tương đương inline keyboard Telegram;
-   Dangerous vẫn không có nút trong phiên.
-4. Người gửi không thuộc allowed_users bị Router chặn trước khi vào agent — test tương tự
-   "callback người lạ bị bỏ qua" đã có cho Telegram.
-5. Reconnect/backoff riêng theo rate limit Discord, không tái dùng tham số của Telegram.
-6. KHÔNG tạo context builder riêng cho Discord — dùng đúng context builder chung.
+**Lý do** (rút ra khi khảo sát bất biến Telegram trước khi thiết kế Discord):
 
-Test bắt buộc: người lạ bị chặn, Confirm/Dangerous qua mock transport, reconnect sau khi rớt kết
-nối giả lập. make check xanh. KHÔNG động vào S1/K1 hay bất kỳ tool file/shell nào.
-```
+1. **Mất bất biến "một token/instance".** Telegram trả `409 Conflict` nên chặn trùng token bằng tín hiệu
+   API. Discord **cho phép nhiều shard với cùng token**, không có tín hiệu tương đương ⇒ phải tự viết
+   cơ chế claim mới (heartbeat trên đĩa) — thêm bề mặt lỗi chỉ để thêm một kênh chat.
+2. **Vòng đời interaction khác hẳn.** Discord bắt buộc trả lời interaction trong **3 giây** nếu
+   không `defer`, và interaction **hết hạn ~15 phút**. Phải thêm `defer` + TTL dọn rác cho bảng
+   confirm — Telegram không cần vì Router tự quản lý hết hạn 300s.
+3. **Sẽ phải port lại ~44 bất biến Telegram** (allowlist 2 lớp, chống giả mạo callback, dedup,
+   rate limit, confirm 3 nút, backoff, redact secret…) — chi phí lớn hơn nhiều so với giá trị thêm.
+4. M18 vốn đã ghi *"tuỳ chọn, chỉ làm nếu rẻ"*, chưa từng có nhu cầu vận hành thực tế.
+
+**Hệ quả:** Slack/WhatsApp đã bỏ từ trước ⇒ **Telegram + Web là hai kênh cuối cùng**. Bảng tag ở mục
+2/2b và toàn bộ milestone M22–M24 giữ nguyên; không milestone nào phụ thuộc Discord.
+
+> Tài liệu `docs/telegram-invariants.md` (danh sách 44 bất biến + phân tích 3 điểm không port được ở
+> trên) **đã bị xoá** cùng M18. Lý do bỏ đã rút gọn vào mục này.
 
 ### M21 — Project profile + RBAC + Developer/QA role (bản hợp nhất cuối cùng)
 
@@ -236,5 +234,17 @@ xanh.
 
 ## 7. Câu hỏi mở còn lại
 
-Không còn câu hỏi chặn tiến độ M18/M21/M22/M22a/M24. **M23 vẫn chờ bạn xác nhận S1 đã vá xong**
-trước khi giao cho coding agent.
+**Không còn câu hỏi chặn tiến độ M21/M22/M22a/M23/M24.**
+
+* **S1 đã vá xong** (commit `9415c5d`, `make check` xanh) ⇒ chốt chặn của **M23 đã mở**, không còn
+  cần xác nhận thêm.
+* **M18 (Discord) đã loại bỏ** (mục 5.0) — không phải câu hỏi mở nữa.
+
+Còn lại 1 điểm **cần chốt trước khi code M21** (không chặn đọc spec, nhưng ảnh hưởng an toàn):
+
+* **M21 mâu thuẫn nội tại.** Mục 4 nói `required_tags()` mặc định `&[]` ⇒ *"tool không nhạy cảm, ai
+  trong `allowed_users` cũng gọi được"*, nhưng test bắt buộc lại nói *"user không có trong
+  `user_roles` là `no-access`, **không gọi được tool nào kể cả tool an toàn cũ**"*. Hai câu này
+  không vừa nhau. Đề xuất của agent: **fail-closed** — `no-access` thấy **không tool nào**, còn
+  `&[]` chỉ nghĩa *"không cần tag đặc biệt"* đối với role **đã** được cấp quyền. Cần chủ dự án
+  xác nhận trước khi implement.

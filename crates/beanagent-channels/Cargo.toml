@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Adapter kênh ngoài (Telegram, sau: Discord, Slack)"
+description = "Adapter kênh ngoài (Telegram)"
 
 [lints]
 workspace = true

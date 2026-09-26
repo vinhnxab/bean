@@ -45,6 +45,8 @@ make smoke-scheduler   # smoke 1 giờ ảo, scheduler tick nhanh
 File mẫu đầy đủ là `BeanAgent.example.toml`. Các trường quan trọng:
 
 - `[agent]`: `workspace`, `max_steps`, `context_budget_tokens`, `timezone`, `allowed_users`.
+- `[llm]`: `provider` (`anthropic` | `openai_compat`), `model`, `allowed_models`, `api_key_env`,
+  `base_url`, `max_tokens`. `api_key_env` là **tên biến môi trường**, không phải key.
 - `[security].daily_token_budget`: ngân sách token theo ngày UTC; khi chạm/vượt, run dừng và
   ghi thông báo bền vững để UI, Telegram và lịch sử sau reconnect đều thấy.
 - `[security.sandbox]`: `docker` hoặc `host`; `host` làm mọi `run_shell` thành Dangerous.
@@ -52,6 +54,41 @@ File mẫu đầy đủ là `BeanAgent.example.toml`. Các trường quan trọn
 - `[telegram]`: `enabled`, `token_env`, `allowed_user_ids`; user ID cũng phải có trong
   `agent.allowed_users` dưới dạng `telegram:<id>`.
 - `[[mcp_servers]]`: stdio command/args/env; `trust = false` làm mỗi MCP tool cần xác nhận.
+
+### OpenRouter (và mọi endpoint tương thích OpenAI)
+
+OpenRouter nói đúng dialect OpenAI Chat Completions nên chỉ cần `provider = "openai_compat"`
+và `base_url`. Đặt key trong biến môi trường, **không** ghi vào file cấu hình:
+
+```sh
+export OPENROUTER_API_KEY='sk-or-v1-...'   # thêm vào ~/.bashrc, không commit
+```
+
+```toml
+[llm]
+provider = "openai_compat"
+model = "nvidia/nemotron-3-super-120b-a12b:free"
+allowed_models = ["nvidia/nemotron-3-super-120b-a12b:free", "anthropic/claude-sonnet-5"]
+api_key_env = "OPENROUTER_API_KEY"          # tên biến, không phải key
+base_url = "https://openrouter.ai/api/v1"
+max_tokens = 2048
+```
+
+```sh
+./target/debug/BeanAgent chat
+```
+
+Xem model và giá hiện tại: `curl -s https://openrouter.ai/api/v1/models | jq -r '.data[].id'`.
+Xem credit/giới hạn của key: `curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+https://openrouter.ai/api/v1/key`.
+
+Hai lỗi thường gặp:
+
+- **HTTP 402 "requires more credits, or fewer max_tokens"** — tài khoản free tier, credit ≈ 0.
+  Dùng model hậu tố `:free` (giới hạn request/ngày) hoặc nạp credit.
+- **HTTP 404 "0 endpoints ... guardrail restrictions and data policy"** — endpoint bị loại do
+  cài đặt **ZDR / data policy** trong tài khoản. Sửa ở
+  <https://openrouter.ai/settings/privacy>, hoặc chọn model khác.
 
 ### Web an toàn khi truy cập từ xa
 

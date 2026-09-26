@@ -25,7 +25,7 @@ Xây dựng **personal AI agent self-hosted, chạy lâu dài**, phát hành dư
 - Công cụ mở rộng được (built-in + MCP).
 - Bộ nhớ bền vững (SQLite + FTS5), tự tóm tắt khi hội thoại dài.
 - Skills (hướng dẫn tái sử dụng, nạp theo nhu cầu).
-- Ba cách giao tiếp: **CLI**, **giao diện web (React)**, **Telegram** (Discord/Slack sau).
+- Ba cách giao tiếp: **CLI**, **giao diện web (React)**, **Telegram**. Đây là bộ kênh cuối cùng — không thêm kênh chat khác (quyết định 2026-09-26, xem `Plan.md` mục 5.0).
 - Tác vụ định kỳ (cron).
 - An toàn: sandbox, xin xác nhận với hành động nguy hiểm, chống prompt injection và XSS/rò rỉ dữ liệu qua giao diện.
 - (Giai đoạn sau) Learning loop: tự đề xuất skill mới từ các task đã hoàn thành.
@@ -73,7 +73,6 @@ Toolchain `stable`, Cargo workspace, `tokio`.
 | Sinh kiểu TypeScript | `ts-rs` (derive `TS` trên kiểu API, xuất ra `web/src/api/generated/`) |
 | Xác thực | `argon2`, `rand`, `subtle`; giới hạn tần suất: `governor` (hoặc `tower_governor`) |
 | Telegram | `teloxide` |
-| Discord / Slack (sau) | `serenity` hoặc `twilight`; `slack-morphism` |
 | Path jail | `cap-std` (truy cập file theo capability, chặn `..` và symlink thoát ra); fallback `canonicalize` + kiểm tra prefix |
 | Cron/thời gian | `croner` hoặc `cron`, `chrono`, `chrono-tz` |
 | MCP | `rmcp` (SDK Rust chính thức của MCP) |
@@ -129,7 +128,7 @@ BeanAgent/
 │  ├─ BeanAgent-memory/               # SQLite store, FTS5, compaction
 │  ├─ BeanAgent-skills/               # loader, skill tools
 │  ├─ BeanAgent-core/                 # agent loop, context, router, scheduler, learning, trait Channel
-│  ├─ BeanAgent-channels/             # telegram (sau: discord, slack)
+│  ├─ BeanAgent-channels/             # telegram (bộ kênh cuối cùng: web + telegram)
 │  ├─ BeanAgent-web/                  # axum: auth, REST, WebSocket, phục vụ UI nhúng, kiểu API (ts-rs)
 │  └─ BeanAgent/                      # bin: `BeanAgent chat | serve | auth`
 ├─ web/                             # React app (mục 12)
@@ -384,7 +383,7 @@ Các bước, ví dụ, lưu ý...
 
 ## 10. Router và Channel (trong tiến trình)
 
-Tất cả kênh (CLI, web, Telegram, sau này Discord/Slack) là **adapter mỏng** gọi vào `Router` của `BeanAgent-core`. Không có logic agent trong adapter.
+Tất cả kênh (CLI, web, Telegram) là **adapter mỏng** gọi vào `Router` của `BeanAgent-core`. Không có logic agent trong adapter.
 
 ```rust
 pub struct Incoming { pub channel: String, pub chat_id: String, pub user_id: String, pub text: String }
@@ -534,7 +533,7 @@ Output của model có thể chứa nội dung độc hại lấy từ web/email
 - Hai instance dùng chung một token gây lỗi 409: phát hiện và log rõ ràng.
 - Kết nối rớt thì tự nối lại; tắt êm khi `CancellationToken` bị huỷ.
 
-Kênh khác (Discord, Slack) là milestone tuỳ chọn, cùng trait `Channel` và cùng yêu cầu allowlist.
+Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nhu cầu vận hành thực tế và được duyệt riêng — M18 (Discord) đã bị loại bỏ 2026-09-26 vì không có tín hiệu API chặn trùng token và có vòng đời interaction riêng.
 
 ---
 
@@ -728,7 +727,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 | M14 | MCP client | Kết nối 1 MCP server thật |
 | M15 | Learning loop + duyệt skill nháp trong UI/Telegram | Sinh skill nháp, duyệt được |
 | M16 | Hardening và triển khai: nhúng UI vào release, systemd, Dockerfile nhiều tầng, README, `make audit`, (tuỳ chọn) Playwright | Chạy ổn định 24h; `make check`/`audit`/`e2e` xanh |
-| M17 | (Tuỳ chọn) Streaming token (SSE từ provider → `Text` delta qua WS); kênh Discord/Slack | Chữ hiện dần trong UI |
+| M17 | (Tuỳ chọn) Streaming token (SSE từ provider → `Text` delta qua WS) | Chữ hiện dần trong UI |
 
 ---
 
