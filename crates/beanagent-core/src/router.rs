@@ -14,7 +14,7 @@ use beanagent_security::{AuditLog, SessionPolicy};
 use beanagent_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use beanagent_tools::{ToolRegistry, truncate_chars};
 use beanagent_types::{
-    Config, ConfirmId, ConfirmOutcome, Outbound, Risk, RunEvent, RunId, SessionId,
+    Config, ConfirmId, ConfirmOutcome, Outbound, Risk, RolePermissions, RunEvent, RunId, SessionId,
 };
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -54,6 +54,8 @@ pub struct Incoming {
     pub text: String,
     /// Session cụ thể; `None` resolve theo `(channel, chat_id, user_id)`.
     pub session_id: Option<SessionId>,
+    /// Project profile muốn dùng (M21.1); `None` ⇒ project mặc định.
+    pub project: Option<String>,
 }
 
 impl Incoming {
@@ -71,6 +73,7 @@ impl Incoming {
             user_id: user_id.into(),
             text: text.into(),
             session_id: None,
+            project: None,
         }
     }
 
@@ -78,6 +81,13 @@ impl Incoming {
     #[must_use]
     pub fn with_session(mut self, session: SessionId) -> Self {
         self.session_id = Some(session);
+        self
+    }
+
+    /// Gắn project profile (M21.1).
+    #[must_use]
+    pub fn with_project(mut self, project: impl Into<String>) -> Self {
+        self.project = Some(project.into());
         self
     }
 }
@@ -94,6 +104,9 @@ pub enum RouterError {
         /// Channel bị từ chối.
         channel: String,
     },
+    /// Project profile không tồn tại trong cấu hình (M21.1).
+    #[error("project `{0}` không tồn tại trong cấu hình")]
+    InvalidProject(String),
     /// Lỗi store.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -141,6 +154,7 @@ impl RouterError {
     pub const fn code(&self) -> &'static str {
         match self {
             Self::Forbidden(_) | Self::InvalidIdentity { .. } => "forbidden",
+            Self::InvalidProject(_) => "invalid_project",
             Self::Store(_) => "store",
             Self::Skill(_) => "skill_draft",
             Self::Internal(_) => "internal",
@@ -424,6 +438,12 @@ impl Router {
     /// Submit trả `RunId` ngay; run LLM được spawn nền.
     pub async fn submit(&self, incoming: Incoming) -> Result<RunId, RouterError> {
         self.authorize(&incoming)?;
+        // (M21.1) Validate project trước khi xếp hàng — lỗi trả về cho adapter, không phải
+        // giữa run.
+        {
+            let config = read_lock(&self.inner.config)?;
+            self.resolve_project(&incoming, &config)?;
+        }
         let _submission = self.inner.submission.lock().await;
         let run_id = new_run_id()?;
         let session = self.resolve_session(&incoming).await?;
@@ -454,6 +474,10 @@ impl Router {
         allowed_tools: Vec<String>,
     ) -> Result<RunId, RouterError> {
         self.authorize(&incoming)?;
+        {
+            let config = read_lock(&self.inner.config)?;
+            self.resolve_project(&incoming, &config)?;
+        }
         let _submission = self.inner.submission.lock().await;
         let run_id = new_run_id()?;
         let session = self.resolve_session(&incoming).await?;
@@ -485,6 +509,22 @@ impl Router {
             });
         }
         Ok(())
+    }
+
+    /// Chọn project profile cho lượt (M21.1).
+    ///
+    /// Tên lạ ⇒ `RouterError::InvalidProject` (fail-closed: không rơi về project khác, vì
+    /// làm vậy sẽ cho phiên đọc/ghi nhầm `MEMORY.md` của project khác).
+    fn resolve_project(&self, incoming: &Incoming, config: &Config) -> Result<String, RouterError> {
+        let requested = incoming
+            .project
+            .as_deref()
+            .unwrap_or(beanagent_types::config::DEFAULT_PROJECT);
+        if config.project_workspace(requested).is_some() {
+            Ok(requested.to_string())
+        } else {
+            Err(RouterError::InvalidProject(requested.to_string()))
+        }
     }
 
     async fn resolve_session(&self, incoming: &Incoming) -> Result<SessionId, RouterError> {
@@ -599,6 +639,25 @@ impl Router {
                 return;
             }
         };
+        // (M21.3) **Điểm quyết định RBAC duy nhất.** Router resolve role → `RolePermissions`
+        // một lần mỗi run rồi truyền struct tuần tự hoá được xuống agent loop. Mọi lần lọc
+        // tool (payload và tầng thực thi) đều dùng **cùng** struct này nên không thể lệch nhau,
+        // và không logic RBAC nào nằm rải trong tool/role (ràng buộc `Plan.md` mục 4.3).
+        let permissions: RolePermissions = config.permissions_for(&queued.incoming.user_id);
+        // (M21.1) Project của lượt; `execute` chỉ chạy sau khi `submit` đã validate qua
+        // `resolve_project`, nên ở đây dùng `unwrap_or(default)` là lưới an toàn.
+        let project = queued
+            .incoming
+            .project
+            .clone()
+            .unwrap_or_else(|| beanagent_types::config::DEFAULT_PROJECT.to_string());
+        tracing::debug!(
+            run_id = %queued.run_id,
+            user_id = %queued.incoming.user_id,
+            role = %permissions.role,
+            project = %project,
+            "resolve quyền cho run"
+        );
         let result = run_turn_outcome(RunTurnArgs {
             store: self.inner.store.as_ref(),
             registry: self.inner.registry.as_ref(),
@@ -612,6 +671,8 @@ impl Router {
             audit: self.inner.audit.clone(),
             channel: audit_channel,
             skills_index: &skills_index,
+            permissions: &permissions,
+            project: &project,
         })
         .await;
         match result {
@@ -1573,6 +1634,7 @@ fn agent_error_code(error: &AgentError) -> &'static str {
 fn router_error_code(error: &RouterError) -> &'static str {
     match error {
         RouterError::Forbidden(_) | RouterError::InvalidIdentity { .. } => "forbidden",
+        RouterError::InvalidProject(_) => "invalid_project",
         RouterError::Store(_) => "store",
         RouterError::Skill(_) => "skill_draft",
         RouterError::Internal(_) => "internal",

@@ -41,12 +41,12 @@ fn files_registry(dir: &tempfile::TempDir) -> ToolRegistry {
 
 fn ctx_of(reg: &ToolRegistry) -> (ToolCtx, Arc<AtomicBool>) {
     let seen = Arc::new(AtomicBool::new(false));
-    let ctx = ToolCtx {
-        workspace: reg.workspace().unwrap(),
-        session: SessionId::new(1),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::clone(&seen),
-    };
+    let ctx = ToolCtx::for_project(
+        reg.workspace().unwrap(),
+        SessionId::new(1),
+        CancellationToken::new(),
+        Arc::clone(&seen),
+    );
     (ctx, seen)
 }
 
@@ -159,12 +159,12 @@ async fn run_shell_wraps_and_flags() {
     );
     let tool = run_shell(Arc::new(sandbox));
     let seen = Arc::new(AtomicBool::new(false));
-    let ctx = ToolCtx {
-        workspace: Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap()),
-        session: SessionId::new(1),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::clone(&seen),
-    };
+    let ctx = ToolCtx::for_project(
+        Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap()),
+        SessionId::new(1),
+        CancellationToken::new(),
+        Arc::clone(&seen),
+    );
     let output = tool
         .call(&ctx, serde_json::json!({"command": "echo 'xin chào 🦀'"}))
         .await

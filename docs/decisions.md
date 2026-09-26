@@ -325,3 +325,63 @@ Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`g
   * **Bài học để lại:** mọi bất biến an toàn của một adapter **không tự động portable sang nền
     tảng khác**. Trước khi thêm channel mới phải liệt kê bất biến và đối chiếu từng cái với đặc
     tính nền tảng đích, đặc biệt là phần *không có tín hiệu API tương đương*.
+
+## 11. RBAC & project profile (D11.x — milestone M21)
+
+* **D11.1 — `no-access` là deny-all (fail-closed), không phải "role không tag".**
+  Spec M21 mâu thuẫn: mục 4 nói `required_tags() = &[]` ⇒ *"ai trong `allowed_users` cũng gọi
+  được"*, nhưng test bắt buộc nói user không có trong `user_roles` *"không gọi được tool nào
+  kể cả tool an toàn cũ"*. Chọn hướng **fail-closed** vì `Plan.md` mục 2 coi "role mặc định
+  `no-access`" là **bất biến bắt buộc**. Cụ thể:
+  * `no-access` thấy **không tool nào**, kể cả untagged.
+  * `required_tags() = &[]` chỉ nghĩa *"không cần thẻ đặc biệt"* — với role **đã** được cấp quyền.
+  * `no-access` là tên **dự phòng của hệ thống**: `validate()` **từ chối** nếu khai báo lại nó
+    trong `[[roles]]`, tránh cấu hình tự mâu thuẫn.
+  * Bằng chứng: `crates/beanagent-core/tests/rbac.rs::user_without_role_is_no_access_and_sees_no_tool`.
+
+* **D11.2 — RBAC chỉ bật khi `agent.user_roles` khác rỗng.** Nếu bật vô điều kiện thì mọi cài
+  đặt một-người-dùng sẵn có **đột nhiên mất hết tool** ngay sau khi nâng cấp. Vì vậy
+  `Config::rbac_enabled()` = `!user_roles.is_empty()`; bảng `[[roles]]` vẫn được nạp để có sẵn
+  tên tag. Bằng chứng: `rbac_disabled_keeps_legacy_behavior_for_every_allowed_user`.
+
+* **D11.3 — Một kiểu `RolePermissions` tuần tự hoá được, quyết định đúng một chỗ.**
+  `Plan.md` mục 4 ràng buộc (1) giao tiếp serializable và (3) RBAC check ở đúng một điểm.
+  `RolePermissions` (`beanagent-types::rbac`) là hiện thân của cả hai: Router gọi
+  `Config::permissions_for(user_id)` **một lần** mỗi run, rồi truyền struct xuống agent loop
+  qua `RunTurnArgs::permissions`. Agent loop **không** tự tra cứu role.
+
+* **D11.4 — Hai chốt chặn, cùng một ngữ nghĩa.** (a) `registry.specs_visible_to(perms)` lọc danh
+  sách tool **trước** khi dựng request tới LLM (M21.5 yêu cầu rõ "không lọc sau khi model đã
+  chọn tool"); (b) `registry.allows(name, perms)` chặn lúc thực thi. Cả hai gọi **cùng** một
+  hàm `RolePermissions::allows` với **cùng** một struct ⇒ không thể lệch nhau. Chốt (b) là bắt
+  buộc vì `args` là JSON không tin cậy: nội dung `<untrusted_content>` hoặc ảo giác của model
+  vẫn có thể bịa tên tool. Đây **không** phải "logic RBAC thứ hai rải rác" — quyết định vẫn
+  chỉ được ra ở Router một lần.
+
+* **D11.5 — `required_tags` dùng ngữ nghĩa OR; `run_shell` mang `["dev-write", "infra-scan"]`.**
+  Nếu chỉ gắn `dev-write` cho `run_shell` thì M23 (security-scan) không chạy được `nmap`/`trivy`;
+  nếu gắn `infra-read` thì role chỉ-đọc cũng chạy được shell. OR với hai tag cho phép đúng hai
+  vai trò cần nó, vẫn chặn `qa`.
+
+* **D11.6 — `run_shell` **phải** bị chặn với `qa`, không chỉ `write_file`/`edit_file`.**
+  Đây là điểm dễ sót nhất: nếu chỉ chặn tool ghi file thì `qa` chạy
+  `echo x > src/lib.rs` là lách được four-eyes. Vì vậy cả 3 tool có khả năng sửa code
+  (`write_file`, `edit_file`, `run_shell`) đều mang tag `dev-write`.
+
+* **D11.7 — Four-eyes kiểm ở tầng code bằng `forbid_tags`, không dựa vào model.** `validate()`
+  **từ chối khởi động** nếu một role vừa được cấp tag vừa khai báo tag đó trong `forbid_tags`.
+  Bảng mẫu khai báo `qa.forbid_tags = ["dev-write"]` ⇒ không thể lỡ tay phá nguyên tắc.
+  Bằng chứng: `config_rejects_role_that_is_granted_a_forbidden_tag`.
+
+* **D11.8 — Ngân sách token tách theo role qua bảng `usage_by_role` (migration v5).**
+  Bảng `usage` (tổng toàn instance) **giữ nguyên** vì `GET /api/status` đang dùng; thêm bảng
+  mới `(day, role)` thay vì sửa bảng cũ để không phá dữ liệu người dùng. Mỗi lượt ghi vào
+  **cả hai** sổ: tổng cho status, riêng role cho ngân sách. `context_budget_tokens` cũng lấy
+  theo role. Bằng chứng: `store::tests::usage_by_role_is_independent_between_roles`.
+
+* **D11.9 — Project profile = workspace riêng, `default` là dự phòng.** `default` ánh xạ tới
+  `agent.workspace` và **không** khai báo lại trong `[[projects]]` (`validate()` từ chối). Mỗi
+  project có `MEMORY.md`/`USER.md` riêng **và** sandbox `run_shell` riêng, nên lệnh trong project
+  A không nhìn/ghi được file của project B — giữ nguyên tắc path jail mục 15.1. Tên project lạ
+  bị `RouterError::InvalidProject` (fail-closed, không rơi về project khác). Bằng chứng:
+  `two_projects_do_not_mix_memory_md`.

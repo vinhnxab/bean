@@ -7,13 +7,16 @@ use std::time::Duration;
 
 use crate::store::{Store, StoreError};
 use beanagent_llm::{LlmError, LlmProvider};
-use beanagent_memory::{ensure_daily_budget, record_usage};
+use beanagent_memory::{
+    ensure_daily_budget, ensure_role_daily_budget, record_usage, record_usage_for_role,
+};
 use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
 use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 use beanagent_security::untrusted::contains_untrusted_block;
 use beanagent_tools::{ToolCtx, ToolError};
 use beanagent_types::{
-    Config, LlmDelta, LlmResponse, Message, StopReason, ToolCall, ToolSpec, Usage,
+    Config, LlmDelta, LlmResponse, Message, Risk, RolePermissions, StopReason, ToolCall, ToolSpec,
+    Usage,
 };
 use futures_util::StreamExt;
 use tokio::time::timeout;
@@ -121,6 +124,15 @@ pub struct RunTurnArgs<'a> {
     pub channel: &'a str,
     /// Progressive-disclosure index `name: description` của các skill đang có.
     pub skills_index: &'a str,
+    /// Quyền RBAC **đã resolve** cho người gửi (M21.5).
+    ///
+    /// Router gọi `Config::permissions_for` **một lần** rồi truyền struct tuần tự hoá được này
+    /// xuống đây. Agent loop **không** tự tra cứu role ⇒ quyết định RBAC nằm đúng một chỗ
+    /// (ràng buộc `Plan.md` mục 4.3), và struct thì tuần tự hoá được nên sẵn sàng cho mô hình
+    /// nhiều tiến trình sau này (mục 4.1).
+    pub permissions: &'a RolePermissions,
+    /// Project profile của lượt này (M21.1); quyết định workspace và file bộ nhớ nạp.
+    pub project: &'a str,
 }
 
 /// Lý do run kết thúc bình thường.
@@ -171,6 +183,8 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         audit: audit_log,
         channel,
         skills_index,
+        permissions,
+        project,
     } = args;
     // (M5/D8.10) System prompt chỉ đi qua `ChatRequest.system` — **không** nhân bản nó
     // thành message `User` (M3 từng làm vậy: tốn token gấp đôi cho phần system và dễ
@@ -222,13 +236,17 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
     for _step in 0..config.agent.max_steps {
         // (M5, mục 8.2) Dựng context: system prompt + MEMORY.md/USER.md + summary của phiên
         // + lịch sử vừa ngân sách token, cắt ở ranh giới an toàn (không tách cặp tool).
-        let workspace = registry.workspace_opt();
-        let ctx = crate::context::build_with_skills(
+        //
+        // (M21.1) `MEMORY.md`/`USER.md` đọc từ workspace **của project**, và (M21.7) ngân
+        // sách context lấy theo role nên role có thể có context budget riêng.
+        let workspace = registry.workspace_for(project);
+        let ctx = crate::context::build_for_project(
             store,
             config,
             session,
             workspace.as_deref(),
             skills_index,
+            config.context_budget_for(permissions),
         )
         .await?;
         let system = ctx.system;
@@ -240,23 +258,36 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         }
 
         let usage_day = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        match ensure_daily_budget(store, &usage_day, config.security.daily_token_budget).await {
-            Ok(()) => {}
-            Err(StoreError::BudgetExceeded { used, limit }) => {
-                return finish_with_notice(
-                    store,
-                    session,
-                    transcript,
-                    budget_notice(used, limit),
-                    EndReason::BudgetExceeded,
-                    tool_call_count,
-                    loaded_skills,
-                )
-                .await;
+        // (M21.7) Hai ngân sách độc lập: **tổng** toàn instance (mục 15.9) và **riêng role**
+        // này. Nhờ vậy Developer chạy vòng lặp dài không ăn hết hạn mức khiến
+        // Monitor/Security-scan không chạy được job định kỳ.
+        let role_budget = config.daily_budget_for(permissions);
+        for budget_error in [
+            ensure_daily_budget(store, &usage_day, config.security.daily_token_budget).await,
+            ensure_role_daily_budget(store, &usage_day, permissions.usage_scope(), role_budget)
+                .await,
+        ] {
+            match budget_error {
+                Ok(()) => {}
+                Err(StoreError::BudgetExceeded { used, limit }) => {
+                    return finish_with_notice(
+                        store,
+                        session,
+                        transcript,
+                        budget_notice(used, limit),
+                        EndReason::BudgetExceeded,
+                        tool_call_count,
+                        loaded_skills,
+                    )
+                    .await;
+                }
+                Err(error) => return Err(error.into()),
             }
-            Err(error) => return Err(error.into()),
         }
-        let tool_specs: Vec<ToolSpec> = registry.specs();
+        // (M21.5) **Lọc danh sách tool TRƯỚC khi dựng request tới LLM** — không lọc sau khi
+        // model đã "chọn" tool. Model không thấy tool ngoài quyền của role nên không thể gọi
+        // nhầm, và cũng không bị dắt vào hướng dẫn bằng schema của tool bị cấm.
+        let tool_specs: Vec<ToolSpec> = registry.specs_visible_to(permissions);
         let req = beanagent_llm::ChatRequest {
             system: &system,
             messages: &messages,
@@ -286,14 +317,17 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         }
         let resp = streamed.finish()?;
 
-        let usage = record_usage(store, &usage_day, resp.usage).await?;
-        let used = u64::from(usage.total());
-        if used > config.security.daily_token_budget {
+        // Ghi vào cả sổ tổng lẫn sổ riêng role (M21.7).
+        record_usage(store, &usage_day, resp.usage).await?;
+        let role_usage =
+            record_usage_for_role(store, &usage_day, permissions.usage_scope(), resp.usage).await?;
+        let used = u64::from(role_usage.total());
+        if used > role_budget {
             return finish_with_notice(
                 store,
                 session,
                 transcript,
-                budget_notice(used, config.security.daily_token_budget),
+                budget_notice(used, role_budget),
                 EndReason::BudgetExceeded,
                 tool_call_count,
                 loaded_skills,
@@ -323,6 +357,34 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
 
         for call in resp.tool_calls {
             tool_call_count = tool_call_count.saturating_add(1);
+
+            // (M21.5) **Chốt chặn thứ hai ở tầng thực thi.** Lọc ở `specs_visible_to` đã ngăn
+            // model *thấy* tool ngoài quyền, nhưng `args` là JSON không tin cậy: nội dung
+            // untrusted (mục 15.4) hoặc model bị ảo giác vẫn có thể bịa ra tên tool. Dùng
+            // **cùng** `RolePermissions` và **cùng** hàm `allows` ⇒ không thể lệch nhau
+            // giữa lúc lọc payload và lúc chạy, và không có logic RBAC thứ hai rải rác.
+            if !registry.allows(&call.name, permissions) {
+                let message = format!(
+                    "Bạn không có quyền (`{}`) gọi tool `{}`.",
+                    permissions.role, call.name
+                );
+                tracing::warn!(
+                    tool = %call.name,
+                    role = %permissions.role,
+                    "từ chối tool call ngoài quyền của role"
+                );
+                append_run_message(
+                    store,
+                    session,
+                    &mut transcript,
+                    Message::tool_error(call.id.clone(), message.clone()),
+                )
+                .await?;
+                io.on_tool_start(&call.id, &call.name, Risk::Dangerous, &call.name, "");
+                io.on_tool_end(&call.id, &call.name, false, &message);
+                continue;
+            }
+
             let risk = registry
                 .get(&call.name)
                 .map_or(beanagent_types::Risk::Safe, |tool| tool.risk(&call.args));
@@ -341,10 +403,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 continue;
             }
 
-            let workspace = match registry.workspace() {
-                Ok(workspace) => workspace,
-                Err(error) => {
-                    let message = format!("registry thiếu workspace: {error}");
+            // (M21.1) Workspace của **project profile** của lượt này; rơi về workspace
+            // chung khi project không có thư mục riêng. Nhờ vậy `MEMORY.md`/`USER.md` và
+            // mọi thao tác file của hai project không lẫn nhau.
+            let workspace = match registry.workspace_for(project) {
+                Some(workspace) => workspace,
+                None => {
+                    let message = format!("registry thiếu workspace cho project `{project}`");
                     append_run_message(
                         store,
                         session,
@@ -361,6 +426,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 session,
                 cancel: io.cancel_token().clone(),
                 untrusted_seen: untrusted_seen.clone(),
+                project: project.to_string(),
             };
 
             let args_hash = hash_args(&call.args);

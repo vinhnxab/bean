@@ -13,7 +13,7 @@ use beanagent_llm::{ChatRequest, FakeProvider, LlmError, LlmProvider};
 use beanagent_security::CapWorkspace;
 use beanagent_skills::{SkillCatalog, skill_tools};
 use beanagent_tools::ToolRegistry;
-use beanagent_types::{Config, LlmResponse, Role, SessionId, ToolCall};
+use beanagent_types::{Config, LlmResponse, Role, RolePermissions, SessionId, ToolCall};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
@@ -129,6 +129,8 @@ async fn fake_provider_loads_matching_skill_before_answering() {
     let config = Config::default();
     let skills_index = catalog.index();
     let owned_io = Arc::new(io);
+    let perms = RolePermissions::unrestricted("test");
+
     let output = run_turn(RunTurnArgs {
         store: &store,
         registry: &registry,
@@ -142,6 +144,8 @@ async fn fake_provider_loads_matching_skill_before_answering() {
         audit: None,
         channel: "test",
         skills_index: &skills_index,
+        permissions: &perms,
+        project: "default",
     })
     .await
     .unwrap();

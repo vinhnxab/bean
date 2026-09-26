@@ -15,8 +15,8 @@ use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
 use beanagent_security::CapWorkspace;
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use beanagent_types::{
-    Config, LlmDelta, LlmResponse, LlmToolCallDelta, Risk, Role, SessionId, StopReason, ToolCall,
-    ToolSpec, Usage,
+    Config, LlmDelta, LlmResponse, LlmToolCallDelta, Risk, Role, RolePermissions, SessionId,
+    StopReason, ToolCall, ToolSpec, Usage,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -289,6 +289,8 @@ async fn turn(
         cursor: AtomicUsize::new(0),
     };
     let owned_io = Arc::new(io.clone());
+    let perms = RolePermissions::unrestricted("test");
+
     run_turn(RunTurnArgs {
         store,
         registry,
@@ -304,6 +306,8 @@ async fn turn(
         audit: None,
         channel: "cli",
         skills_index: "",
+        permissions: &perms,
+        project: "default",
     })
     .await
 }
@@ -427,6 +431,8 @@ async fn streaming_deltas_are_emitted_and_assembled_into_tool_call() {
     let provider = StreamProvider {
         calls: AtomicUsize::new(0),
     };
+    let perms = RolePermissions::unrestricted("test");
+
     let out = run_turn(RunTurnArgs {
         store: &store,
         registry: &reg,
@@ -440,6 +446,8 @@ async fn streaming_deltas_are_emitted_and_assembled_into_tool_call() {
         audit: None,
         channel: "cli",
         skills_index: "",
+        permissions: &perms,
+        project: "default",
     })
     .await
     .unwrap();
@@ -821,6 +829,8 @@ async fn system_prompt_is_sent_once_via_system_field() {
     };
 
     let owned_io = Arc::new(io);
+    let perms = RolePermissions::unrestricted("test");
+
     let out = run_turn(RunTurnArgs {
         store: &store,
         registry: &reg,
@@ -834,6 +844,8 @@ async fn system_prompt_is_sent_once_via_system_field() {
         audit: None,
         channel: "cli",
         skills_index: "",
+        permissions: &perms,
+        project: "default",
     })
     .await
     .unwrap();

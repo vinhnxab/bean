@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
+use crate::rbac::{NO_ACCESS_ROLE, RolePermissions};
+
 /// Tên file cấu hình mặc định ở gốc workspace.
 pub const DEFAULT_CONFIG_FILE: &str = "BeanAgent.toml";
 
@@ -136,6 +138,14 @@ pub struct AgentConfig {
     pub timezone: String,
     /// Lớp kiểm tra thứ hai ở lõi, ngoài allowlist của từng kênh (mục 10).
     pub allowed_users: Vec<String>,
+    /// Map `user_id` (`telegram:<id>`, `web:admin`, `cli:local`) → tên role (M21.3).
+    ///
+    /// User **không** có trong map này dùng role mặc định
+    /// [`NO_ACCESS_ROLE`](crate::NO_ACCESS_ROLE) — deny-all, an toàn theo mặc định.
+    ///
+    /// RBAC chỉ **bật** khi map này khác rỗng; để trống thì mọi user trong `allowed_users`
+    /// giữ hành vi cũ (thấy mọi tool) để không phá cài đặt một-người-dùng (D10.3).
+    pub user_roles: BTreeMap<String, String>,
 }
 
 impl Default for AgentConfig {
@@ -147,9 +157,59 @@ impl Default for AgentConfig {
             context_budget_tokens: 100_000,
             timezone: "Asia/Ho_Chi_Minh".to_string(),
             allowed_users: vec!["web:admin".to_string(), "cli:local".to_string()],
+            user_roles: BTreeMap::new(),
         }
     }
 }
+
+/// Một role trong bảng `[[roles]]` (M21.2).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoleConfig {
+    /// Tên role, khớp giá trị trong `agent.user_roles`.
+    pub name: String,
+    /// Các tag mà role được cấp. Tag `"*"` nghĩa là **mọi** quyền.
+    #[serde(default)]
+    pub tool_tags: Vec<String>,
+    /// Tag **cấm** cứng cho role này; config sai thì `validate()` báo lỗi (M21.6).
+    ///
+    /// Dùng cho nguyên tắc four-eyes: role `qa` khai báo
+    /// `forbid_tags = ["dev-write"]` nên **không thể** lỡ tay cấp quyền ghi code cho role
+    /// review — kiểm tra ở tầng code, không dựa vào model tự kiểm tra.
+    #[serde(default)]
+    pub forbid_tags: Vec<String>,
+    /// Ghi đè `agent.context_budget_tokens` cho riêng role này (M21.7).
+    #[serde(default)]
+    pub context_budget_tokens: Option<u32>,
+    /// Ghi đè `security.daily_token_budget` cho riêng role này (M21.7).
+    #[serde(default)]
+    pub daily_token_budget: Option<u64>,
+}
+
+impl RoleConfig {
+    /// Tập tag đã chuẩn hoá (loại khoảng trắng thừa, bỏ tag rỗng).
+    #[must_use]
+    pub fn tag_set(&self) -> BTreeSet<String> {
+        self.tool_tags
+            .iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .collect()
+    }
+}
+
+/// Một project profile trong `[[projects]]` (M21.1).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectConfig {
+    /// Tên project (kebab-case), dùng làm khoá chọn project khi mở phiên.
+    pub name: String,
+    /// Workspace riêng của project; mọi thao tác file của project bị jail trong đây.
+    pub workspace: PathBuf,
+}
+
+/// Tên project mặc định — ánh xạ tới `agent.workspace` (M21.1).
+pub const DEFAULT_PROJECT: &str = "default";
 
 /// `[data]`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -416,6 +476,11 @@ pub struct Config {
     pub llm: LlmConfig,
     /// `[tools]`.
     pub tools: ToolsConfig,
+    /// `[[roles]]` — bảng role của RBAC (M21.2).
+    pub roles: Vec<RoleConfig>,
+    /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
+    /// ánh xạ tới `agent.workspace`.
+    pub projects: Vec<ProjectConfig>,
     /// `[learning]` — reflection và duyệt skill nháp.
     pub learning: LearningConfig,
     /// `[security]`.
@@ -514,12 +579,176 @@ impl Config {
     /// Trả [`ConfigError::Invalid`] khi cấu hình vô nghĩa hoặc không an toàn.
     pub fn validate(&mut self) -> Result<(), ConfigError> {
         self.validate_core()?;
+        self.validate_rbac()?;
+        self.validate_projects()?;
         self.validate_web_and_channels()?;
         self.validate_paths()
     }
 }
 
 impl Config {
+    /// RBAC có đang bật không? (M21.3)
+    ///
+    /// Chỉ bật khi người dùng khai báo ít nhất một `agent.user_roles`. Nếu không, mọi user
+    /// trong `allowed_users` giữ hành vi cũ (thấy mọi tool) — nhờ vậy cài đặt một-người-dùng
+    /// sẵn có **không** đột nhiên mất tool (D10.3).
+    #[must_use]
+    pub fn rbac_enabled(&self) -> bool {
+        !self.agent.user_roles.is_empty()
+    }
+
+    /// **Điểm quyết định RBAC duy nhất** (M21.3): `user_id` → [`RolePermissions`].
+    ///
+    /// Router gọi hàm này **một lần** mỗi run rồi truyền struct kết quả (tuần tự hoá được)
+    /// xuống agent loop; agent loop không tự tra cứu role ⇒ không có logic RBAC rải rác.
+    ///
+    /// * RBAC tắt ⇒ [`RolePermissions::unrestricted`] (giữ hành vi cũ).
+    /// * RBAC bật mà user có trong `user_roles` ⇒ tag của role đó.
+    /// * RBAC bật mà user **không** có trong map ⇒ `no-access` (deny-all).
+    /// * `user_roles` trỏ tới role không tồn tại ⇒ `no-access`; `validate()` đã chặn từ lúc
+    ///   nạp config nên nhánh này chỉ là lưới an toàn.
+    #[must_use]
+    pub fn permissions_for(&self, user_id: &str) -> RolePermissions {
+        if !self.rbac_enabled() {
+            return RolePermissions::unrestricted("default");
+        }
+        let Some(role_name) = self.agent.user_roles.get(user_id) else {
+            tracing::warn!(
+                user_id,
+                "user không có trong agent.user_roles — dùng role no-access (không thấy tool nào)"
+            );
+            return RolePermissions::deny_all(NO_ACCESS_ROLE);
+        };
+        match self.role(role_name) {
+            Some(role) => RolePermissions::from_tags(&role.name, role.tag_set()),
+            None => {
+                tracing::error!(user_id, role = %role_name,
+                    "user_roles trỏ tới role không tồn tại — dùng no-access");
+                RolePermissions::deny_all(NO_ACCESS_ROLE)
+            }
+        }
+    }
+
+    /// Tra role theo tên trong `[[roles]]`.
+    #[must_use]
+    pub fn role(&self, name: &str) -> Option<&RoleConfig> {
+        self.roles.iter().find(|role| role.name == name)
+    }
+
+    /// Ngân sách context token **riêng cho role** (M21.7).
+    #[must_use]
+    pub fn context_budget_for(&self, perms: &RolePermissions) -> u32 {
+        self.role(&perms.role)
+            .and_then(|role| role.context_budget_tokens)
+            .unwrap_or(self.agent.context_budget_tokens)
+    }
+
+    /// Ngân sách token/ngày **riêng cho role** (M21.7).
+    #[must_use]
+    pub fn daily_budget_for(&self, perms: &RolePermissions) -> u64 {
+        self.role(&perms.role)
+            .and_then(|role| role.daily_token_budget)
+            .unwrap_or(self.security.daily_token_budget)
+    }
+
+    /// Danh sách project đã khai báo; luôn có ít nhất project `default`.
+    ///
+    /// `default` ánh xạ tới `agent.workspace` (M21.1) — BeanAgent tự phát triển chính nó là một
+    /// project profile **không đặc quyền hơn** project nào khác: cùng cơ chế, cùng jail.
+    #[must_use]
+    pub fn project_profiles(&self) -> Vec<ProjectConfig> {
+        let mut profiles = vec![ProjectConfig {
+            name: DEFAULT_PROJECT.to_string(),
+            workspace: self.agent.workspace.clone(),
+        }];
+        for project in &self.projects {
+            if project.name != DEFAULT_PROJECT {
+                profiles.push(project.clone());
+            }
+        }
+        profiles
+    }
+
+    /// Workspace của một project; `None` nếu tên không tồn tại.
+    #[must_use]
+    pub fn project_workspace(&self, name: &str) -> Option<&Path> {
+        if name == DEFAULT_PROJECT {
+            return Some(&self.agent.workspace);
+        }
+        self.projects
+            .iter()
+            .find(|project| project.name == name)
+            .map(|project| project.workspace.as_path())
+    }
+
+    /// Kiểm tra bảng `[[roles]]` và `agent.user_roles` (M21.2, M21.6).
+    fn validate_rbac(&self) -> Result<(), ConfigError> {
+        let mut seen = BTreeSet::new();
+        for role in &self.roles {
+            let name = role.name.trim();
+            if name.is_empty() {
+                return Err(invalid("[[roles]] có role thiếu tên"));
+            }
+            if name == NO_ACCESS_ROLE {
+                return Err(invalid(format!(
+                    "`{NO_ACCESS_ROLE}` là role dự phòng của hệ thống (deny-all); không được khai báo lại"
+                )));
+            }
+            if !seen.insert(name.to_string()) {
+                return Err(invalid(format!("[[roles]] có role trùng tên `{name}`")));
+            }
+            // (M21.6) Nguyên tắc four-eyes kiểm ở tầng code: cấp vừa cấm là lỗi cấu hình,
+            // không phải việc để model tự phát hiện lúc chạy.
+            let granted = role.tag_set();
+            for forbidden in &role.forbid_tags {
+                let forbidden = forbidden.trim();
+                if granted.contains(forbidden) {
+                    return Err(invalid(format!(
+                        "role `{name}` vừa được cấp tag `{forbidden}` vừa khai báo nó trong forbid_tags — vi phạm nguyên tắc four-eyes"
+                    )));
+                }
+            }
+            if role
+                .context_budget_tokens
+                .is_some_and(|value| value < 1_000)
+            {
+                return Err(invalid(format!(
+                    "role `{name}`.context_budget_tokens tối thiểu 1000"
+                )));
+            }
+        }
+        for (user, role) in &self.agent.user_roles {
+            if self.role(role).is_none() {
+                return Err(invalid(format!(
+                    "agent.user_roles[`{user}`] trỏ tới role `{role}` không tồn tại trong [[roles]]"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[[projects]]` (M21.1).
+    fn validate_projects(&self) -> Result<(), ConfigError> {
+        let mut seen = BTreeSet::new();
+        for project in &self.projects {
+            let name = project.name.trim();
+            if name.is_empty() {
+                return Err(invalid("[[projects]] có project thiếu tên"));
+            }
+            if name == DEFAULT_PROJECT {
+                return Err(invalid(format!(
+                    "`{DEFAULT_PROJECT}` là project dự phòng ánh xạ tới agent.workspace; không khai báo lại"
+                )));
+            }
+            if !seen.insert(name.to_string()) {
+                return Err(invalid(format!(
+                    "[[projects]] có project trùng tên `{name}`"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Kiểm tra `[agent]`, `[tools]`, `[llm]`, `[security]`.
     fn validate_core(&mut self) -> Result<(), ConfigError> {
         if !(1..=1000).contains(&self.agent.max_steps) {

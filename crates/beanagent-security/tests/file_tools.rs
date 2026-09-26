@@ -22,12 +22,12 @@ fn files_registry(dir: &tempfile::TempDir) -> ToolRegistry {
 }
 
 fn ctx_of(reg: &ToolRegistry) -> ToolCtx {
-    ToolCtx {
-        workspace: reg.workspace().unwrap(),
-        session: beanagent_types::SessionId::new(1),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    }
+    ToolCtx::for_project(
+        reg.workspace().unwrap(),
+        beanagent_types::SessionId::new(1),
+        CancellationToken::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
 }
 
 async fn call(

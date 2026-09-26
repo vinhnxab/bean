@@ -114,7 +114,11 @@ Chủ dự án quyết **bỏ hẳn Discord** khỏi hệ thống để giữ đ
 > Tài liệu `docs/telegram-invariants.md` (danh sách 44 bất biến + phân tích 3 điểm không port được ở
 > trên) **đã bị xoá** cùng M18. Lý do bỏ đã rút gọn vào mục này.
 
-### M21 — Project profile + RBAC + Developer/QA role (bản hợp nhất cuối cùng)
+### M21 — Project profile + RBAC + Developer/QA role (bản hợp nhất cuối cùng) — ✅ **ĐÃ XONG 2026-09-26**
+
+Bằng chứng: `crates/beanagent-core/tests/rbac.rs` (7 test) + `store::tests::usage_by_role_is_independent_between_roles`.
+Quyết định thiết kế: `docs/decisions.md` mục 11 (D11.1–D11.9). Điểm đã chốt trước khi code:
+`no-access` là **deny-all** (D11.1) và RBAC chỉ bật khi `agent.user_roles` khác rỗng (D11.2).
 
 ```
 Ràng buộc kiến trúc bắt buộc (giữ đường lui sang mô hình nhiều tiến trình sau này):
@@ -240,11 +244,11 @@ xanh.
   cần xác nhận thêm.
 * **M18 (Discord) đã loại bỏ** (mục 5.0) — không phải câu hỏi mở nữa.
 
-Còn lại 1 điểm **cần chốt trước khi code M21** (không chặn đọc spec, nhưng ảnh hưởng an toàn):
+Còn lại 1 điểm **cần chốt trước khi code M22** (không chặn M21, đã xong):
 
-* **M21 mâu thuẫn nội tại.** Mục 4 nói `required_tags()` mặc định `&[]` ⇒ *"tool không nhạy cảm, ai
-  trong `allowed_users` cũng gọi được"*, nhưng test bắt buộc lại nói *"user không có trong
-  `user_roles` là `no-access`, **không gọi được tool nào kể cả tool an toàn cũ**"*. Hai câu này
-  không vừa nhau. Đề xuất của agent: **fail-closed** — `no-access` thấy **không tool nào**, còn
-  `&[]` chỉ nghĩa *"không cần tag đặc biệt"* đối với role **đã** được cấp quyền. Cần chủ dự án
-  xác nhận trước khi implement.
+* **M22 chưa có tag `infra-read` nào trên tool thật.** M21 mới chỉ dựng cơ chế RBAC; các tool
+  `infra-read`/`billing-read`/`marketing-*` sẽ được gắn tag ở đúng milestone của nó (M22/M22a/
+  M24). Trước M22, role `it-security` và `finance-readonly` trong cấu hình mẫu **chưa có tool
+  nào để gọi** — đó là hệ quả đúng của thiết kế tag, không phải lỗi.
+* **Danh sách tool per-role trong UI chưa có.** `GET /api/status` mới chỉ báo tổng token; muốn
+  hiện "role này còn bao nhiêu hạn mức" thì thêm endpoint đọc `usage_by_role` (không chặn M22).

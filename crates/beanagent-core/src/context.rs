@@ -58,6 +58,50 @@ pub async fn build_with_skills(
     workspace: Option<&dyn WorkspaceFs>,
     skills_index: &str,
 ) -> Result<TurnContext, StoreError> {
+    build_full(
+        store,
+        config,
+        session,
+        workspace,
+        skills_index,
+        config.agent.context_budget_tokens,
+    )
+    .await
+}
+
+/// Dựng context cho project profile cụ thể (M21.1).
+///
+/// `workspace` phải là workspace **của project đó** (xem
+/// [`ToolRegistry::workspace_for`]) ⇒ `MEMORY.md`/`USER.md` của hai project không lẫn nhau.
+/// `context_budget` cho phép áp ngân sách riêng theo role (M21.7).
+pub async fn build_for_project(
+    store: &dyn Store,
+    config: &Config,
+    session: SessionId,
+    workspace: Option<&dyn WorkspaceFs>,
+    skills_index: &str,
+    context_budget: u32,
+) -> Result<TurnContext, StoreError> {
+    build_full(
+        store,
+        config,
+        session,
+        workspace,
+        skills_index,
+        context_budget,
+    )
+    .await
+}
+
+/// Thân chung của các hàm `build*`.
+async fn build_full(
+    store: &dyn Store,
+    config: &Config,
+    session: SessionId,
+    workspace: Option<&dyn WorkspaceFs>,
+    skills_index: &str,
+    context_budget: u32,
+) -> Result<TurnContext, StoreError> {
     let memory_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, MEMORY_FILE));
     let user_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, USER_FILE));
     let summary = store.summary(session).await?.unwrap_or_default();
@@ -70,7 +114,7 @@ pub async fn build_with_skills(
     }
 
     let history = store.history(session, None, 0).await?;
-    let messages = trim_history(&history, config.agent.context_budget_tokens);
+    let messages = trim_history(&history, context_budget);
     Ok(TurnContext { system, messages })
 }
 

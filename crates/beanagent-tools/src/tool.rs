@@ -45,6 +45,25 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Tag RBAC mà role phải giữ **ít nhất một** để thấy/gọi tool này (M21.4).
+    ///
+    /// Mặc định `&[]` ⇒ *"không cần thẻ đặc biệt"*: mọi role **đã được cấp quyền** đều thấy
+    /// (giữ hành vi cũ cho tool chat thường — M21.4 ghi rõ điều này).
+    ///
+    /// **Không** đọc ngữ nghĩa "ai cũng gọi được" theo nghĩa đen: role `no-access` (user
+    /// không có trong `agent.user_roles`) vẫn **không thấy tool nào**, kể cả untagged — đó là
+    /// bất biến an toàn mặc định của `Plan.md` mục 2, xem D10.2.
+    ///
+    /// Ngữ nghĩa giữa nhiều tag là **OR**: role giữ một tag là đủ. Nhờ vậy `run_shell` có thể
+    /// mang cả `dev-write` lẫn `infra-scan` mà vẫn chặn được `qa` (four-eyes).
+    ///
+    /// Việc kiểm tra thực hiện ở **một** chỗ duy nhất: Router resolve
+    /// [`RolePermissions`] rồi lọc danh sách tool **trước** khi dựng request tới LLM
+    /// (M21.5) — không có logic RBAC nào nằm trong tool/role.
+    fn required_tags(&self) -> &[&str] {
+        &[]
+    }
+
     /// Thực thi tool.
     ///
     /// # Errors

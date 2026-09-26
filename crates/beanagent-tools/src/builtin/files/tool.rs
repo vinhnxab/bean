@@ -111,41 +111,53 @@ pub fn grep() -> Arc<dyn Tool> {
 }
 
 /// Tool ghi file (Confirm).
+///
+/// **RBAC (M21.6):** yêu cầu tag `dev-write` — đây là quyền *sửa code dự án*, nên role `qa`
+/// (chỉ có `dev-read`/`test-run`) không thấy tool này. Nhờ vậy nguyên tắc four-eyes được
+/// ràng buộc **ở tầng code**: agent review không có công cụ để tự sửa code nó đang review.
 pub fn write_file() -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "write_file",
-        Risk::Confirm,
-        |ctx: &ToolCtx, p: WriteFileParams| {
-            let ws = ctx.workspace.clone();
-            let path = p.path.clone();
-            let content = p.content.clone();
-            async move {
-                ws.write_text(&path, &content)?;
-                Ok(format!("đã ghi `{}` — {} byte", path, content.len()))
-            }
-        },
-    ))
+    Arc::new(
+        TypedTool::new(
+            "write_file",
+            Risk::Confirm,
+            |ctx: &ToolCtx, p: WriteFileParams| {
+                let ws = ctx.workspace.clone();
+                let path = p.path.clone();
+                let content = p.content.clone();
+                async move {
+                    ws.write_text(&path, &content)?;
+                    Ok(format!("đã ghi `{}` — {} byte", path, content.len()))
+                }
+            },
+        )
+        .requires_tags(["dev-write"]),
+    )
 }
 
 /// Tool sửa file (Confirm).
+///
+/// **RBAC (M21.6):** yêu cầu tag `dev-write` — xem [`write_file`].
 pub fn edit_file() -> Arc<dyn Tool> {
-    Arc::new(TypedTool::new(
-        "edit_file",
-        Risk::Confirm,
-        |ctx: &ToolCtx, p: EditFileParams| {
-            let ws = ctx.workspace.clone();
-            let path = p.path.clone();
-            let old = p.old.clone();
-            let new_str = p.new.clone();
-            async move {
-                ws.edit_unique(&path, &old, &new_str)?;
-                Ok(format!(
-                    "đã thay `{}` → `{}` trong `{}`",
-                    old, new_str, path
-                ))
-            }
-        },
-    ))
+    Arc::new(
+        TypedTool::new(
+            "edit_file",
+            Risk::Confirm,
+            |ctx: &ToolCtx, p: EditFileParams| {
+                let ws = ctx.workspace.clone();
+                let path = p.path.clone();
+                let old = p.old.clone();
+                let new_str = p.new.clone();
+                async move {
+                    ws.edit_unique(&path, &old, &new_str)?;
+                    Ok(format!(
+                        "đã thay `{}` → `{}` trong `{}`",
+                        old, new_str, path
+                    ))
+                }
+            },
+        )
+        .requires_tags(["dev-write"]),
+    )
 }
 
 // Test đọc/ghi/offset/grep của nhóm file nằm ở `beanagent-security/tests/file_tools.rs`

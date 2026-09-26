@@ -27,7 +27,7 @@ use beanagent_core::{
 };
 use beanagent_llm::{FakeProvider, LlmProvider};
 use beanagent_security::{
-    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell, web_fetch, web_search,
+    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
 };
 use beanagent_skills::{SkillCatalog, skill_tools};
 use beanagent_tools::{ToolRegistry, mcp::McpRuntime};
@@ -186,6 +186,34 @@ pub(crate) async fn build_registry(
         CapWorkspace::open(config.agent.workspace.clone()).context("không mở được workspace")?;
     let ws: Arc<dyn beanagent_tools::WorkspaceFs> = Arc::new(ws);
     let mut registry = ToolRegistry::with_workspace(ws);
+
+    // (M21.1) Workspace riêng cho từng project profile. Mỗi project có `MEMORY.md`/
+    // `USER.md`/thư mục làm việc riêng ⇒ hai project không lẫn bộ nhớ hay ghi đè file
+    // của nhau. Project `default` dùng sẵn `agent.workspace` nên không cần khai ở đây.
+    let mut project_sandboxes: std::collections::BTreeMap<String, Arc<Sandbox>> =
+        std::collections::BTreeMap::new();
+    for profile in config.project_profiles() {
+        if profile.name == beanagent_types::config::DEFAULT_PROJECT {
+            continue;
+        }
+        std::fs::create_dir_all(&profile.workspace).with_context(|| {
+            format!(
+                "không tạo được workspace của project `{}` tại {}",
+                profile.name,
+                profile.workspace.display()
+            )
+        })?;
+        let project_ws = CapWorkspace::open(profile.workspace.clone())
+            .with_context(|| format!("không mở được workspace của project `{}`", profile.name))?;
+        registry.set_project_workspace(&profile.name, Arc::new(project_ws));
+        project_sandboxes.insert(
+            profile.name.clone(),
+            Arc::new(Sandbox::new(
+                config.security.sandbox.clone(),
+                profile.workspace.clone(),
+            )),
+        );
+    }
     if config.tools.enabled.iter().any(|g| g == "files") {
         for tool in beanagent_tools::builtin::file_tools() {
             registry
@@ -199,7 +227,7 @@ pub(crate) async fn build_registry(
             config.agent.workspace.clone(),
         ));
         registry
-            .register(run_shell(sandbox))
+            .register(run_shell_for_projects(sandbox, project_sandboxes))
             .context("đăng ký run_shell thất bại")?;
     }
     if config.tools.enabled.iter().any(|g| g == "web") {

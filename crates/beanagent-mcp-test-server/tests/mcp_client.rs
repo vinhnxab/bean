@@ -137,6 +137,7 @@ async fn agent_discovers_calls_and_wraps_real_stdio_mcp_tool() {
     ]);
     let io = Arc::new(TestIo::allow());
     let config = Config::default();
+    let perms = beanagent_types::RolePermissions::unrestricted("test");
     let final_text = run_turn(RunTurnArgs {
         store: &store,
         registry: &registry,
@@ -150,6 +151,8 @@ async fn agent_discovers_calls_and_wraps_real_stdio_mcp_tool() {
         audit: None,
         channel: "test",
         skills_index: "",
+        permissions: &perms,
+        project: "default",
     })
     .await
     .unwrap();
@@ -182,12 +185,12 @@ async fn remote_error_is_wrapped_and_marks_turn_untrusted() {
         .unwrap();
     let tool = registry.get("mcp__fixture__report_error").unwrap();
     let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let ctx = ToolCtx {
-        workspace: registry.workspace().unwrap(),
-        session: SessionId::new(2),
-        cancel: CancellationToken::new(),
-        untrusted_seen: flag.clone(),
-    };
+    let ctx = ToolCtx::for_project(
+        registry.workspace().unwrap(),
+        SessionId::new(2),
+        CancellationToken::new(),
+        flag.clone(),
+    );
 
     let error = tool.call(&ctx, serde_json::json!({})).await.unwrap_err();
     assert!(matches!(error, ToolError::Mcp(_)), "{error:?}");
@@ -210,12 +213,12 @@ async fn call_timeout_returns_tool_error_without_hanging_the_loop() {
         .unwrap();
     let tool = registry.get("mcp__fixture__slow").unwrap();
     assert_eq!(tool.risk(&serde_json::json!({})), Risk::Safe);
-    let ctx = ToolCtx {
-        workspace: registry.workspace().unwrap(),
-        session: SessionId::new(3),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    };
+    let ctx = ToolCtx::for_project(
+        registry.workspace().unwrap(),
+        SessionId::new(3),
+        CancellationToken::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
 
     let started = std::time::Instant::now();
     let error = tool.call(&ctx, serde_json::json!({})).await.unwrap_err();
@@ -269,12 +272,12 @@ async fn mcp_reconnects_after_stdio_server_drops() {
         .await
         .unwrap();
     let tool = registry.get("mcp__fixture__echo").unwrap();
-    let ctx = ToolCtx {
-        workspace: registry.workspace().unwrap(),
-        session: SessionId::new(9),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    };
+    let ctx = ToolCtx::for_project(
+        registry.workspace().unwrap(),
+        SessionId::new(9),
+        CancellationToken::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
     let output = tool
         .call(&ctx, serde_json::json!({ "text": "sau reconnect" }))
         .await

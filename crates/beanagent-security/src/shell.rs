@@ -25,14 +25,32 @@ pub struct RunShellParams {
 /// Dựng tool `run_shell` gắn với một sandbox.
 #[must_use]
 pub fn run_shell(sandbox: Arc<Sandbox>) -> Arc<dyn Tool> {
+    run_shell_for_projects(sandbox, Default::default())
+}
+
+/// Dựng tool `run_shell` với sandbox riêng cho từng project profile (M21.1).
+///
+/// `by_project` tra theo [`ToolCtx::project`]; project không có trong map thì dùng
+/// `sandbox` mặc định. Nhờ vậy lệnh trong project A **không** nhìn thấy (hay ghi được)
+/// file của project B — giữ đúng nguyên tắc path jail mục 15.1 khi có nhiều project.
+#[must_use]
+pub fn run_shell_for_projects(
+    sandbox: Arc<Sandbox>,
+    by_project: std::collections::BTreeMap<String, Arc<Sandbox>>,
+) -> Arc<dyn Tool> {
+    // Mức rủi ro cơ bản lấy từ sandbox **mặc định**; mọi sandbox đều dùng chung
+    // `[security.sandbox]` nên cùng chế độ docker/host.
     let base_risk = sandbox.base_risk();
     Arc::new(
         TypedTool::new(
             "run_shell",
             base_risk,
-            move |_ctx: &beanagent_tools::ToolCtx, p: RunShellParams| {
-                let sandbox = sandbox.clone();
-                let cancel = _ctx.cancel.clone();
+            move |ctx: &beanagent_tools::ToolCtx, p: RunShellParams| {
+                let sandbox = by_project
+                    .get(&ctx.project)
+                    .cloned()
+                    .unwrap_or_else(|| sandbox.clone());
+                let cancel = ctx.cancel.clone();
                 async move {
                     if p.command.trim().is_empty() {
                         return Err(ToolError::InvalidArgs(
@@ -52,7 +70,12 @@ pub fn run_shell(sandbox: Arc<Sandbox>) -> Arc<dyn Tool> {
         )
         // Mục 15.4: stdout/stderr là dữ liệu ngoài lõi (lệnh trong sandbox có thể in ra
         // nội dung file do kẻ tấn công kiểm soát) — bọc thẻ + bật cờ `untrusted_seen`.
-        .untrusted(),
+        .untrusted()
+        // RBAC (M21.6): lệnh shell **luôn** có thể sửa code, nên phải cùng bị chặn với
+        // `dev-write` — nếu chỉ chặn `write_file`/`edit_file` thì `qa` chạy
+        // `echo x > src/lib.rs` là lách được four-eyes. Tag `infra-scan` cho phép
+        // security-scan chạy `nmap`/`trivy` (M23) mà không cần quyền ghi code.
+        .requires_tags(["dev-write", "infra-scan"]),
     )
 }
 

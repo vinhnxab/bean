@@ -77,6 +77,7 @@ pub struct TypedTool<P, F, Fut> {
     default_risk: Risk,
     risk_fn: Option<Arc<dyn Fn(&Value) -> Risk + Send + Sync>>,
     marks_untrusted: bool,
+    required_tags: Vec<&'static str>,
     handler: F,
     _phantom: PhantomData<fn(P) -> Fut>,
 }
@@ -130,6 +131,24 @@ where
         self
     }
 
+    /// Khai báo tag RBAC mà role phải giữ **ít nhất một** để thấy tool này (M21.4).
+    ///
+    /// ```ignore
+    /// // four-eyes: chỉ developer (dev-write) và security-scan (infra-scan) chạy được
+    /// // lệnh shell; qa bị chặn dù có thể đọc code.
+    /// let tool = TypedTool::new("run_shell", Risk::Confirm, handler)
+    ///     .requires_tags(["dev-write", "infra-scan"]);
+    /// ```
+    #[must_use]
+    pub fn requires_tags<I, S>(mut self, tags: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<&'static str>,
+    {
+        self.required_tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
     fn build(
         name: &str,
         default_risk: Risk,
@@ -142,6 +161,7 @@ where
             default_risk,
             risk_fn,
             marks_untrusted: false,
+            required_tags: Vec::new(),
             handler,
             _phantom: PhantomData,
         }
@@ -199,6 +219,10 @@ where
 
     fn marks_untrusted(&self) -> bool {
         self.marks_untrusted
+    }
+
+    fn required_tags(&self) -> &[&str] {
+        &self.required_tags
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {

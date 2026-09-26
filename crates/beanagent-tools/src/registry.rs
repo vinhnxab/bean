@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use beanagent_types::ToolSpec;
+use beanagent_types::{RolePermissions, ToolSpec};
 
 use crate::error::ToolError;
 use crate::tool::Tool;
@@ -15,6 +15,11 @@ pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
     /// Workspace dùng cho tool (M4: `CapWorkspace` trên cap-std — beanagent-security).
     workspace: Option<Arc<dyn WorkspaceFs>>,
+    /// Workspace theo project profile (M21.1), tra cứu theo tên project.
+    ///
+    /// Rỗng ⇒ mọi project dùng chung [`Self::workspace`]. Có dữ liệu ⇒ mỗi project có
+    /// thư mục riêng (và `MEMORY.md`/`USER.md` riêng), nên hai project không lẫn bộ nhớ.
+    project_workspaces: BTreeMap<String, Arc<dyn WorkspaceFs>>,
 }
 
 impl std::fmt::Debug for ToolRegistry {
@@ -38,6 +43,7 @@ impl ToolRegistry {
         Self {
             tools: BTreeMap::new(),
             workspace: None,
+            project_workspaces: BTreeMap::new(),
         }
     }
 
@@ -47,7 +53,27 @@ impl ToolRegistry {
         Self {
             tools: BTreeMap::new(),
             workspace: Some(workspace),
+            project_workspaces: BTreeMap::new(),
         }
+    }
+
+    /// Gắn workspace cho một project profile (M21.1).
+    ///
+    /// Project không có trong map thì rơi về [`Self::workspace`] (project `default`).
+    pub fn set_project_workspace(&mut self, project: &str, workspace: Arc<dyn WorkspaceFs>) {
+        self.project_workspaces
+            .insert(project.to_string(), workspace);
+    }
+
+    /// Workspace của một project profile (M21.1).
+    ///
+    /// `None` chỉ khi registry không gắn workspace **và** project cũng không có riêng.
+    #[must_use]
+    pub fn workspace_for(&self, project: &str) -> Option<Arc<dyn WorkspaceFs>> {
+        self.project_workspaces
+            .get(project)
+            .cloned()
+            .or_else(|| self.workspace.clone())
     }
 
     /// Trả về workspace liên kết với registry (`None` khi registry rỗng / chưa gắn).
@@ -89,6 +115,30 @@ impl ToolRegistry {
     #[must_use]
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.tools.values().map(|t| t.spec()).collect()
+    }
+
+    /// Danh sách tool mà `perms` được phép thấy, **đã sort theo tên** (M21.5).
+    ///
+    /// Đây là *áp dụng* quyết định RBAC đã resolve ở Router, không phải chỗ ra quyết định:
+    /// toàn bộ ngữ nghĩa nằm trong [`beanagent_types::RolePermissions::allows`].
+    #[must_use]
+    pub fn specs_visible_to(&self, perms: &RolePermissions) -> Vec<ToolSpec> {
+        self.tools
+            .values()
+            .filter(|tool| perms.allows(tool.required_tags()))
+            .map(|tool| tool.spec())
+            .collect()
+    }
+
+    /// Role này có được gọi tool này không? (dùng để chặn ở tầng thực thi — M21.5)
+    ///
+    /// Cùng ngữ nghĩa với [`Self::specs_visible_to`]: cùng một [`RolePermissions`] và cùng
+    /// một hàm `allows`, nên không thể lệch nhau giữa lúc lọc payload và lúc chạy.
+    #[must_use]
+    pub fn allows(&self, name: &str, perms: &RolePermissions) -> bool {
+        self.tools
+            .get(name)
+            .is_some_and(|tool| perms.allows(tool.required_tags()))
     }
 
     /// Tên các tool đã đăng ký (sort).

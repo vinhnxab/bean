@@ -24,7 +24,7 @@ use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
 use beanagent_security::{CapWorkspace, SessionPolicy};
 use beanagent_tools::builtin::files::tool::{read_file, write_file};
 use beanagent_tools::{Risk, ToolCtx, ToolRegistry, untrusted::OPEN_TAG};
-use beanagent_types::{Config, LlmResponse, SessionId, ToolCall};
+use beanagent_types::{Config, LlmResponse, RolePermissions, SessionId, ToolCall};
 use tokio_util::sync::CancellationToken;
 
 /// Payload tấn công điển hình nằm trong file người dùng tải về / nhận qua email.
@@ -150,6 +150,8 @@ async fn turn(
     c.security.tool_timeout_seconds = 5;
     let store = MemoryStore::new();
     let owned_io = Arc::new(io.clone());
+    let perms = RolePermissions::unrestricted("test");
+
     run_turn(RunTurnArgs {
         store: &store,
         registry: reg,
@@ -163,6 +165,8 @@ async fn turn(
         audit: None,
         channel: "cli",
         skills_index: "",
+        permissions: &perms,
+        project: "default",
     })
     .await
 }
@@ -174,12 +178,12 @@ async fn read_file_marks_turn_as_untrusted() {
     let (dir, _reg) = registry();
     let ws = Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap());
     let seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let ctx = ToolCtx {
-        workspace: ws,
-        session: SessionId::new(1),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::clone(&seen),
-    };
+    let ctx = ToolCtx::for_project(
+        ws,
+        SessionId::new(1),
+        CancellationToken::new(),
+        Arc::clone(&seen),
+    );
     let output = read_file()
         .call(&ctx, serde_json::json!({"path": "ghichu.md"}))
         .await

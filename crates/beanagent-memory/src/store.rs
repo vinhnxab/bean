@@ -402,6 +402,21 @@ pub trait Store: Send + Sync {
     /// Đọc usage theo ngày UTC.
     async fn usage(&self, day: &str) -> Result<Usage, StoreError>;
 
+    /// Cộng usage của **một role** trong ngày UTC (M21.7).
+    ///
+    /// Tách khỏi [`Self::add_usage`] (bảng tổng phục vụ `GET /api/status`) để mỗi role có hạn
+    /// mức riêng: Developer chạy vòng lặp dài không ăn hết hạn mức khiến Monitor/Security-scan
+    /// không chạy được job định kỳ.
+    async fn add_usage_by_role(
+        &self,
+        day: &str,
+        role: &str,
+        usage: Usage,
+    ) -> Result<(), StoreError>;
+
+    /// Đọc usage của một role trong ngày UTC; chưa có ⇒ `Usage` rỗng.
+    async fn usage_by_role(&self, day: &str, role: &str) -> Result<Usage, StoreError>;
+
     /// Tạo bản ghi phiên đăng nhập chỉ lưu hash token.
     async fn create_web_session(
         &self,
@@ -513,6 +528,35 @@ pub async fn record_usage(store: &dyn Store, day: &str, usage: Usage) -> Result<
     store.usage(day).await
 }
 
+/// Kiểm tra ngân sách token **riêng của một role** trước lượt gọi LLM mới (M21.7).
+///
+/// Tách khỏi [`ensure_daily_budget`] (tổng toàn instance) để Developer chạy vòng lặp dài không
+/// ăn hết hạn mức khiến Monitor/Security-scan không chạy được job định kỳ.
+pub async fn ensure_role_daily_budget(
+    store: &dyn Store,
+    day: &str,
+    role: &str,
+    limit: u64,
+) -> Result<(), StoreError> {
+    let usage = store.usage_by_role(day, role).await?;
+    let used = u64::from(usage.total());
+    if used >= limit {
+        return Err(StoreError::BudgetExceeded { used, limit });
+    }
+    Ok(())
+}
+
+/// Ghi usage vừa lượt gọi vào **hai** sổ: tổng (`/api/status`) và riêng role (M21.7).
+pub async fn record_usage_for_role(
+    store: &dyn Store,
+    day: &str,
+    role: &str,
+    usage: Usage,
+) -> Result<Usage, StoreError> {
+    store.add_usage_by_role(day, role, usage).await?;
+    store.usage_by_role(day, role).await
+}
+
 // ---------------------------------------------------------------------------
 // Bản in-memory (M3)
 // ---------------------------------------------------------------------------
@@ -557,6 +601,7 @@ pub struct MemoryStore {
     tasks: RwLock<Vec<ScheduledTask>>,
     outbox: RwLock<Vec<MemoryOutboxEntry>>,
     usage: RwLock<BTreeMap<String, Usage>>,
+    usage_by_role: RwLock<BTreeMap<(String, String), Usage>>,
     web_sessions: RwLock<Vec<(Vec<u8>, WebSessionInfo)>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
@@ -573,6 +618,7 @@ impl Default for MemoryStore {
             tasks: RwLock::new(Vec::new()),
             outbox: RwLock::new(Vec::new()),
             usage: RwLock::new(BTreeMap::new()),
+            usage_by_role: RwLock::new(BTreeMap::new()),
             web_sessions: RwLock::new(Vec::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
@@ -1119,6 +1165,31 @@ impl Store for MemoryStore {
             .unwrap_or_default())
     }
 
+    async fn add_usage_by_role(
+        &self,
+        day: &str,
+        role: &str,
+        usage: Usage,
+    ) -> Result<(), StoreError> {
+        let mut values = self.usage_by_role.write().await;
+        let current = values
+            .entry((day.to_string(), role.to_string()))
+            .or_default();
+        current.input_tokens = current.input_tokens.saturating_add(usage.input_tokens);
+        current.output_tokens = current.output_tokens.saturating_add(usage.output_tokens);
+        Ok(())
+    }
+
+    async fn usage_by_role(&self, day: &str, role: &str) -> Result<Usage, StoreError> {
+        Ok(self
+            .usage_by_role
+            .read()
+            .await
+            .get(&(day.to_string(), role.to_string()))
+            .copied()
+            .unwrap_or_default())
+    }
+
     async fn create_web_session(
         &self,
         token_hash: Vec<u8>,
@@ -1597,6 +1668,15 @@ CREATE TABLE IF NOT EXISTS usage (
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0
 );
+-- M21.7: ngân sách token tách riêng theo từng role, tách khỏi bảng `usage` tổng
+-- (bảng `usage` vẫn phục vụ `GET /api/status`).
+CREATE TABLE IF NOT EXISTS usage_by_role (
+  day TEXT NOT NULL,
+  role TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, role)
+);
 CREATE INDEX IF NOT EXISTS web_sessions_expiry ON web_sessions(expires_at);
 ";
 
@@ -1761,6 +1841,17 @@ enum DbCommand {
     },
     Usage {
         day: String,
+        reply: Reply<Usage>,
+    },
+    AddUsageByRole {
+        day: String,
+        role: String,
+        usage: Usage,
+        reply: Reply<()>,
+    },
+    UsageByRole {
+        day: String,
+        role: String,
         reply: Reply<Usage>,
     },
     CreateWebSession {
@@ -2241,6 +2332,30 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn add_usage_by_role(
+        &self,
+        day: &str,
+        role: &str,
+        usage: Usage,
+    ) -> Result<(), StoreError> {
+        let day = day.to_string();
+        let role = role.to_string();
+        self.request(move |reply| DbCommand::AddUsageByRole {
+            day,
+            role,
+            usage,
+            reply,
+        })
+        .await
+    }
+
+    async fn usage_by_role(&self, day: &str, role: &str) -> Result<Usage, StoreError> {
+        let day = day.to_string();
+        let role = role.to_string();
+        self.request(move |reply| DbCommand::UsageByRole { day, role, reply })
+            .await
+    }
+
     async fn create_web_session(
         &self,
         token_hash: Vec<u8>,
@@ -2581,6 +2696,17 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::Usage { day, reply } => {
             let _ = reply.send(read_usage(conn, &day));
         }
+        DbCommand::AddUsageByRole {
+            day,
+            role,
+            usage,
+            reply,
+        } => {
+            let _ = reply.send(add_usage_by_role(conn, &day, &role, usage));
+        }
+        DbCommand::UsageByRole { day, role, reply } => {
+            let _ = reply.send(read_usage_by_role(conn, &day, &role));
+        }
         DbCommand::CreateWebSession {
             token_hash,
             user_id,
@@ -2762,6 +2888,25 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         )
         .map_err(|err| StoreError::Internal(format!("migration v4 scheduler thất bại: {err}")))?;
         conn.pragma_update(None, "user_version", 4)
+            .map_err(internal)?;
+        version = 4;
+    }
+    if version < 5 {
+        // M21.7: ngân sách token tách theo role. `IF NOT EXISTS` ⇒ chạy lại vô hại, kể cả
+        // DB mới đã có bảng này trong `SCHEMA_SQL` (migration v1).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS usage_by_role (
+               day TEXT NOT NULL,
+               role TEXT NOT NULL,
+               input_tokens INTEGER NOT NULL DEFAULT 0,
+               output_tokens INTEGER NOT NULL DEFAULT 0,
+               PRIMARY KEY (day, role)
+             );",
+        )
+        .map_err(|err| {
+            StoreError::Internal(format!("migration v5 usage_by_role thất bại: {err}"))
+        })?;
+        conn.pragma_update(None, "user_version", 5)
             .map_err(internal)?;
     }
     Ok(())
@@ -3276,6 +3421,42 @@ fn read_usage(conn: &Connection, day: &str) -> Result<Usage, StoreError> {
     conn.query_row(
         "SELECT input_tokens, output_tokens FROM usage WHERE day = ?1",
         params![day],
+        |row| {
+            Ok(Usage {
+                input_tokens: row.get(0)?,
+                output_tokens: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(internal)?
+    .map_or(Ok(Usage::default()), Ok)
+}
+
+/// Cộng dồn usage của **một role** trong ngày (M21.7).
+fn add_usage_by_role(
+    conn: &Connection,
+    day: &str,
+    role: &str,
+    usage: Usage,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO usage_by_role(day, role, input_tokens, output_tokens) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(day, role) DO UPDATE SET \
+           input_tokens = input_tokens + excluded.input_tokens, \
+           output_tokens = output_tokens + excluded.output_tokens",
+        params![day, role, usage.input_tokens, usage.output_tokens],
+    )
+    .map_err(internal)?;
+    Ok(())
+}
+
+/// Đọc usage của một role; chưa có bản ghi ⇒ [`Usage::default`].
+fn read_usage_by_role(conn: &Connection, day: &str, role: &str) -> Result<Usage, StoreError> {
+    conn.query_row(
+        "SELECT input_tokens, output_tokens FROM usage_by_role WHERE day = ?1 AND role = ?2",
+        params![day, role],
         |row| {
             Ok(Usage {
                 input_tokens: row.get(0)?,
@@ -4009,7 +4190,64 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        // 5 = đã chạy tới migration `usage_by_role` (M21.7).
+        assert_eq!(version, 5);
+    }
+
+    /// M21.7: ngân sách token **tách theo role** — role này dùng hết hạn mức thì role
+    /// khác vẫn còn ngân sách (tránh Developer ăn hết hạn mức của Monitor/Security-scan).
+    #[tokio::test]
+    async fn usage_by_role_is_independent_between_roles() {
+        let dir = TempDir::new().unwrap();
+        let store = open(&dir);
+        let usage = beanagent_types::Usage {
+            input_tokens: 100,
+            output_tokens: 50,
+        };
+        store
+            .add_usage_by_role("2026-09-26", "developer", usage)
+            .await
+            .unwrap();
+        store
+            .add_usage_by_role("2026-09-26", "developer", usage)
+            .await
+            .unwrap();
+        store
+            .add_usage_by_role(
+                "2026-09-26",
+                "monitor",
+                beanagent_types::Usage {
+                    input_tokens: 7,
+                    output_tokens: 3,
+                },
+            )
+            .await
+            .unwrap();
+
+        let developer = store
+            .usage_by_role("2026-09-26", "developer")
+            .await
+            .unwrap();
+        assert_eq!(developer.input_tokens, 200);
+        assert_eq!(developer.output_tokens, 100);
+
+        let monitor = store.usage_by_role("2026-09-26", "monitor").await.unwrap();
+        assert_eq!(monitor.total(), 10, "role khác không bị role này ăn hết");
+
+        // Bảng tổng `usage` (phục vụ /api/status) vẫn tách biệt, không bị thay thế.
+        assert_eq!(
+            store.usage("2026-09-26").await.unwrap().total(),
+            0,
+            "ghi theo role không được đụng vào sổ tổng"
+        );
+        assert_eq!(
+            store
+                .usage_by_role("2026-09-26", "chua-ton-tai")
+                .await
+                .unwrap(),
+            beanagent_types::Usage::default(),
+            "role chưa từng dùng thì usage rỗng"
+        );
     }
 
     /// Tiêu đề phiên lấy từ **dòng đầu** của tin đầu tiên do người dùng gửi (mục 8.1).

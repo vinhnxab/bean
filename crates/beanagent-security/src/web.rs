@@ -649,12 +649,12 @@ mod tests {
     use crate::paths::CapWorkspace;
 
     fn tool_ctx(dir: &tempfile::TempDir, untrusted_seen: Arc<AtomicBool>) -> ToolCtx {
-        ToolCtx {
-            workspace: Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap()),
-            session: SessionId::new(1),
-            cancel: CancellationToken::new(),
+        ToolCtx::for_project(
+            Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap()),
+            SessionId::new(1),
+            CancellationToken::new(),
             untrusted_seen,
-        }
+        )
     }
 
     #[tokio::test]

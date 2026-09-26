@@ -21,12 +21,12 @@ fn write_skill(root: &Path, directory: &str, content: &str) {
 }
 
 fn tool_context(workspace: &Path) -> ToolCtx {
-    ToolCtx {
-        workspace: Arc::new(CapWorkspace::open(workspace.to_path_buf()).unwrap()),
-        session: SessionId::new(1),
-        cancel: CancellationToken::new(),
-        untrusted_seen: Arc::new(AtomicBool::new(false)),
-    }
+    ToolCtx::for_project(
+        Arc::new(CapWorkspace::open(workspace.to_path_buf()).unwrap()),
+        SessionId::new(1),
+        CancellationToken::new(),
+        Arc::new(AtomicBool::new(false)),
+    )
 }
 
 #[test]

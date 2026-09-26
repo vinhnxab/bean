@@ -13,7 +13,7 @@ use beanagent_core::{RunTurnArgs, run_turn};
 use beanagent_llm::{ChatRequest, LlmError, LlmProvider};
 use beanagent_security::{CapWorkspace, SessionPolicy};
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
-use beanagent_types::{Config, LlmResponse, Risk, SessionId, ToolCall, ToolSpec};
+use beanagent_types::{Config, LlmResponse, Risk, RolePermissions, SessionId, ToolCall, ToolSpec};
 use tokio_util::sync::CancellationToken;
 
 /// Provider trả sẵn kịch bản các response.
@@ -151,6 +151,8 @@ async fn turn_with(
     c.security.tool_timeout_seconds = 5;
     let store = MemoryStore::new();
     let owned_io = Arc::new(io.clone());
+    let perms = RolePermissions::unrestricted("test");
+
     run_turn(RunTurnArgs {
         store: &store,
         registry: reg,
@@ -164,6 +166,8 @@ async fn turn_with(
         audit: None,
         channel: "cli",
         skills_index: "",
+        permissions: &perms,
+        project: "default",
     })
     .await
 }

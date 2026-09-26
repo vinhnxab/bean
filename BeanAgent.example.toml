@@ -12,6 +12,14 @@ context_budget_tokens = 100000
 timezone = "Asia/Ho_Chi_Minh"
 # Lớp kiểm tra thứ hai ở lõi, ngoài allowlist của từng kênh (mục 10).
 allowed_users = ["web:admin", "cli:local", "telegram:123456789"]
+# M21 — map user identity -> tên role trong [[roles]].
+# Bỏ trống (mặc định) ⇒ RBAC TẮT, mọi user trong allowed_users thấy mọi tool như cũ.
+# Có bất kỳ dòng nào ⇒ RBAC BẬT, user KHÔNG có trong đây sẽ là `no-access`
+# (không thấy tool nào, kể cả tool an toàn). Đây là hành vi an toàn mặc định.
+#
+# [agent.user_roles]
+# "web:admin" = "admin"
+# "telegram:123456789" = "developer"
 
 [data]
 dir = "~/.BeanAgent"                 # sqlite, audit log, auth.toml
@@ -31,6 +39,51 @@ enabled = ["files", "shell", "web", "memory", "skills", "schedule"]
 enabled = true
 min_tool_calls = 5
 proposal_interval_minutes = 60
+
+# ---------------------------------------------------------------------------
+# M21 — RBAC. Bật/tắt phụ thuộc `agent.user_roles` ở trên, KHÔNG phụ thuộc `[[roles]]`:
+#   * `agent.user_roles` rỗng  ⇒ RBAC TẮT, mọi user trong allowed_users thấy mọi tool
+#     (đúng hành vi cũ — đây là trạng thái của file mẫu này ngay bây giờ).
+#   * `agent.user_roles` có ít nhất 1 dòng ⇒ RBAC BẬT: user được map thì dùng role đó;
+#     user KHÔNG có trong map sẽ là `no-access` (không thấy tool nào, kể cả tool an toàn).
+# Muốn bật: bỏ comment `[agent.user_roles]` ở trên và gán role cho từng user.
+#
+# Bảng `[[roles]]` dưới đây luôn được nạp (kể cả khi RBAC tắt) để bạn có sẵn tên tag.
+# ---------------------------------------------------------------------------
+
+# Tag `*` = mọi quyền. `forbid_tags` là chốt an toàn ở tầng code: cấp vừa cấm sẽ
+# khiến `BeanAgent` không khởi động, nên không thể lỡ tay phá nguyên tắc four-eyes.
+[[roles]]
+name = "admin"
+tool_tags = ["*"]
+
+[[roles]]
+name = "it-security"
+tool_tags = ["infra-read", "infra-scan"]
+
+[[roles]]
+name = "finance-readonly"
+tool_tags = ["billing-read"]
+
+[[roles]]
+name = "developer"
+tool_tags = ["dev-write"]
+
+[[roles]]
+name = "qa"
+tool_tags = ["dev-read", "test-run"]
+forbid_tags = ["dev-write"]           # four-eyes: agent review không được ghi code
+# context_budget_tokens = 200000       # ghi đè agent.context_budget_tokens cho role này
+# daily_token_budget = 1000000         # ngân sách token/ngày RIÊNG của role này (M21.7)
+
+# ---------------------------------------------------------------------------
+# M21 — Project profile. `default` là project dự phòng, ánh xạ tới
+# agent.workspace; mỗi project có MEMORY.md/USER.md và thư mục làm việc riêng.
+# ---------------------------------------------------------------------------
+# [[projects]]
+# name = "khach-hang-a"
+# workspace = "./workspace/khach-hang-a"
+
 
 [tools.web_search]
 provider = "tavily"                  # tavily | brave | searxng
