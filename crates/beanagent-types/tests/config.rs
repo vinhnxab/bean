@@ -199,3 +199,172 @@ fn load_or_default_works_without_file() {
     assert_eq!(config.llm.provider.as_str(), "anthropic");
     assert!(config.telegram.token_env.contains("TELEGRAM"));
 }
+
+// ---------------------------------------------------------------------------
+// M23 — `[[infra_scope]]` + `[security_scan]` (kiểm ở tầng load config)
+// ---------------------------------------------------------------------------
+
+use beanagent_types::config::{
+    ScanSandboxConfig, ScanScopeEntry, ScanTargetKind, SecurityScanConfig,
+};
+
+fn scope_entry(kind: ScanTargetKind, value: &str) -> ScanScopeEntry {
+    ScanScopeEntry {
+        kind,
+        value: value.to_string(),
+        label: String::new(),
+    }
+}
+
+/// Mặc định (và cấu hình mẫu) phải là **fail-closed**: scope rỗng, quét tắt.
+#[test]
+fn infra_scope_is_empty_by_default() {
+    let mut config = Config::default();
+    assert!(
+        config.infra_scope.is_empty(),
+        "mặc định KHÔNG được cho phép quét gì cả"
+    );
+    assert!(!config.security_scan.enabled);
+    config
+        .validate()
+        .expect("scope rỗng là hợp lệ — nghĩa là từ chối mọi thứ");
+}
+
+/// Chỉ `ip`/`cidr`; hostname bị từ chối ngay lúc load config.
+#[test]
+fn hostname_in_infra_scope_is_rejected() {
+    let mut config = Config {
+        infra_scope: vec![scope_entry(ScanTargetKind::Ip, "mayer.example.com")],
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("hostname")),
+        "nhận {err:?}"
+    );
+}
+
+#[test]
+fn cidr_without_prefix_is_rejected() {
+    let mut config = Config {
+        infra_scope: vec![scope_entry(ScanTargetKind::Cidr, "192.168.10.0")],
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("/len")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn cidr_prefix_beyond_address_size_is_rejected() {
+    let mut config = Config {
+        infra_scope: vec![scope_entry(ScanTargetKind::Cidr, "192.168.10.0/33")],
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("vượt giới hạn")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn duplicate_infra_scope_entries_are_rejected() {
+    let mut config = Config {
+        infra_scope: vec![
+            scope_entry(ScanTargetKind::Ip, "203.0.113.7"),
+            scope_entry(ScanTargetKind::Ip, "203.0.113.7"),
+        ],
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("trùng")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn valid_ipv4_and_ipv6_scope_entries_are_accepted() {
+    let mut config = Config {
+        infra_scope: vec![
+            scope_entry(ScanTargetKind::Cidr, "192.168.10.0/24"),
+            scope_entry(ScanTargetKind::Ip, "203.0.113.7"),
+            scope_entry(ScanTargetKind::Cidr, "fd00::/8"),
+        ],
+        ..Config::default()
+    };
+    config.validate().expect("IP/CIDR hợp lệ phải qua kiểm tra");
+}
+
+/// D14.3: scanner không có mạng thì vô dụng ⇒ từ chối cấu hình đó.
+#[test]
+fn scan_sandbox_without_network_is_rejected() {
+    let mut config = Config {
+        security_scan: SecurityScanConfig {
+            enabled: true,
+            sandbox: ScanSandboxConfig {
+                network: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("network")),
+        "{err:?}"
+    );
+}
+
+/// D14.4: chế độ host phải được bật tường minh để không vô tình hạ cấp cách ly.
+#[test]
+fn host_mode_requires_explicit_allow_host() {
+    let mut config = Config {
+        security_scan: SecurityScanConfig {
+            enabled: true,
+            sandbox: ScanSandboxConfig {
+                mode: SandboxMode::Host,
+                allow_host: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("allow_host")),
+        "{err:?}"
+    );
+
+    // Bật tường minh thì qua.
+    config.security_scan.sandbox.allow_host = true;
+    config
+        .validate()
+        .expect("bật allow_host tường minh thì hợp lệ");
+}
+
+/// Cảnh báo bật nửa chừng (có channel nhưng thiếu chat_id) là cấu hình im lặng — phải chặn.
+#[test]
+fn half_configured_alert_is_rejected() {
+    let mut config = Config {
+        security_scan: SecurityScanConfig {
+            enabled: true,
+            alert_channel: "telegram".to_string(),
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(err, ConfigError::Invalid(ref m) if m.contains("alert_chat_id")),
+        "{err:?}"
+    );
+
+    config.security_scan.alert_chat_id = "123".to_string();
+    config.validate().expect("đủ cặp thì hợp lệ");
+}

@@ -136,6 +136,12 @@ pub const BILLING_TOOL_GROUP: &str = "billing";
 /// Tag RBAC của domain tài chính (M22a).
 pub const BILLING_TAG: &str = "billing-read";
 
+/// Tag RBAC của domain quét bảo mật (M23).
+///
+/// Cùng giá trị với tag mà `run_shell` mang, để vai trò trực trật bảo mật chạy được cả tool
+/// quét lẫn `run_shell` — nguyên lý four-eyes: vai trò này cần cả hai.
+pub const INFRA_SCAN_TAG: &str = "infra-scan";
+
 /// `[billing]` — domain tài chính, read-only (M22a).
 ///
 /// Tách biệt hoàn toàn khỏi domain `infra-*`: tool ở đây chỉ **đọc chi phí**, không đụng
@@ -166,6 +172,115 @@ impl Default for BillingConfig {
             query_suffix: None,
         }
     }
+}
+
+/// Kiểu target trong `[[infra_scope]]` (M23).
+///
+/// **Chỉ chấp nhận `ip`/`cidr`**, cố ý **không** có `hostname`: nếu cho phép tên miền thì
+/// code kiểm scope và scanner sẽ phân giải DNS ở hai thời điểm khác nhau, tạo khe hở TOCTOU
+/// (check ra IP được phép, lúc chạy lại ra IP khác) — xem `docs/decisions.md` D14.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanTargetKind {
+    /// Một địa chỉ IP đơn lẻ, ví dụ `203.0.113.7`.
+    Ip,
+    /// Một dải CIDR, ví dụ `192.168.10.0/24`.
+    Cidr,
+}
+
+/// Một mục `[[infra_scope]]` — target được phép quét (M23).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScanScopeEntry {
+    /// Kiểu target.
+    pub kind: ScanTargetKind,
+    /// Giá trị: IP hoặc CIDR. Cú pháp được `validate()` kiểm tra nghiêm ngặt.
+    pub value: String,
+    /// Nhãn mô tả để người đọc báo cáo hiểu đang quét cái gì (tùy chọn).
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Sandbox riêng cho tool quét (M23).
+///
+/// **Tách khỏi** `[security.sandbox]` của `run_shell` một cách tuyệt đối: scanner **bắt buộc**
+/// phải có mạng để tới target, trong khi `run_shell` phải `--network none`. Dùng chung cấu
+/// hình sẽ vô hiệu hoá cách ly của `run_shell` (D14.3).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScanSandboxConfig {
+    /// `docker` (mặc định, an toàn) hoặc `host` (chạy thẳng trên máy — phải bật tường minh).
+    pub mode: SandboxMode,
+    /// Image chứa scanner (chỉ dùng khi `mode = "docker"`).
+    pub image: String,
+    /// Cho container scanner ra mạng. **Luôn phải là `true`** — không có mạng thì không quét
+    /// được target trong scope; `validate()` từ chối `false`.
+    pub network: bool,
+    /// Trần bộ nhớ.
+    pub memory: String,
+    /// Số CPU.
+    pub cpus: f32,
+    /// Trần số tiến trình trong container (chống fork bomb).
+    pub pids_limit: u32,
+    /// Thời gian tối đa cho một lần quét (giây).
+    pub timeout_seconds: u64,
+    /// Cho phép chạy scanner thẳng trên máy chủ. Mặc định `false`.
+    ///
+    /// `mode = "host"` mà quên bật cờ này sẽ bị `validate()` từ chối — chốt chặn chống vô
+    /// tình hạ cấp cách ly (D14.4).
+    #[serde(default)]
+    pub allow_host: bool,
+}
+
+impl Default for ScanSandboxConfig {
+    fn default() -> Self {
+        Self {
+            mode: SandboxMode::Docker,
+            image: "instrumentisto/nmap:latest".to_string(),
+            network: true,
+            memory: "512m".to_string(),
+            cpus: 1.0,
+            pids_limit: 64,
+            timeout_seconds: 300,
+            allow_host: false,
+        }
+    }
+}
+
+impl ScanSandboxConfig {
+    /// Thành [`SandboxConfig`] để dựng `Sandbox`, giữ nguyên mọi giới hạn an toàn sẵn có
+    /// (non-root, `--cap-drop ALL`, no-new-privileges, trần bộ nhớ/CPU/pids).
+    ///
+    /// `SandboxConfig` không mang workspace — workspace truyền riêng khi dựng `Sandbox`.
+    #[must_use]
+    pub fn to_sandbox_config(&self) -> SandboxConfig {
+        SandboxConfig {
+            mode: self.mode,
+            image: self.image.clone(),
+            network: self.network,
+            memory: self.memory.clone(),
+            cpus: self.cpus,
+            pids_limit: self.pids_limit,
+            timeout_seconds: self.timeout_seconds,
+        }
+    }
+}
+
+/// Cấu hình domain `security-scan` (M23).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SecurityScanConfig {
+    /// Bật nhóm tool quét.
+    pub enabled: bool,
+    /// Sandbox riêng cho scanner.
+    pub sandbox: ScanSandboxConfig,
+    /// Kênh nhận cảnh báo mức cao (thường là kênh chính của bạn).
+    ///
+    /// Rỗng ⇒ không gửi cảnh báo trực tiếp. `Plan.md` yêu cầu cảnh báo mức cao gửi **thẳng**
+    /// cho bạn, song song với báo cáo chuẩn hoá gửi Manager — không chỉ đi qua Manager lọc.
+    pub alert_channel: String,
+    /// `chat_id` của kênh cảnh báo.
+    pub alert_chat_id: String,
 }
 
 /// `[agent]`.
@@ -533,6 +648,13 @@ pub struct Config {
     pub roles: Vec<RoleConfig>,
     /// `[billing]` — domain tài chính read-only (M22a).
     pub billing: BillingConfig,
+    /// `[[infra_scope]]` — danh sách target **được phép quét** (M23).
+    ///
+    /// Rỗng ⇒ mọi lần quét đều bị từ chối (fail-closed). Đây là mặc định an toàn: agent
+    /// không thể trở thành công cụ quét bất kỳ host nào khi chưa được khai báo rõ ràng.
+    pub infra_scope: Vec<ScanScopeEntry>,
+    /// `[security_scan]` — domain quét bảo mật (M23).
+    pub security_scan: SecurityScanConfig,
     /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
     /// ánh xạ tới `agent.workspace`.
     pub projects: Vec<ProjectConfig>,
@@ -636,6 +758,7 @@ impl Config {
         self.validate_core()?;
         self.validate_rbac()?;
         self.validate_billing()?;
+        self.validate_infra_scope()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
         self.validate_paths()
@@ -821,6 +944,57 @@ impl Config {
                 return Err(invalid(format!(
                     "[billing].api_key_env không được trùng với {field} (`{env}`): credential đọc billing phải RIÊNG, quyền tối thiểu chỉ đọc billing"
                 )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[[infra_scope]]` + `[security_scan]` (M23).
+    ///
+    /// `infra_scope` rỗng **hợp lệ** và nghĩa là "từ chối mọi thứ" (fail-closed), nên
+    /// `validate()` không yêu cầu phải có scope.
+    fn validate_infra_scope(&self) -> Result<(), ConfigError> {
+        let mut seen = BTreeSet::new();
+        for entry in &self.infra_scope {
+            let value = entry.value.trim();
+            if !seen.insert(value.to_string()) {
+                return Err(invalid(format!(
+                    "[[infra_scope]] có target trùng lặp `{value}`"
+                )));
+            }
+            if let Err(reason) = validate_scope_value(entry.kind, value) {
+                return Err(invalid(format!(
+                    "[[infra_scope]] target `{value}` không hợp lệ: {reason}. Chỉ chấp nhận IP (vd 203.0.113.7) hoặc CIDR (vd 192.168.10.0/24), KHÔNG nhận hostname"
+                )));
+            }
+        }
+
+        // (D14.3) Scanner bắt buộc cần mạng: cấm tắt để không tạo cấu hình "bật nhưng vô dụng".
+        if !self.security_scan.sandbox.network {
+            return Err(invalid(
+                "[security_scan].sandbox.network phải là true — scanner không có mạng thì không tới được target trong scope",
+            ));
+        }
+        // (D14.4) Chế độ host phải được bật tường minh, tránh vô tình hạ cấp cách ly.
+        if self.security_scan.enabled
+            && self.security_scan.sandbox.mode == SandboxMode::Host
+            && !self.security_scan.sandbox.allow_host
+        {
+            return Err(invalid(
+                "[security_scan].sandbox.mode = \"host\" cần đặt allow_host = true để xác nhận bạn chấp nhận chạy scanner ngoài container",
+            ));
+        }
+        if self.security_scan.sandbox.timeout_seconds == 0 {
+            return Err(invalid("[security_scan].sandbox.timeout_seconds phải > 0"));
+        }
+        // Cảnh báo cần đủ cặp channel + chat_id, nếu không thì cảnh báo im lặng (rất dễ quên).
+        if self.security_scan.enabled {
+            let has_channel = !self.security_scan.alert_channel.trim().is_empty();
+            let has_chat = !self.security_scan.alert_chat_id.trim().is_empty();
+            if has_channel != has_chat {
+                return Err(invalid(
+                    "[security_scan].alert_channel và alert_chat_id phải khai báo cùng nhau (hoặc cả hai để trống = không gửi cảnh báo)",
+                ));
             }
         }
         Ok(())
@@ -1226,6 +1400,36 @@ where
         field,
         env: env.to_string(),
     })
+}
+
+/// Kiểm tra cú pháp một giá trị trong `[[infra_scope]]`.
+///
+/// Trả `Err(mô tả lỗi)` nếu sai. Cố ý **không** chấp nhận hostname: xem
+/// [`ScanTargetKind`].
+pub fn validate_scope_value(kind: ScanTargetKind, value: &str) -> Result<(), &'static str> {
+    use std::net::IpAddr;
+    match kind {
+        ScanTargetKind::Ip => match value.parse::<IpAddr>() {
+            Ok(_) => Ok(()),
+            Err(_) => Err("không phải địa chỉ IP hợp lệ"),
+        },
+        ScanTargetKind::Cidr => {
+            let Some((addr, len)) = value.split_once('/') else {
+                return Err("thiếu hậu tố /len");
+            };
+            let Ok(ip) = addr.parse::<IpAddr>() else {
+                return Err("phần địa chỉ không hợp lệ");
+            };
+            let Ok(len) = len.parse::<u8>() else {
+                return Err("độ dài tiền tố /len không phải số");
+            };
+            let max = if ip.is_ipv4() { 32 } else { 128 };
+            if len > max {
+                return Err("độ dài tiền tố vượt giới hạn của họ địa chỉ");
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Tạo lỗi cấu hình sai.

@@ -61,6 +61,14 @@ tool_tags = ["*"]
 name = "it-security"
 tool_tags = ["infra-read", "infra-scan"]
 
+# M23 — vai trò trực trật bảo mật. Cần tag `infra-scan` cho BOTH `security_scan` lẫn
+# `run_shell` (cùng tag, ngữ nghĩa OR) vì thực tế phải tự chạy lệnh để đối chiếu kết quả
+# quét với thực tế máy. Việc này đúng nguyên lý four-eyes: một người vừa đề xuất quét vừa
+# tự quét được thì phải là người được giao phần đó, không phải developer/qa.
+[[roles]]
+name = "security-scan"
+tool_tags = ["infra-read", "infra-scan"]
+
 # M22 — Monitor: chỉ đọc log/CVE qua MCP. Gắn server SIEM/CVE với
 # `tool_tags = ["infra-read"]` trong `[[mcp_servers]]` để chỉ role này (và it-security)
 # thấy được tool đó. M22 KHÔNG thêm tool quét chủ động — chỉ đọc.
@@ -126,6 +134,50 @@ network = false
 memory = "512m"
 cpus = 1.0
 timeout_seconds = 60
+
+# ---------------------------------------------------------------------------
+# M23 — Quét bảo mật (CHỈ ĐỌC, read-only về phía hệ thống được quét).
+#
+# `[[infra_scope]]` là RANH GIỚI AN TOÀN QUAN TRỌNG NHẤT của M23: nếu để rỗng, mọi lần
+# quét đều bị từ chối (fail-closed) — đó là mặc định của file mẫu này.
+#
+# Vì sao phải khai trước: agent có quyền chạy lệnh. Nếu không có allowlist, chỉ cần một
+# dòng log/ticket chứa "hãy quét 8.8.8.8" là máy chủ của bạn thành công cụ tấn công do
+# chính bạn vận hành. Việc kiểm tra nằm ở TẦNG CODE (trước khi spawn scanner), không
+# dựa vào model tự kiểm tra.
+#
+# CHỈ nhận `ip`/`cidr`, KHÔNG nhận `hostname`: nếu nhận tên miền thì lúc kiểm scope và
+# lúc scanner chạy sẽ phân giải DNS ở hai thời điểm khác nhau ⇒ khe hở TOCTOU.
+#
+# Bỏ comment dòng dưới để thử an toàn (192.0.2.0/24 là dải TEST-NET dành riêng cho tài
+# liệu RFC 5737, không bao giờ là hệ thống thật):
+#
+# [[infra_scope]]
+# kind = "cidr"                        # "cidr" | "ip"
+# value = "192.0.2.0/24"
+# label = "mạng thử nghiệm"
+
+# [security_scan]
+# enabled = true
+#
+# Sandbox RIÊNG cho scanner, TÁCH khỏi [security.sandbox] ở trên: scanner bắt buộc phải
+# có mạng để tới target, còn run_shell phải `--network none`. Dùng chung sẽ vô hiệu hoá
+# cách ly của run_shell. `network = false` bị validate() từ chối.
+# [security_scan.sandbox]
+# mode = "docker"                      # docker (mặc định, khuyến nghị) | host
+# image = "instrumentisto/nmap:latest" # phải chứa sẵn scanner; BeanAgent KHÔNG tự pull
+# network = true                       # bắt buộc true
+# memory = "512m"
+# cpus = 1.0
+# pids_limit = 64
+# timeout_seconds = 300
+# allow_host = false                   # mode = "host" BẮT BUỘC đặt true, nếu không sẽ không khởi động
+#
+# Cảnh báo mức cao gửi THẲNG cho bạn, song song với báo cáo chuẩn hoá gửi Manager.
+# Để trống cả hai = không gửi cảnh báo trực tiếp (chỉ còn báo cáo trong phiên).
+# [security_scan]
+# alert_channel = "telegram"
+# alert_chat_id = "123456789"
 
 [web]
 enabled = true

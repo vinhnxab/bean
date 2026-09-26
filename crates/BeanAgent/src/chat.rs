@@ -27,6 +27,7 @@ use beanagent_core::{
     schedule_tools,
 };
 use beanagent_llm::{FakeProvider, LlmProvider};
+use beanagent_scan::{ScanScope, ScannerCmd, security_scan};
 use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
 };
@@ -284,6 +285,26 @@ pub(crate) async fn build_registry(
         registry
             .register(billing_read_cost(Arc::new(client), configured))
             .context("đăng ký tool billing thất bại")?;
+    }
+    // (M23) Domain quét bảo mật. Chỉ đăng ký khi `security_scan.enabled`; scope lấy từ
+    // `[[infra_scope]]` (rỗng ⇒ mọi lần quét bị từ chối ở tầng code, xem D14.1).
+    if config.security_scan.enabled {
+        let scope = ScanScope::from_config(&config.infra_scope);
+        if scope.is_empty() {
+            tracing::warn!(
+                "security_scan đang bật nhưng [[infra_scope]] rỗng — MỌI lần quét sẽ bị từ chối. \
+                 Thêm target vào BeanAgent.toml trước khi dùng."
+            );
+        }
+        // Sandbox RIÊNG cho scanner: khác hẳn `[security.sandbox]` của run_shell vì scanner
+        // bắt buộc phải có mạng để tới target (D14.3).
+        let scan_sandbox = Arc::new(Sandbox::new(
+            config.security_scan.sandbox.to_sandbox_config(),
+            config.agent.workspace.clone(),
+        ));
+        registry
+            .register(security_scan(scope, scan_sandbox, ScannerCmd::default()))
+            .context("đăng ký tool security_scan thất bại")?;
     }
     let mcp = McpRuntime::load(&config.mcp_servers, &mut registry).await;
     Ok(BuiltRegistry { registry, mcp })

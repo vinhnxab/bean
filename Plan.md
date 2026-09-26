@@ -193,10 +193,10 @@ Test: role finance-readonly gọi được billing-read, không gọi/không th�
 make check xanh.
 ```
 
-### M23 — Security-scan agent (Nhóm 2, quét trong scope) — CHỈ làm sau khi S1 đã vá
+### M23 — Security-scan agent (Nhóm 2, quét trong scope) — ✅ ĐÃ XONG
 
 ```
-[CHỜ xác nhận S1 đã vá và make check xanh trước khi bắt đầu milestone này.]
+[Xác nhận S1 đã vá (2026-09-26) và `infra_scope` rỗng = fail-closed. Xem `docs/decisions.md` D14.x.]
 
 Thêm role/agent con "security-scan" (tag infra-scan). Thêm [[infra_scope]] vào cấu hình, mọi
 tool quét (nmap/OpenVAS/Trivy qua MCP hoặc tool nội bộ) phải kiểm tra target nằm trong targets
@@ -252,12 +252,10 @@ xanh.
   cần xác nhận thêm.
 * **M18 (Discord) đã loại bỏ** (mục 5.0) — không phải câu hỏi mở nữa.
 
-Còn lại 1 điểm **cần chốt trước khi code M23** (không chặn M21/M22/M22a, đã xong):
-
-* **M23 (Security-scan) còn chờ chủ dự án xác nhận S1.** Mục 5 ghi *"CHỜ xác nhận S1 đã vá"*.
-  S1 **đã vá** (commit `9415c5d`, `make check` xanh, 13/13 test untrusted PASS) nên chốt chặn
-  về mặt kỹ thuật đã mở — nhưng vì đây là nhóm Nhóm 2 (quét chủ động) nên vẫn cần bạn xác nhận
-  bằng văn bản trước khi tôi code. M23 còn cần bạn cung cấp `[[infra_scope]]` (danh sách target
-  được phép quét) — không có danh sách này thì tính năng không thể chạy đúng.
+* **`[[infra_scope]]` đang RỖNG — cần bạn điền target thật khi muốn dùng.** Chủ dự án đã chốt
+  (2026-09-26) khởi đầu với scope rỗng: code + test đầy đủ, mọi lần quét bị từ chối ở tầng
+  code. Bỏ comment `[[infra_scope]]` trong `BeanAgent.example.toml` để mở.
 * **`GET /api/status` chưa hiện hạn mức per-role.** Muốn UI thấy "role này còn bao nhiêu hạn mức"
-  thì thêm endpoint đọc `usage_by_role` (không chặn M23).
+  thì thêm endpoint đọc `usage_by_role`.
+* **Cảnh báo mức cao M23 chưa nối vào `Router::notify`.** Đã có schema báo cáo + cấu hình
+  `alert_channel`/`alert_chat_id`, nhưng chưa có đường gọi thật. Xem `docs/known-issues.md`.

