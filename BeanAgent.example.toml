@@ -33,7 +33,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 4096
 
 [tools]
-enabled = ["files", "shell", "web", "memory", "skills", "schedule"]
+enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing"]
 
 [learning]
 enabled = true
@@ -71,6 +71,9 @@ tool_tags = ["infra-read"]
 [[roles]]
 name = "finance-readonly"
 tool_tags = ["billing-read"]
+# M22a — domain tài chính TÁCH BIỆT khỏi infra-*. `validate()` từ chối cấu hình
+# vừa cấp vừa cấm; thêm `infra-read`/`infra-scan` vào `tool_tags` sẽ không khởi động được.
+forbid_tags = ["infra-read", "infra-scan"]
 
 [[roles]]
 name = "developer"
@@ -91,6 +94,21 @@ forbid_tags = ["dev-write"]           # four-eyes: agent review không được 
 # name = "khach-hang-a"
 # workspace = "./workspace/khach-hang-a"
 
+
+# ---------------------------------------------------------------------------
+# M22a — Domain tài chính (READ-ONLY). Mặc định TẮT; khi bật mà thiếu `base_url` hoặc
+# biến credential thì tool chạy ở CHẾ ĐỘ STUB: không gọi mạng, trả thông báo rõ.
+#
+# Credential PHẢI là biến RIÊNG, quyền tối thiểu chỉ đọc billing — KHÔNG dùng lại
+# credential có quyền quản trị hạ tầng. `validate()` sẽ KHÔNG CHO KHỞI ĐỘNG nếu
+# `api_key_env` trùng với `llm.api_key_env`, `tools.web_search.api_key_env` hay
+# `telegram.token_env`.
+#
+# [billing]
+# enabled = true
+# api_key_env = "CLOUD_BILLING_READONLY_KEY"
+# base_url = "https://billing-api.noaa.gov/v1/cost"   # endpoint JSON trả chi phí
+# query_suffix = "?currency=USD"                      # tuỳ chọn, chỉ tham số truy vấn
 
 [tools.web_search]
 provider = "tavily"                  # tavily | brave | searxng

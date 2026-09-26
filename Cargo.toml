@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/BeanAgent",
+  "crates/beanagent-billing",
   "crates/beanagent-channels",
   "crates/beanagent-core",
   "crates/beanagent-llm",
@@ -41,6 +42,7 @@ todo = "deny"
 [workspace.dependencies]
 # --- crate nội bộ ---
 beanagent-types = { path = "crates/beanagent-types" }
+beanagent-billing = { path = "crates/beanagent-billing" }
 beanagent-llm = { path = "crates/beanagent-llm" }
 beanagent-security = { path = "crates/beanagent-security" }
 beanagent-tools = { path = "crates/beanagent-tools" }

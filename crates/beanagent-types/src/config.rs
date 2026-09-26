@@ -21,7 +21,15 @@ use crate::rbac::{NO_ACCESS_ROLE, RolePermissions};
 pub const DEFAULT_CONFIG_FILE: &str = "BeanAgent.toml";
 
 /// Nhóm tool hợp lệ cho `[tools] enabled` (agents.md mục 7.3).
-pub const KNOWN_TOOL_GROUPS: &[&str] = &["files", "shell", "web", "memory", "skills", "schedule"];
+pub const KNOWN_TOOL_GROUPS: &[&str] = &[
+    "files",
+    "shell",
+    "web",
+    "memory",
+    "skills",
+    "schedule",
+    BILLING_TOOL_GROUP,
+];
 
 /// Lỗi khi nạp/kiểm tra cấu hình.
 #[derive(Debug, thiserror::Error)]
@@ -119,6 +127,44 @@ impl WebSearchProvider {
     #[must_use]
     pub const fn requires_api_key(self) -> bool {
         !matches!(self, Self::Searxng)
+    }
+}
+
+/// Tên nhóm tool billing trong `[tools] enabled`.
+pub const BILLING_TOOL_GROUP: &str = "billing";
+
+/// Tag RBAC của domain tài chính (M22a).
+pub const BILLING_TAG: &str = "billing-read";
+
+/// `[billing]` — domain tài chính, read-only (M22a).
+///
+/// Tách biệt hoàn toàn khỏi domain `infra-*`: tool ở đây chỉ **đọc chi phí**, không đụng
+/// tới hạ tầng.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BillingConfig {
+    /// Bật tool đọc chi phí. Mặc định `false`.
+    pub enabled: bool,
+    /// Tên biến môi trường chứa credential billing.
+    ///
+    /// **Phải là biến riêng** — `validate()` từ chối nếu trùng với biến của LLM, web search
+    /// hay Telegram, vì credential có quyền quản trị hạ tầng không được dùng lại ở đây
+    /// (`Plan.md` mục 18, D13.2).
+    pub api_key_env: String,
+    /// Endpoint trả JSON chi phí. `None` ⇒ tool chạy ở **chế độ stub**, không gọi mạng.
+    pub base_url: Option<String>,
+    /// Gắn thêm tham số truy vấn vào `base_url` khi gọi (ví dụ `?period=30d`).
+    pub query_suffix: Option<String>,
+}
+
+impl Default for BillingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_key_env: "CLOUD_BILLING_API_KEY".to_string(),
+            base_url: None,
+            query_suffix: None,
+        }
     }
 }
 
@@ -485,6 +531,8 @@ pub struct Config {
     pub tools: ToolsConfig,
     /// `[[roles]]` — bảng role của RBAC (M21.2).
     pub roles: Vec<RoleConfig>,
+    /// `[billing]` — domain tài chính read-only (M22a).
+    pub billing: BillingConfig,
     /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
     /// ánh xạ tới `agent.workspace`.
     pub projects: Vec<ProjectConfig>,
@@ -587,6 +635,7 @@ impl Config {
     pub fn validate(&mut self) -> Result<(), ConfigError> {
         self.validate_core()?;
         self.validate_rbac()?;
+        self.validate_billing()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
         self.validate_paths()
@@ -728,6 +777,49 @@ impl Config {
             if self.role(role).is_none() {
                 return Err(invalid(format!(
                     "agent.user_roles[`{user}`] trỏ tới role `{role}` không tồn tại trong [[roles]]"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[billing]` (M22a).
+    ///
+    /// Trọng tâm là **tách credential**: `api_key_env` của billing phải là biến riêng, không
+    /// được trùng với biến của LLM / web search / Telegram. Đây là cách hiện thực hoá yêu cầu
+    /// "credential đọc billing phải riêng, quyền tối thiểu chỉ đọc billing" ở tầng code thay
+    /// vì chỉ dựa vào quy ước viết trong tài liệu (D13.2).
+    fn validate_billing(&self) -> Result<(), ConfigError> {
+        if !self.billing.enabled {
+            return Ok(());
+        }
+        if self.billing.api_key_env.trim().is_empty() {
+            return Err(invalid("[billing].api_key_env rỗng"));
+        }
+        // Endpoint chỉ lấy từ cấu hình, nhưng vẫn chặn scheme lạ để không biến `base_url`
+        // thành đường đọc file cục bộ nếu cấu hình bị sửa nhầm.
+        if let Some(base) = &self.billing.base_url {
+            validate_http_url("[billing].base_url", base)?;
+        }
+        if let Some(suffix) = &self.billing.query_suffix
+            && (suffix.contains("://") || suffix.contains('@'))
+        {
+            return Err(invalid(
+                "[billing].query_suffix phải chỉ là tham số truy vấn (vd `?period=30d`), không phải URL",
+            ));
+        }
+        let others: [(&str, &str); 3] = [
+            ("llm.api_key_env", &self.llm.api_key_env),
+            (
+                "tools.web_search.api_key_env",
+                &self.tools.web_search.api_key_env,
+            ),
+            ("telegram.token_env", &self.telegram.token_env),
+        ];
+        for (field, env) in others {
+            if env.trim() == self.billing.api_key_env.trim() {
+                return Err(invalid(format!(
+                    "[billing].api_key_env không được trùng với {field} (`{env}`): credential đọc billing phải RIÊNG, quyền tối thiểu chỉ đọc billing"
                 )));
             }
         }
@@ -1008,6 +1100,26 @@ impl Config {
             &self.telegram.token_env,
         )?;
         Ok(Some(token))
+    }
+
+    /// Đọc credential billing (M22a).
+    ///
+    /// Trả `None` khi billing tắt. Khi billing **bật** mà biến chưa được đặt thì trả lỗi
+    /// rõ ràng — không âm thầm chạy stub, vì người vận hành cần biết ngay là chưa có key
+    /// thay vì tưởng đã đọc được chi phí.
+    ///
+    /// # Errors
+    /// [`ConfigError::MissingEnv`] kể billing bật mà biến `api_key_env` thiếu/rỗng.
+    pub fn resolve_billing_key(&self) -> Result<Option<SecretString>, ConfigError> {
+        if !self.billing.enabled {
+            return Ok(None);
+        }
+        let key = read_required(
+            &|name: &str| std::env::var(name).ok(),
+            "billing.api_key_env",
+            &self.billing.api_key_env,
+        )?;
+        Ok(Some(key))
     }
 
     /// Read optional API key for `web_search` from biến môi trường được cấu hình.

@@ -21,6 +21,7 @@ default = ["ui"]
 ui = ["beanagent-web/ui"]
 
 [dependencies]
+beanagent-billing.workspace = true
 beanagent-llm.workspace = true
 beanagent-types.workspace = true
 anyhow.workspace = true

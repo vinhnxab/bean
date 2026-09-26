@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use beanagent_billing::{BillingClient, billing_read_cost};
 use beanagent_core::{
     Channel, Decision, Incoming, Router, RouterDeps, SqliteStore, SystemClock, memory_tools,
     schedule_tools,
@@ -265,6 +266,24 @@ pub(crate) async fn build_registry(
                 .register(tool)
                 .context("đăng ký tool scheduler thất bại")?;
         }
+    }
+    // (M22a) Domain tài chính read-only. Chỉ đăng ký khi `billing.enabled` **và** nhóm tool
+    // `billing` bật; credential đọc từ biến môi trường riêng (validate đã chặn dùng chung).
+    if config.billing.enabled && config.tools.enabled.iter().any(|g| g == "billing") {
+        let billing_key = config
+            .resolve_billing_key()
+            .context("đọc credential billing thất bại")?;
+        let client = BillingClient::new(&config.billing, billing_key);
+        let configured = client.is_configured();
+        if !configured {
+            tracing::warn!(
+                "billing đang bật nhưng thiếu [billing].base_url hoặc biến credential — \
+                 tool sẽ chạy ở chế độ stub, KHÔNG gọi được nhà cung cấp cloud"
+            );
+        }
+        registry
+            .register(billing_read_cost(Arc::new(client), configured))
+            .context("đăng ký tool billing thất bại")?;
     }
     let mcp = McpRuntime::load(&config.mcp_servers, &mut registry).await;
     Ok(BuiltRegistry { registry, mcp })

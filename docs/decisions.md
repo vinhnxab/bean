@@ -412,3 +412,33 @@ Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`g
   dữ liệu log SIEM/CVE là nguồn injection kinh điển (attacker ghi được vào log). Test
   `monitor_tool_result_is_wrapped_and_cannot_escape_the_block` dùng payload cố cài thẻ đóng để
   chứng minh nó bị escape và khối bọc không bị phá.
+
+## 13. Finance-readonly (D13.x — milestone M22a)
+
+* **D13.1 — Đi hướng GENERIC thay vì chọn hẳn AWS/Azure/GCP.** `Plan.md` M22a ghi *"chọn theo nhà
+  cung cấp cloud công ty đang dùng"* nhưng chưa chốt được nhà cung cấp. Hard-code một provider sẽ
+  phải viết lại khi đổi, nên tool lấy `base_url` + credential từ cấu hình. Đổi provider chỉ cần
+  sửa `BeanAgent.toml`, **không sửa/build lại binary** — đúng tinh thần kiến trúc A (một tiến
+  trình, cấu hình quyết định hành vi).
+
+* **D13.2 — Ràng buộc "credential phải riêng" kiểm ở TẦNG CODE, không chỉ bằng tài liệu.**
+  `Config::validate_billing()` **từ chối khởi động** nếu `billing.api_key_env` trùng với
+  `llm.api_key_env`, `tools.web_search.api_key_env` hay `telegram.token_env`. Lý do: yêu cầu M22a là
+  *"credential đọc billing PHẢI là API key/IAM role riêng, quyền tối thiểu chỉ đọc billing"* — nếu
+  chỉ ghi trong README thì một lần copy-paste config là đã vi phạm mà không ai bị chặn. Đây là
+  mẫu chung: kiểm ràng buộc bảo mật ở chỗ load cấu hình, không dựa vào kỷ luật vận hành.
+
+* **D13.3 — Chế độ STUB mặc định, không gọi mạng.** Chưa có `base_url` hoặc chưa có credential thì
+  tool trả thông báo nói rõ *"chưa cấu hình, đây là kết quả dự kiến chứ không phải lỗi"*, đồng thời
+  `description` của tool ghi *"HIỆN CHƯA CẤU HÌNH"*. Mục đích: người vận hành không bao giờ tưởng
+  đã đọc được chi phí thật, và `make check`/môi trường dev chạy được ngay mà không cần secret.
+  Khi bật billing mà thiếu key thì `resolve_billing_key()` báo lỗi rõ (không im lặng chạy stub).
+
+* **D13.4 — Rủi ro tài chính chặn bằng RBAC tag, không bằng xác nhận thủ công.** Tool là `Safe`
+  (chỉ đọc) nhưng mang tag `billing-read`, nên chỉ role `finance-readonly` thấy được. Cấu hình mẫu
+  khai báo `finance-readonly.forbid_tags = ["infra-read", "infra-scan"]` để tầng code chặn lẫn
+  domain (M22a yêu cầu 3), tái dùng đúng cơ chế `forbid_tags` đã có từ M21 thay vì thêm logic mới.
+
+* **D13.5 — Tool trong crate riêng `beanagent-billing`.** Giữ đúng nguyên tắc "domain tách biệt"
+  của M21–M24: billing không lẫn vào `beanagent-security` (đó là crate SSRF/sandbox) hay
+  `beanagent-tools` (đó là trait/registry). Thêm source ở M22a rẻ hơn nhiều so với dồn về sau.

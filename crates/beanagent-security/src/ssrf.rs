@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use url::{Host, Url};
 
@@ -197,6 +198,54 @@ impl SafeHttpClient {
         Ok(Self {
             client,
             max_body_bytes,
+        })
+    }
+
+    /// Tải một URL kèm header `Authorization: Bearer <token>` (M22a — billing read-only).
+    ///
+    /// Dùng cho endpoint billing vì **mọi** cloud provider đều xác thực kiểu bearer, và
+    /// endpoint lấy từ **cấu hình** chứ không phải do model sinh ra.
+    ///
+    /// Bất biến an toàn:
+    /// * URL vẫn qua đúng [`validate_url`] và resolver chống SSRF như [`Self::fetch`] — không
+    ///   có đường vòng nào bỏ qua được.
+    /// * `token` là [`SecretString`]; **không bao giờ** đưa vào `Display`/`Debug`/log. Nó chỉ
+    ///   sống trong header của request, và redirect cũng bị policy kiểm lại từng bước nên
+    ///   header không bị đưa sang origin khác một cách âm thầm (xem [`redirect_policy`]).
+    ///
+    /// # Errors
+    /// Như [`Self::fetch`].
+    pub async fn fetch_bearer(
+        &self,
+        raw_url: &str,
+        token: &SecretString,
+    ) -> Result<FetchedPage, SsrfError> {
+        let url = validate_url(raw_url)?;
+        let mut response = self
+            .client
+            .get(url)
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(map_request_error)?;
+        let final_url = response.url().clone();
+        validate_url(final_url.as_str())?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(SsrfError::HttpStatus {
+                status: status.as_u16(),
+            });
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = read_body_limited(&mut response, self.max_body_bytes).await?;
+        Ok(FetchedPage {
+            url: final_url.to_string(),
+            content_type,
+            body,
         })
     }
 }
