@@ -12,11 +12,13 @@ use beanagent_core::router::{Channel, Router, RouterDeps, RouterOptions};
 use beanagent_core::store::{MemoryStore, Store};
 use beanagent_core::{Decision, Incoming, RouterError};
 use beanagent_llm::{ChatRequest, FakeProvider, LlmError, LlmProvider};
-use beanagent_security::{AuditLog, CapWorkspace};
+use beanagent_scan::{ScanScope, ScannerCmd, security_scan};
+use beanagent_security::{AuditLog, CapWorkspace, Sandbox};
 use beanagent_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
+use beanagent_types::config::{SandboxConfig, SandboxMode, ScanScopeEntry, ScanTargetKind};
 use beanagent_types::{
-    Config, ConfirmOutcome, LlmDelta, LlmResponse, Outbound, OutboundKind, Risk, RunEvent, RunId,
-    SessionId, ToolCall, ToolSpec,
+    Alert, AlertSeverity, Config, ConfirmOutcome, LlmDelta, LlmResponse, Outbound, OutboundKind,
+    Risk, RunEvent, RunId, SessionId, ToolCall, ToolSpec,
 };
 use tokio::sync::{Notify, Semaphore, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -914,4 +916,150 @@ async fn stop_command_cancels_only_the_sender_session_in_shared_chat() {
 
     assert_eq!(wait_final(&mut events, &run_99).await, "xong");
     assert_eq!(router.active_run("telegram", "group-1"), None);
+}
+
+/// Router với cấu hình cảnh báo bật (M23).
+async fn router_with_alerts(store: Arc<MemoryStore>) -> (tempfile::TempDir, Arc<Router>) {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = Arc::new(CapWorkspace::open(temp.path().to_path_buf()).unwrap());
+    let registry = ToolRegistry::with_workspace(workspace);
+    let router = Arc::new(Router::new(RouterDeps {
+        config: config_with_alerts(),
+        store,
+        registry: Arc::new(registry),
+        llm: fake("x"),
+        audit: None,
+        skills_index: "demo".into(),
+        skills: None,
+    }));
+    (temp, router)
+}
+
+/// Tool `security_scan` thật phát ra mức `High` (script in cổng nhạy cảm đang mở).
+fn alerting_scan_tool() -> Arc<dyn Tool> {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("scan.sh");
+    std::fs::write(&script, "#!/bin/sh\necho '22/tcp open ssh'\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let sandbox = Arc::new(Sandbox::new(
+        SandboxConfig {
+            mode: SandboxMode::Host,
+            network: true,
+            timeout_seconds: 5,
+            ..SandboxConfig::default()
+        },
+        dir.path().to_path_buf(),
+    ));
+    let scope = ScanScope::from_config(&[ScanScopeEntry {
+        kind: ScanTargetKind::Cidr,
+        value: "192.0.2.0/24".into(),
+        label: "test".into(),
+    }]);
+    let tool = security_scan(
+        scope,
+        sandbox,
+        ScannerCmd {
+            program: script.to_string_lossy().into_owned(),
+            fixed_args: Vec::new(),
+        },
+    );
+    // Giữ thư mục tạm sống: script nằm trong đó, drop sớm sẽ làm tool không chạy được.
+    std::mem::forget(dir);
+    tool
+}
+
+// ---------------------------------------------------------------------------
+// M23 (K23) — Cảnh báo mức cao từ `security_scan` tới kênh chính qua `Router::notify`
+// ---------------------------------------------------------------------------
+
+/// Cấu hình có bật cảnh báo trực tiếp tới kênh `test`.
+fn config_with_alerts() -> Config {
+    let mut config = config();
+    config.security_scan.enabled = true;
+    config.security_scan.alert_channel = "test".into();
+    config.security_scan.alert_chat_id = "chat-alert".into();
+    config
+}
+
+/// M23: cảnh báo phải **thật sự** tới kênh chính, không chỉ nằm trong tool result.
+#[tokio::test]
+async fn security_scan_high_alert_reaches_the_main_channel() {
+    let store = Arc::new(MemoryStore::new());
+    let (_temp, router) = router_with_alerts(store.clone()).await;
+    let channel = Arc::new(FlakyChannel {
+        fail_first: false,
+        calls: AtomicUsize::new(0),
+        sent: Mutex::new(Vec::new()),
+    });
+    router.register_channel(channel.clone()).unwrap();
+
+    // Gọi tool `security_scan` THẬT (phát hiện cổng 22) với `ToolCtx` mang sink của Router —
+    // khẳng định đúng chuỗi: tool -> AlertSink -> Router::notify -> channel.
+    let tool = alerting_scan_tool();
+    let sink = router.alert_sink().expect("phải có sink khi đã cấu hình");
+    let workspace = CapWorkspace::open(std::env::temp_dir()).unwrap();
+    let ctx = ToolCtx::for_project(
+        Arc::new(workspace),
+        SessionId::new(1),
+        CancellationToken::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .with_alerts(sink);
+    tool.call(&ctx, serde_json::json!({ "target": "192.0.2.5" }))
+        .await
+        .expect("quét phải chạy được");
+
+    let sent = channel.sent.lock().unwrap();
+    assert_eq!(sent.len(), 1, "phải gửi đúng 1 cảnh báo");
+    let out = sent.first().expect("có cảnh báo");
+    assert_eq!(out.kind, OutboundKind::Notification);
+    assert!(out.text.contains("Cảnh báo quét bảo mật"), "{}", out.text);
+    assert!(out.text.contains("cổng nhạy cảm 22"), "{}", out.text);
+    // Tin phải có `message_id` thật (adapter/UI cần id để hiển thị).
+    assert!(out.message_id > 0, "message_id phải có thật trong DB");
+}
+
+/// Chưa cấu hình `alert_channel`/`alert_chat_id` ⇒ không có sink (không gửi im lặng).
+#[tokio::test]
+async fn alert_sink_is_none_when_not_configured() {
+    let store = Arc::new(MemoryStore::new());
+    let (_temp, router) =
+        router_with(store.clone(), fake("x"), vec![], RouterOptions::default()).await;
+    assert!(
+        router.alert_sink().is_none(),
+        "không cấu hình thì không được tạo sink (tránh gửi tin rác)"
+    );
+}
+
+/// Cảnh báo gửi lỗi phải rơi vào **outbox** chứ không mất (không mất tin cảnh báo an ninh).
+#[tokio::test]
+async fn failed_alert_goes_to_outbox_instead_of_being_lost() {
+    let store = Arc::new(MemoryStore::new());
+    let (_temp, router) = router_with_alerts(store.clone()).await;
+    // CHƯA đăng ký channel ⇒ `notify` không tìm thấy adapter ⇒ phải enqueue outbox.
+    router
+        .alert_sink()
+        .expect("phải có sink")
+        .send_alert(&Alert {
+            severity: AlertSeverity::High,
+            title: "Cảnh báo quét bảo mật".into(),
+            summary: "tóm tắt".into(),
+            risks: vec!["rủi ro".into()],
+        })
+        .await
+        .unwrap();
+
+    let due = store
+        .due_outbox("2999-01-01T00:00:00.000000Z", 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        due.len(),
+        1,
+        "cảnh báo gửi lỗi phải được lưu outbox để thử lại"
+    );
+    assert_eq!(due.first().expect("có entry").channel, "test");
 }

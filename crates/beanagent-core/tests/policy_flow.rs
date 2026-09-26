@@ -168,6 +168,7 @@ async fn turn_with(
         skills_index: "",
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
 }

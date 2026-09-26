@@ -178,3 +178,41 @@ pub enum OutboundKind {
     /// Câu trả lời đã lưu của một run.
     AgentReply,
 }
+
+/// Mức nghiêm trọng của một cảnh báo (M23).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertSeverity {
+    /// Thông tin, không cần hành động.
+    Low,
+    /// Cần xem nhưng không gấp.
+    Medium,
+    /// Cần người quản trị xem **ngay**.
+    High,
+}
+
+impl AlertSeverity {
+    /// Cảnh báo mức cao có đáng gửi thẳng cho kênh chính không?
+    ///
+    /// `Plan.md` M23 yêu cầu cảnh báo mức cao gửi **thẳng** cho chủ dự án, song song với
+    /// báo cáo chuẩn hoá gửi Manager. Mức thấp/trung bình chỉ nằm trong báo cáo.
+    #[must_use]
+    pub const fn needs_direct_alert(self) -> bool {
+        matches!(self, Self::High)
+    }
+}
+
+/// Cảnh báo chủ động gửi **thẳng** cho kênh chính, tách khỏi báo cáo gửi Manager (M23).
+///
+/// Tuần tự hoá được (ràng buộc `Plan.md` mục 4.1) để sẵn sàng cho kiến trúc B.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alert {
+    /// Mức nghiêm trọng.
+    pub severity: AlertSeverity,
+    /// Tiêu đề ngắn, ví dụ "Cảnh báo quét bảo mật".
+    pub title: String,
+    /// Tóm tắt một dòng cho người đọc nhanh.
+    pub summary: String,
+    /// Các rủi ro chi tiết.
+    pub risks: Vec<String>,
+}

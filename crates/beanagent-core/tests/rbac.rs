@@ -223,6 +223,7 @@ async fn run_once(
         skills_index: "",
         permissions: perms,
         project,
+        alerts: None,
     })
     .await
     .unwrap();
@@ -368,6 +369,7 @@ async fn qa_cannot_see_or_call_dev_write_tool() {
         skills_index: "",
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
     .unwrap();
@@ -447,6 +449,7 @@ async fn two_projects_do_not_mix_memory_md() {
             skills_index: "",
             permissions: &perms,
             project,
+            alerts: None,
         })
         .await
         .unwrap();

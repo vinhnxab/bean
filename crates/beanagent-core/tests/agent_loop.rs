@@ -308,6 +308,7 @@ async fn turn(
         skills_index: "",
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
 }
@@ -448,6 +449,7 @@ async fn streaming_deltas_are_emitted_and_assembled_into_tool_call() {
         skills_index: "",
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
     .unwrap();
@@ -846,6 +848,7 @@ async fn system_prompt_is_sent_once_via_system_field() {
         skills_index: "",
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
     .unwrap();

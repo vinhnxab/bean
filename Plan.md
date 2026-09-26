@@ -257,5 +257,6 @@ xanh.
   code. Bỏ comment `[[infra_scope]]` trong `BeanAgent.example.toml` để mở.
 * **`GET /api/status` chưa hiện hạn mức per-role.** Muốn UI thấy "role này còn bao nhiêu hạn mức"
   thì thêm endpoint đọc `usage_by_role`.
-* **Cảnh báo mức cao M23 chưa nối vào `Router::notify`.** Đã có schema báo cáo + cấu hình
-  `alert_channel`/`alert_chat_id`, nhưng chưa có đường gọi thật. Xem `docs/known-issues.md`.
+* **Cảnh báo mức cao M23 đã nối xong** (2026-09-26, đóng K23): `AlertSink` → `ToolCtx.alerts`
+  → `Router::notify`. Cảnh báo `High` tới kênh chính, lỗi gửi rơi vào outbox. Cần `docker
+  pull instrumentisto/nmap` + bỏ comment `[[infra_scope]]` mới dùng được thật.

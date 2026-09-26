@@ -4,13 +4,12 @@ use std::sync::Arc;
 
 use beanagent_security::{Sandbox, SandboxError};
 use beanagent_tools::{Tool, ToolCtx, ToolError};
-use beanagent_types::{Risk, ToolSpec};
+use beanagent_types::config::INFRA_SCAN_TAG;
+use beanagent_types::{Alert, AlertSeverity, Risk, ToolSpec};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::scope::ScanScope;
-
-pub use beanagent_types::config::INFRA_SCAN_TAG;
 
 /// Số mục cổng tối đa mỗi lần quét (chống quét quá rộng gây nghẽn).
 const MAX_PORTS: usize = 64;
@@ -32,18 +31,6 @@ pub struct SecurityScanParams {
     pub ports: Option<String>,
 }
 
-/// Mức nghiêm trọng của báo cáo quét.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScanSeverity {
-    /// Không thấy cổng nào mở.
-    Low,
-    /// Có cổng mở nhưng không thuộc danh sách nhạy cảm.
-    Medium,
-    /// Có **cổng nhạy cảm đang mở** — cần người quản trị xem ngay.
-    High,
-}
-
 /// Báo cáo chuẩn hoá mà Manager đọc (schema cố định, `Plan.md` mục 3).
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanReport {
@@ -54,7 +41,7 @@ pub struct ScanReport {
     /// Các rủi ro phát hiện được.
     pub risks: Vec<String>,
     /// Mức nghiêm trọng.
-    pub severity: ScanSeverity,
+    pub severity: AlertSeverity,
 }
 
 /// Các cổng mở ra luôn được coi là rủi ro mức cao.
@@ -163,7 +150,7 @@ fn build_report(target: &str, label: &str, output: &str) -> ScanReport {
         .collect();
     let (severity, risks) = if !sensitive.is_empty() {
         (
-            ScanSeverity::High,
+            AlertSeverity::High,
             sensitive
                 .iter()
                 .map(|port| format!("cổng nhạy cảm {port} đang mở"))
@@ -171,7 +158,7 @@ fn build_report(target: &str, label: &str, output: &str) -> ScanReport {
         )
     } else if !open.is_empty() {
         (
-            ScanSeverity::Medium,
+            AlertSeverity::Medium,
             vec![format!(
                 "{} cổng đang mở: {}",
                 open.len(),
@@ -182,7 +169,7 @@ fn build_report(target: &str, label: &str, output: &str) -> ScanReport {
             )],
         )
     } else {
-        (ScanSeverity::Low, Vec::new())
+        (AlertSeverity::Low, Vec::new())
     };
     let target_desc = if label.is_empty() {
         target.to_string()
@@ -192,9 +179,9 @@ fn build_report(target: &str, label: &str, output: &str) -> ScanReport {
     ScanReport {
         status: "ok",
         summary: match severity {
-            ScanSeverity::High => format!("quét {target_desc}: có cổng nhạy cảm đang mở"),
-            ScanSeverity::Medium => format!("quét {target_desc}: có cổng đang mở"),
-            ScanSeverity::Low => format!("quét {target_desc}: không thấy cổng mở"),
+            AlertSeverity::High => format!("quét {target_desc}: có cổng nhạy cảm đang mở"),
+            AlertSeverity::Medium => format!("quét {target_desc}: có cổng đang mở"),
+            AlertSeverity::Low => format!("quét {target_desc}: không thấy cổng mở"),
         },
         risks,
         severity,
@@ -299,7 +286,7 @@ impl Tool for ScanTool {
                 status: "refused",
                 summary: format!("không quét {} — ngoài phạm vi đã khai báo", params.target),
                 risks: Vec::new(),
-                severity: ScanSeverity::Low,
+                severity: AlertSeverity::Low,
             };
             let message = format!(
                 "TỪ CHỐI: không quét được — {reason}. Chỉ được quét target đã khai báo trong \
@@ -345,6 +332,23 @@ impl Tool for ScanTool {
         }
         let label = self.scope.label_for(&params.target).unwrap_or_default();
         let report = build_report(&params.target, label, &output);
+
+        // (4) Cảnh báo mức cao gửi THẲNG cho kênh chính, song song với báo cáo chuẩn hoá
+        //     (M23). Chỉ mức `High`; lỗi gửi chỉ ghi log, không làm hỏng tool (mục 6).
+        if report.severity.needs_direct_alert()
+            && let Some(sink) = ctx.alerts.as_ref()
+        {
+            let alert = Alert {
+                severity: report.severity,
+                title: "Cảnh báo quét bảo mật".to_string(),
+                summary: report.summary.clone(),
+                risks: report.risks.clone(),
+            };
+            if let Err(error) = sink.send_alert(&alert).await {
+                tracing::warn!(error = %error, "gửi cảnh báo quét bảo mật thất bại");
+            }
+        }
+
         let rendered = format!("{}\n{output}", render_json(&report));
         Ok(wrap(&rendered))
     }

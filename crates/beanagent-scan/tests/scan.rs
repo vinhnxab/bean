@@ -24,9 +24,9 @@ use std::sync::atomic::AtomicBool;
 
 use beanagent_scan::{ScanScope, ScannerCmd, security_scan};
 use beanagent_security::{CapWorkspace, Policy, PolicyDecision, Sandbox, SessionPolicy};
-use beanagent_tools::{Tool, ToolCtx};
+use beanagent_tools::{AlertSink, Tool, ToolCtx};
 use beanagent_types::config::{SandboxConfig, SandboxMode, ScanScopeEntry, ScanTargetKind};
-use beanagent_types::{RolePermissions, SessionId};
+use beanagent_types::{Alert, AlertSeverity, RolePermissions, SessionId};
 use tokio_util::sync::CancellationToken;
 
 /// Một entry `[[infra_scope]]`.
@@ -405,4 +405,179 @@ fn spec_schema_is_generated_from_the_params_struct() {
         schema["additionalProperties"], false,
         "phải chặn tham số thừa (deny_unknown_fields)"
     );
+}
+
+// ---------------------------------------------------------------------------
+// M23 — Cảnh báo mức cao gửi THẲNG cho kênh chính (K23)
+// ---------------------------------------------------------------------------
+
+/// `AlertSink` ghi lại cảnh báo để test khẳng định được **có gửi** và **gửi mấy lần**.
+struct RecordingSink {
+    alerts: std::sync::Mutex<Vec<Alert>>,
+    fail: bool,
+}
+
+#[async_trait::async_trait]
+impl AlertSink for RecordingSink {
+    async fn send_alert(&self, alert: &Alert) -> Result<(), String> {
+        if self.fail {
+            return Err("mô phỏng kênh chính đang hỏng".into());
+        }
+        self.alerts.lock().expect("khoá alerts").push(alert.clone());
+        Ok(())
+    }
+}
+
+impl RecordingSink {
+    fn new(fail: bool) -> Arc<Self> {
+        Arc::new(Self {
+            alerts: std::sync::Mutex::new(Vec::new()),
+            fail,
+        })
+    }
+
+    fn count(&self) -> usize {
+        self.alerts.lock().expect("khoá alerts").len()
+    }
+}
+
+/// Script in ra một cổng **nhạy cảm** đang mở ⇒ báo cáo mức `High` ⇒ phải cảnh báo.
+fn sensitive_scan_tool() -> (
+    Arc<dyn Tool>,
+    Arc<RecordingSink>,
+    ToolCtx,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::tempdir().expect("thư mục test");
+    let marker = dir.path().join("argv.txt");
+    let (sandbox, _script) = marker_sandbox(&marker);
+    let noisy = dir.path().join("scan.sh");
+    std::fs::write(&noisy, "#!/bin/sh\necho '22/tcp open ssh'\n").expect("ghi script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&noisy, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod script");
+    }
+    let sink = RecordingSink::new(false);
+    let ctx = test_ctx().with_alerts(sink.clone());
+    let tool = security_scan(
+        sample_scope(),
+        sandbox,
+        ScannerCmd {
+            program: noisy.to_string_lossy().into_owned(),
+            fixed_args: Vec::new(),
+        },
+    );
+    // Giữ `dir` sống: nếu TempDir bị drop, script `scan.sh` cùng thư mục mẹ bị xoá và
+    // tool sẽ báo lỗi khởi động — đúng cái lỗi test này từng mắc phải.
+    (tool, sink, ctx, dir)
+}
+
+/// M23: phát hiện cổng nhạy cảm ⇒ **gửi cảnh báo thẳng**, song song với báo cáo chuẩn hoá.
+#[tokio::test]
+async fn high_severity_scan_sends_direct_alert() {
+    let (tool, sink, ctx, _keep) = sensitive_scan_tool();
+
+    let out = tool
+        .call(&ctx, serde_json::json!({ "target": "192.0.2.5" }))
+        .await
+        .expect("quét phải chạy được");
+
+    assert_eq!(sink.count(), 1, "mức cao phải gửi đúng 1 cảnh báo");
+    let alert = sink
+        .alerts
+        .lock()
+        .expect("khoá")
+        .first()
+        .cloned()
+        .expect("có cảnh báo");
+    assert_eq!(alert.severity, AlertSeverity::High);
+    assert!(
+        alert.risks.iter().any(|risk| risk.contains("22")),
+        "cảnh báo phải nêu cổng nhạy cảm: {alert:?}"
+    );
+    // Báo cáo chuẩn hoá vẫn nằm trong tool result cho Manager — không thay thế nhau.
+    assert!(out.contains("\"status\":\"ok\""), "{out}");
+}
+
+/// Mức thấp/trung bình **không** gửi cảnh báo trực tiếp (chỉ nằm trong báo cáo).
+#[tokio::test]
+async fn low_severity_scan_does_not_send_alert() {
+    let dir = tempfile::tempdir().expect("thư mục test");
+    let (sandbox, _script) = marker_sandbox(&dir.path().join("argv.txt"));
+    let quiet = dir.path().join("scan.sh");
+    std::fs::write(&quiet, "#!/bin/sh\necho 'No open ports found.'\n").expect("ghi script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&quiet, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod script");
+    }
+    let sink = RecordingSink::new(false);
+    let ctx = test_ctx().with_alerts(sink.clone());
+    let tool = security_scan(
+        sample_scope(),
+        sandbox,
+        ScannerCmd {
+            program: quiet.to_string_lossy().into_owned(),
+            fixed_args: Vec::new(),
+        },
+    );
+    let _keep = dir;
+
+    tool.call(&ctx, serde_json::json!({ "target": "192.0.2.5" }))
+        .await
+        .expect("quét phải chạy được");
+
+    assert_eq!(
+        sink.count(),
+        0,
+        "mức thấp KHÔNG được gửi cảnh báo trực tiếp"
+    );
+}
+
+/// Kênh chính hỏng **không được** làm hỏng tool (mục 6: lỗi tool không hỏng vòng lặp).
+#[tokio::test]
+async fn alert_failure_does_not_break_the_tool() {
+    let dir = tempfile::tempdir().expect("thư mục test");
+    let (sandbox, _script) = marker_sandbox(&dir.path().join("argv.txt"));
+    let noisy = dir.path().join("scan.sh");
+    std::fs::write(&noisy, "#!/bin/sh\necho '22/tcp open ssh'\n").expect("ghi script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&noisy, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod script");
+    }
+    let sink = RecordingSink::new(true);
+    let ctx = test_ctx().with_alerts(sink.clone());
+    let tool = security_scan(
+        sample_scope(),
+        sandbox,
+        ScannerCmd {
+            program: noisy.to_string_lossy().into_owned(),
+            fixed_args: Vec::new(),
+        },
+    );
+    let _keep = dir;
+
+    let out = tool
+        .call(&ctx, serde_json::json!({ "target": "192.0.2.5" }))
+        .await
+        .expect("lỗi gửi cảnh báo KHÔNG được làm tool lỗi");
+
+    assert!(out.contains("\"status\":\"ok\""), "{out}");
+}
+
+/// Không cấu hình `alerts` (CLI/test) ⇒ tool vẫn chạy, chỉ không gửi đi đâu.
+#[tokio::test]
+async fn scan_works_without_alert_channel() {
+    let (tool, _sink, _ctx, _keep) = sensitive_scan_tool();
+    // Dùng `test_ctx()` (không `with_alerts`) — không có kênh nào để gửi.
+    let out = tool
+        .call(&test_ctx(), serde_json::json!({ "target": "192.0.2.5" }))
+        .await
+        .expect("không có kênh cảnh báo vẫn phải quét được");
+    assert!(out.contains("\"status\":\"ok\""), "{out}");
 }

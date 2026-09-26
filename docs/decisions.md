@@ -462,3 +462,22 @@ Chủ dự án đã **mở khóa M23** (S1 đã vá, `make check` xanh) và ch�
 **Bằng chứng:** `crates/beanagent-scan/tests/scan.rs` (12 test) + `crates/beanagent-scan/src/scope.rs`
 (6 unit test) + `crates/beanagent-types/tests/config.rs` (9 test M23). Test dùng sandbox chế
 độ host với script tự tạo, nên **không cần Docker, không cần mạng, không cần image scanner**.
+
+### D14.9 — Cảnh báo qua trait `AlertSink`, không tham chiếu `Router` (đóng K23)
+
+M23 yêu cầu cảnh báo mức cao gửi **thẳng** cho chủ dự án, song song với báo cáo chuẩn hoá
+gửi Manager. Ban đầu phần này mới chỉ có schema báo cáo + cấu hình, **chưa có đường gọi thật** —
+một khoảng trống dễ khiến người dùng tin là đã có cảnh báo Telegram khi thực ra chưa (K23).
+
+| # | Quyết định | Vì sao |
+|---|-----------|--------|
+| D14.9 | Trait `AlertSink` đặt ở `beanagent-tools` (cùng `ToolCtx`), **không** đặt ở `beanagent-core` | `beanagent-scan` cần gửi cảnh báo, mà `beanagent-core` lại điều phối tool. Nếu tham chiếu thẳng `Router` sẽ thành phụ thuộc vòng. M23 chỉ cần một trait một hàm, không cần cả Router. |
+| D14.10 | `RouterAlertSink` bọc quanh `Router::notify` | Giữ **một** đường gửi duy nhất ⇒ lỗi gửi rơi vào outbox và được thử lại, không mất tin cảnh báo an ninh (không tạo đường gửi "song song" riêng). |
+| D14.11 | Chỉ mức `High` mới gửi cảnh báo trực tiếp; `Low`/`Medium` chỉ nằm trong báo cáo | `Plan.md` M23 nói *"cảnh báo mức cao"*. Gửi mọi lần quét sẽ biến kênh chính thành spam và dạy bạn bỏ qua nó. Quy tắc nằm ở `AlertSeverity::needs_direct_alert()` — một chỗ duy nhất. |
+| D14.12 | Lỗi gửi cảnh báo chỉ ghi log, **không** làm hỏng tool | Mục 6: lỗi tool không được làm hỏng vòng lặp. Kênh chính hỏng không phải lý do để bỏ dở lần quét. |
+
+**Bằng chứng:** `crates/beanagent-core/tests/router.rs` — `security_scan_high_alert_reaches_the_main_channel`
+gọi tool `security_scan` **thật** (script in `22/tcp open ssh`) rồi khẳng định cảnh báo tới
+đúng channel, có `message_id` thật trong DB; `failed_alert_goes_to_outbox_instead_of_being_lost`;
+`alert_sink_is_none_when_not_configured`. Cộng 4 test ở `crates/beanagent-scan/tests/scan.rs`
+cho ranh giới mức nghiêm trọng và việc lỗi gửi không làm hỏng tool.

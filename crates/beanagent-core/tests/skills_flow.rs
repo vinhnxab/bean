@@ -146,6 +146,7 @@ async fn fake_provider_loads_matching_skill_before_answering() {
         skills_index: &skills_index,
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
     .unwrap();

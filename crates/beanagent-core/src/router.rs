@@ -12,9 +12,10 @@ use anyhow::Result as AnyResult;
 use beanagent_llm::LlmProvider;
 use beanagent_security::{AuditLog, SessionPolicy};
 use beanagent_skills::{SkillCatalog, SkillDraftDecision, SkillError};
-use beanagent_tools::{ToolRegistry, truncate_chars};
+use beanagent_tools::{AlertSink, ToolRegistry, truncate_chars};
 use beanagent_types::{
-    Config, ConfirmId, ConfirmOutcome, Outbound, Risk, RolePermissions, RunEvent, RunId, SessionId,
+    Alert, Config, ConfirmId, ConfirmOutcome, Outbound, OutboundKind, Risk, RolePermissions,
+    RunEvent, RunId, SessionId,
 };
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -673,6 +674,7 @@ impl Router {
             skills_index: &skills_index,
             permissions: &permissions,
             project: &project,
+            alerts: self.alert_sink(),
         })
         .await;
         match result {
@@ -1325,6 +1327,25 @@ impl Router {
         Ok(())
     }
 
+    /// Dựng [`AlertSink`] gửi cảnh báo M23 tới kênh chính, hoặc `None` nếu chưa cấu hình.
+    ///
+    /// Trả `None` khi `alert_channel`/`alert_chat_id` trống — đó là cấu hình "không gửi
+    /// cảnh báo trực tiếp", và `Config::validate` đã chặn trạng thái bật nửa chừng.
+    #[must_use]
+    pub fn alert_sink(&self) -> Option<Arc<dyn AlertSink>> {
+        let config = read_lock(&self.inner.config).ok()?;
+        let channel = config.security_scan.alert_channel.trim();
+        let chat_id = config.security_scan.alert_chat_id.trim();
+        if channel.is_empty() || chat_id.is_empty() {
+            return None;
+        }
+        Some(Arc::new(RouterAlertSink {
+            router: Arc::new(self.clone()),
+            channel: channel.to_string(),
+            chat_id: chat_id.to_string(),
+        }))
+    }
+
     /// Khởi động worker retry outbox đúng một lần.
     pub fn start_outbox_worker(self: &Arc<Self>) -> Result<(), RouterError> {
         if self
@@ -1648,5 +1669,63 @@ fn router_error_code(error: &RouterError) -> &'static str {
         RouterError::NoRuntime => "no_runtime",
         RouterError::StatePoisoned => "router_state",
         RouterError::Random(_) => "random_unavailable",
+    }
+}
+
+/// Cài bản [`AlertSink`] bọc quanh [`Router::notify`] (M23).
+///
+/// Giữ **một** đường gửi: mọi cảnh báo đi qua `notify` nên lỗi vẫn rơi vào outbox và được
+/// thử lại — không mất tin cảnh báo an ninh.
+struct RouterAlertSink {
+    router: Arc<Router>,
+    channel: String,
+    chat_id: String,
+}
+
+#[async_trait::async_trait]
+impl AlertSink for RouterAlertSink {
+    async fn send_alert(&self, alert: &Alert) -> Result<(), String> {
+        let text = if alert.risks.is_empty() {
+            format!("{}\n{}", alert.title, alert.summary)
+        } else {
+            format!(
+                "{}\n{}\n- {}",
+                alert.title,
+                alert.summary,
+                alert.risks.join("\n- ")
+            )
+        };
+        // Ghi vào lịch sử trước để `message_id` có thật (adapter hiển thị và UI cần id này).
+        let session = self
+            .router
+            .inner
+            .store
+            .ensure_session(&self.channel, &self.chat_id, &alert.title)
+            .await
+            .map_err(|error| error.to_string())?;
+        let message_id = self
+            .router
+            .inner
+            .store
+            .append(
+                session,
+                beanagent_types::Message::assistant(Some(text.clone()), Vec::new()),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        self.router
+            .notify(
+                &self.channel,
+                &self.chat_id,
+                Outbound {
+                    session_id: session,
+                    message_id,
+                    text,
+                    kind: OutboundKind::Notification,
+                    action: None,
+                },
+            )
+            .await
+            .map_err(|error| error.to_string())
     }
 }

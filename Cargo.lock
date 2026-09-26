@@ -352,6 +352,7 @@ dependencies = [
  "async-trait",
  "beanagent-llm",
  "beanagent-memory",
+ "beanagent-scan",
  "beanagent-security",
  "beanagent-skills",
  "beanagent-tools",

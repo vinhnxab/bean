@@ -13,7 +13,7 @@ use beanagent_memory::{
 use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
 use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 use beanagent_security::untrusted::contains_untrusted_block;
-use beanagent_tools::{ToolCtx, ToolError};
+use beanagent_tools::{AlertSink, ToolCtx, ToolError};
 use beanagent_types::{
     Config, LlmDelta, LlmResponse, Message, Risk, RolePermissions, StopReason, ToolCall, ToolSpec,
     Usage,
@@ -133,6 +133,8 @@ pub struct RunTurnArgs<'a> {
     pub permissions: &'a RolePermissions,
     /// Project profile của lượt này (M21.1); quyết định workspace và file bộ nhớ nạp.
     pub project: &'a str,
+    /// Kênh gửi cảnh báo chủ động cho tool (M23); `None` ⇒ tool chỉ trả cảnh báo trong kết quả.
+    pub alerts: Option<Arc<dyn AlertSink>>,
 }
 
 /// Lý do run kết thúc bình thường.
@@ -185,6 +187,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         skills_index,
         permissions,
         project,
+        alerts,
     } = args;
     // (M5/D8.10) System prompt chỉ đi qua `ChatRequest.system` — **không** nhân bản nó
     // thành message `User` (M3 từng làm vậy: tốn token gấp đôi cho phần system và dễ
@@ -427,6 +430,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 cancel: io.cancel_token().clone(),
                 untrusted_seen: untrusted_seen.clone(),
                 project: project.to_string(),
+                alerts: alerts.clone(),
             };
 
             let args_hash = hash_args(&call.args);

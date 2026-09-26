@@ -31,7 +31,7 @@ pub mod untrusted;
 pub mod workspace;
 
 pub use beanagent_types::{Risk, ToolSpec};
-pub use ctx::ToolCtx;
+pub use ctx::{AlertSink, ToolCtx};
 pub use error::ToolError;
 pub use registry::ToolRegistry;
 pub use text::{compile_regex, truncate_chars};

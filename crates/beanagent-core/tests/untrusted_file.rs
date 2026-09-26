@@ -167,6 +167,7 @@ async fn turn(
         skills_index: "",
         permissions: &perms,
         project: "default",
+        alerts: None,
     })
     .await
 }

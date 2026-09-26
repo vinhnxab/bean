@@ -23,4 +23,7 @@ mod scope;
 mod tool;
 
 pub use scope::ScanScope;
-pub use tool::{INFRA_SCAN_TAG, ScanReport, ScanSeverity, ScannerCmd, security_scan};
+pub use tool::{ScanReport, ScannerCmd, security_scan};
+
+// Re-export để test và adapter dùng chung đúng một kiểu cảnh báo (M23).
+pub use beanagent_types::config::INFRA_SCAN_TAG;

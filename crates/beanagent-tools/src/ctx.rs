@@ -8,10 +8,26 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use async_trait::async_trait;
+use beanagent_types::Alert;
 use tokio_util::sync::CancellationToken;
 
 use crate::workspace::WorkspaceFs;
 use beanagent_types::SessionId;
+
+/// Kênh gửi cảnh báo chủ động cho tool (M23).
+///
+/// Đặt **trait** ở đây (không phải ở `beanagent-core`) để tool không phụ thuộc Router:
+/// `beanagent-scan` cần gửi cảnh báo, nhưng Router lại điều phối tool — nếu tham chiếu thẳng
+/// `Router` sẽ thành phụ thuộc vòng. M23 chỉ cần một trait nhỏ, không cần toàn bộ Router.
+///
+/// Cài bản thật trong `beanagent-core` bọc quanh [`Router::notify`], nên lỗi gửi vẫn đi qua
+/// outbox như mọi outbound khác (không mất tin).
+#[async_trait]
+pub trait AlertSink: Send + Sync {
+    /// Gửi cảnh báo tới kênh chính. `Err` chỉ để ghi log — **không** được làm hỏng tool.
+    async fn send_alert(&self, alert: &Alert) -> Result<(), String>;
+}
 
 /// Project profile dùng khi lượt không khai báo project (M21.1) — trùng
 /// [`beanagent_types::config::DEFAULT_PROJECT`], chỉ lặp lại chuỗi để tránh phụ thuộc vòng.
@@ -35,6 +51,8 @@ pub struct ToolCtx {
     /// Không dùng để quyết định quyền: quyền đã được Router resolve trước và truyền xuống
     /// dưới dạng [`beanagent_types::RolePermissions`] (ràng buộc `Plan.md` mục 4.3).
     pub project: String,
+    /// Kênh gửi cảnh báo chủ động (M23); `None` ⇒ tool chỉ trả cảnh báo trong kết quả.
+    pub alerts: Option<Arc<dyn AlertSink>>,
 }
 
 impl ToolCtx {
@@ -52,6 +70,14 @@ impl ToolCtx {
             cancel,
             untrusted_seen,
             project: DEFAULT_PROJECT.to_string(),
+            alerts: None,
         }
+    }
+
+    /// Gắn kênh gửi cảnh báo (M23).
+    #[must_use]
+    pub fn with_alerts(mut self, alerts: Arc<dyn AlertSink>) -> Self {
+        self.alerts = Some(alerts);
+        self
     }
 }
