@@ -125,7 +125,7 @@ impl ToolRegistry {
     pub fn specs_visible_to(&self, perms: &RolePermissions) -> Vec<ToolSpec> {
         self.tools
             .values()
-            .filter(|tool| perms.allows(tool.required_tags()))
+            .filter(|tool| perms.allows(&tool.required_tags()))
             .map(|tool| tool.spec())
             .collect()
     }
@@ -138,7 +138,7 @@ impl ToolRegistry {
     pub fn allows(&self, name: &str, perms: &RolePermissions) -> bool {
         self.tools
             .get(name)
-            .is_some_and(|tool| perms.allows(tool.required_tags()))
+            .is_some_and(|tool| perms.allows(&tool.required_tags()))
     }
 
     /// Tên các tool đã đăng ký (sort).

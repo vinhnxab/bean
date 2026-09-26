@@ -462,6 +462,13 @@ pub struct McpServerConfig {
     /// `true` ⇒ tool của server hạ xuống `Safe`; mặc định `false` ⇒ `Confirm`.
     #[serde(default)]
     pub trust: bool,
+    /// Tag RBAC mà role phải giữ để thấy/cọp tool của server này (M22).
+    ///
+    /// Rỗng (mặc định) ⇒ mọi role đã được cấp quyền đều thấy, giữ hành vi cũ. Đặt
+    /// `["infra-read"]` cho server SIEM/CVE để chỉ role giám sát mới thấy (xem
+    /// `docs/decisions.md` D12.1).
+    #[serde(default)]
+    pub tool_tags: Vec<String>,
 }
 
 /// Cấu hình gốc của BeanAgent (`BeanAgent.toml`).

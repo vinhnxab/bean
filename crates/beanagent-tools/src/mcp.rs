@@ -340,6 +340,16 @@ impl McpRuntime {
             }
         };
         let mut registered = 0;
+        // (M22) Tag RBAC áp cho **mọi** tool của server này: khai báo ở `[[mcp_servers]]`
+        // thay vì gắn tay từng tool (server MCP không tiết lộ tag của tool).
+        let required_tags = Arc::new(
+            server
+                .tool_tags
+                .iter()
+                .map(|tag| tag.trim().to_string())
+                .filter(|tag| !tag.is_empty())
+                .collect::<Vec<String>>(),
+        );
         for definition in definitions {
             let parameters = definition.schema_as_json_value();
             let remote_name = definition.name.into_owned();
@@ -357,6 +367,7 @@ impl McpRuntime {
                 remote_name,
                 spec: ToolSpec::new(exposed_name, description, parameters),
                 trusted: server.trust,
+                required_tags: required_tags.clone(),
             });
             match registry.register(tool) {
                 Ok(()) => registered += 1,
@@ -391,6 +402,11 @@ struct McpTool {
     remote_name: String,
     spec: ToolSpec,
     trusted: bool,
+    /// Tag RBAC kế thừa từ `[[mcp_servers]].tool_tags` (M22).
+    ///
+    /// Dùng `Vec<String>` (không phải `&'static str`) vì tag đến từ file cấu hình chạy
+    /// được, không phải literal trong mã.
+    required_tags: Arc<Vec<String>>,
 }
 
 const fn risk_for_trust(trusted: bool) -> Risk {
@@ -447,6 +463,13 @@ impl Tool for McpTool {
     /// ngay cả khi `call` trả `Err` trước khi tới chỗ bọc.
     fn marks_untrusted(&self) -> bool {
         true
+    }
+
+    /// (M22) Tag RBAC kế thừa từ `[[mcp_servers]].tool_tags`.
+    ///
+    /// Rỗng ⇒ mọi role đã cấp quyền đều thấy (giữ hành vi cũ cho server không gắn tag).
+    fn required_tags(&self) -> Vec<&str> {
+        self.required_tags.iter().map(String::as_str).collect()
     }
 
     async fn call(&self, ctx: &ToolCtx, args: serde_json::Value) -> Result<String, ToolError> {

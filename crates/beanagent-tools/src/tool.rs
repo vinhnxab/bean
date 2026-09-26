@@ -57,11 +57,14 @@ pub trait Tool: Send + Sync {
     /// Ngữ nghĩa giữa nhiều tag là **OR**: role giữ một tag là đủ. Nhờ vậy `run_shell` có thể
     /// mang cả `dev-write` lẫn `infra-scan` mà vẫn chặn được `qa` (four-eyes).
     ///
+    /// Trả `Vec<&str>` (sở hữu) thay vì `&[&str]` vì tag có thể đến từ **cấu hình chạy
+    /// được** (ví dụ `[[mcp_servers]].tool_tags`) chứ không chỉ literal trong mã.
+    ///
     /// Việc kiểm tra thực hiện ở **một** chỗ duy nhất: Router resolve
     /// [`RolePermissions`] rồi lọc danh sách tool **trước** khi dựng request tới LLM
     /// (M21.5) — không có logic RBAC nào nằm trong tool/role.
-    fn required_tags(&self) -> &[&str] {
-        &[]
+    fn required_tags(&self) -> Vec<&str> {
+        Vec::new()
     }
 
     /// Thực thi tool.

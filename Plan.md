@@ -159,7 +159,10 @@ Test bắt buộc:
 make check xanh.
 ```
 
-### M22 — Monitor agent (Nhóm 1, giám sát read-only)
+### M22 — Monitor agent (Nhóm 1, giám sát read-only) — ✅ **ĐÃ XONG 2026-09-26**
+
+Bằng chứng: `crates/beanagent-mcp-test-server/tests/mcp_client.rs` (3 test M22, dùng MCP stdio thật).
+Quyết định thiết kế: `docs/decisions.md` mục 12 (D12.1–D12.5).
 
 ```
 Thêm role/agent con "monitor" (tag infra-read). Kết nối MCP server cho SIEM/log (Wazuh/ELK) và
@@ -244,11 +247,11 @@ xanh.
   cần xác nhận thêm.
 * **M18 (Discord) đã loại bỏ** (mục 5.0) — không phải câu hỏi mở nữa.
 
-Còn lại 1 điểm **cần chốt trước khi code M22** (không chặn M21, đã xong):
+Còn lại 1 điểm **cần chốt trước khi code M22a** (không chặn M21/M22, đã xong):
 
 * **M22 chưa có tag `infra-read` nào trên tool thật.** M21 mới chỉ dựng cơ chế RBAC; các tool
   `infra-read`/`billing-read`/`marketing-*` sẽ được gắn tag ở đúng milestone của nó (M22/M22a/
   M24). Trước M22, role `it-security` và `finance-readonly` trong cấu hình mẫu **chưa có tool
   nào để gọi** — đó là hệ quả đúng của thiết kế tag, không phải lỗi.
 * **Danh sách tool per-role trong UI chưa có.** `GET /api/status` mới chỉ báo tổng token; muốn
-  hiện "role này còn bao nhiêu hạn mức" thì thêm endpoint đọc `usage_by_role` (không chặn M22).
+  hiện "role này còn bao nhiêu hạn mức" thì thêm endpoint đọc `usage_by_role` (không chặn M22a).

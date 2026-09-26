@@ -103,8 +103,8 @@ impl Tool for TagTool {
     fn risk(&self, _args: &serde_json::Value) -> Risk {
         Risk::Safe
     }
-    fn required_tags(&self) -> &[&str] {
-        &self.tags
+    fn required_tags(&self) -> Vec<&str> {
+        self.tags.clone()
     }
     async fn call(&self, _ctx: &ToolCtx, _args: serde_json::Value) -> Result<String, ToolError> {
         Ok("ok".into())

@@ -385,3 +385,30 @@ Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`g
   A không nhìn/ghi được file của project B — giữ nguyên tắc path jail mục 15.1. Tên project lạ
   bị `RouterError::InvalidProject` (fail-closed, không rơi về project khác). Bằng chứng:
   `two_projects_do_not_mix_memory_md`.
+
+## 12. Monitor agent qua MCP (D12.x — milestone M22)
+
+* **D12.1 — Tag RBAC khai báo ở cấp **server** (`[[mcp_servers]].tool_tags`), không gắn tay từng
+  tool.** MCP protocol không tiết lộ tag của tool (`tools/list` chỉ có name/description/schema),
+  nên không thể gắn tag chi tiết từng tool như built-in. Chọn gắn ở cấp server vì đó là ranh giới
+  tin cậy thực sự: **toàn bộ** tool của một server SIEM/CVE đều là dữ liệu giám sát hạ tầng. Rủi ro
+  của cách này là **thô** (một server có cả tool đọc lẫn tool ghi thì cả hai cùng tag) — chấp nhận
+  được vì server không tin cậy đã phải bọc container (mục 16) và `trust = false` vẫn hỏi xác nhận.
+
+* **D12.2 — `tool_tags` rỗng ⇒ giữ nguyên hành vi cũ.** Server không khai báo tag thì mọi role đã
+  cấp quyền đều thấy, đúng như trước M21. Nhờ vậy thêm MCP server mới không vô tình khoá người
+  dùng. Bằng chứng: `mcp_server_without_tags_keeps_legacy_visibility`.
+
+* **D12.3 — `Tool::required_tags()` trả `Vec<&str>` sở hữu, không phải `&[&str]`.** Tag có thể đến
+  từ **file cấu hình chạy được** (`[[mcp_servers]].tool_tags`) chứ không chỉ literal trong mã, nên
+  không thể yêu cầu `&'static str` mà không rò bộ nhớ. Chi phí: một `Vec` nhỏ mỗi lần lọc; lọc
+  tool chỉ xảy ra mỗi bước của vòng lặp nên không đáng kể.
+
+* **D12.4 — M22 chỉ làm read-only, KHÔNG thêm tool quét chủ động.** Đúng như `Plan.md` yêu cầu.
+  Việc quét trong `[[infra_scope]]` thuộc M23, kèm chốt chặn target ở tầng code và cảnh báo mức
+  cao gửi thẳng cho admin. M22 **không** mở đường cho `nmap`/`trivy`.
+
+* **D12.5 — Kết quả MCP tiếp tục bọc `<untrusted_content>` không đổi.** Đây là điểm quan trọng:
+  dữ liệu log SIEM/CVE là nguồn injection kinh điển (attacker ghi được vào log). Test
+  `monitor_tool_result_is_wrapped_and_cannot_escape_the_block` dùng payload cố cài thẻ đóng để
+  chứng minh nó bị escape và khối bọc không bị phá.

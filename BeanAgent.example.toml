@@ -61,6 +61,13 @@ tool_tags = ["*"]
 name = "it-security"
 tool_tags = ["infra-read", "infra-scan"]
 
+# M22 — Monitor: chỉ đọc log/CVE qua MCP. Gắn server SIEM/CVE với
+# `tool_tags = ["infra-read"]` trong `[[mcp_servers]]` để chỉ role này (và it-security)
+# thấy được tool đó. M22 KHÔNG thêm tool quét chủ động — chỉ đọc.
+[[roles]]
+name = "monitor"
+tool_tags = ["infra-read"]
+
 [[roles]]
 name = "finance-readonly"
 tool_tags = ["billing-read"]
@@ -123,3 +130,16 @@ command = "/usr/local/bin/some-mcp-server" # executable; không phải dòng she
 args = []
 # env = { APP_MODE = "production" }     # chỉ biến không bí mật; không ghi token vào config
 trust = false                           # false => Confirm; true chỉ sau khi audit server
+# M22 — tag RBAC áp cho MỌI tool của server này. Bỏ trống (mặc định) ⇒ mọi role đã
+# cấp quyền đều thấy, giữ hành vi cũ. Đặt ["infra-read"] cho server SIEM/CVE để chỉ
+# role `monitor` / `it-security` thấy tool đó.
+tool_tags = []
+
+# M22 — ví dụ server SIEM/CVE chỉ đọc. `command` có thể là `docker run …` để bọc
+# server không tin cậy trong container (khuyến nghị cho MCP server công khai).
+# [[mcp_servers]]
+# name = "siem"
+# command = "docker"
+# args = ["run", "--rm", "-i", "--network", "none", "ghcr.io/example/siem-mcp:1.0"]
+# trust = false
+# tool_tags = ["infra-read"]

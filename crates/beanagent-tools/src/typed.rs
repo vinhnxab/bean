@@ -221,8 +221,8 @@ where
         self.marks_untrusted
     }
 
-    fn required_tags(&self) -> &[&str] {
-        &self.required_tags
+    fn required_tags(&self) -> Vec<&str> {
+        self.required_tags.to_vec()
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
