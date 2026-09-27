@@ -19,8 +19,12 @@ use sha2::{Digest, Sha256};
 
 /// Tên file chứa hash mật khẩu.
 pub const AUTH_FILE: &str = "auth.toml";
-/// User web một người dùng của v1.
-pub const WEB_USER: &str = "web:admin";
+/// Định danh web mặc định khi `[web].user_id` không được khai báo.
+///
+/// Re-export từ `beanagent-types` để crate web và crate khác dùng **cùng một** hằng
+/// số — trước đây hằng số này nằm ở đây nên không thể làm mặc định serde trong
+/// `Config` mà không tạo phụ thuộc vòng.
+pub const WEB_USER: &str = beanagent_types::config::DEFAULT_WEB_USER;
 /// Số byte token phiên đăng nhập.
 pub const SESSION_TOKEN_BYTES: usize = 32;
 
@@ -116,7 +120,7 @@ impl AuthService {
             inner: Arc::new(AuthInner {
                 password_hash,
                 store,
-                user_id: WEB_USER.to_string(),
+                user_id: config.web.user_id.clone(),
                 session_ttl: Duration::from_secs(
                     u64::from(config.web.session_ttl_hours).saturating_mul(3600),
                 ),

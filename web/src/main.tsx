@@ -1,4 +1,7 @@
 import "@fontsource-variable/inter";
+// Mono tự host (không CDN) — chỉ dùng cho định danh máy sinh ra: run_id,
+// confirm_id, timestamp, tên tool. Số đo dùng `tnum` của Inter (không mono).
+import "@fontsource-variable/jetbrains-mono";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

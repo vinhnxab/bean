@@ -39,4 +39,35 @@ export const testServer = setupServer(
   http.get("/api/skills/drafts", () => HttpResponse.json({ drafts: [] })),
   http.get("/api/tasks", () => HttpResponse.json({ tasks: [] })),
   http.get("/api/audit", () => HttpResponse.json({ entries: [] })),
+  // `/api/agents` mặc định trả danh sách rỗng: phần lớn test chỉ cần "không lỗi".
+  // Test HUB dùng `testServer.use(...)` để ghi đè theo từng kịch bản.
+  http.get("/api/agents", () => HttpResponse.json({ agents: [], viewer_role: "admin" })),
 );
+
+/**
+ * Dữ liệu agent cho test — phản ánh đúng hệ trong `BeanAgent.example.toml`:
+ * Manager điều phối, QA review (four-eyes), Security-scan có đường cảnh báo riêng.
+ */
+export const FULL_AGENTS = [
+  { role: "developer", status: "working", summary: "đang thực hiện lượt", risks: [], relation: "manages" },
+  { role: "qa", status: "idle", summary: "không có việc nào đang chạy", risks: [], relation: "reviews" },
+  {
+    role: "marketing",
+    status: "awaiting_you",
+    summary: "1 hành động đang chờ bạn duyệt",
+    risks: ["marketing_publish"],
+    relation: "manages",
+  },
+  {
+    role: "security-scan",
+    status: "idle",
+    summary: "không có việc nào đang chạy",
+    risks: [],
+    relation: "alerts_directly",
+  },
+] as const;
+
+/** Fixture `/api/agents` cho một tập agent tuỳ ý. */
+export function agentsHandler(agents: unknown[], viewerRole = "admin") {
+  return http.get("/api/agents", () => HttpResponse.json({ agents, viewer_role: viewerRole }));
+}

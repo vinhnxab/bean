@@ -19,6 +19,8 @@ export const queryKeys = {
   tasks: ["tasks"] as const,
   audit: ["audit"] as const,
   status: ["status"] as const,
+  /** Báo cáo agent đã lọc RBAC ở server — không lọc lại ở client. */
+  agents: ["agents"] as const,
 };
 
 export function useAuth() {

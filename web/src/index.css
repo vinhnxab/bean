@@ -6,7 +6,87 @@
    được import trong src/main.tsx. */
 @theme {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  /* JetBrains Mono dành RIÊNG cho định danh máy sinh ra: run_id, confirm_id,
+     timestamp, tên tool, đường dẫn. KHÔNG dùng cho nhãn/đầu đề/trạng thái —
+     số đo căn cột dùng `tnum` của Inter (xem .hub-num bên dưới). */
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
 }
+
+/* ==========================================================================
+   Token HUB — "Bảng vẽ kỹ thuật trên bàn thép"
+   --------------------------------------------------------------------------
+   Mặt thép lạnh (cool graphite-blue), đường kẻ mảnh 1px, bo góc nhỏ, KHÔNG
+   shadow. Ba màu trạng thái là NGỮ NGHĨA, mỗi màu đúng một việc:
+     --live  = đang chạy
+     --need  = đang chờ bạn duyệt
+     --alert = nguy hiểm / bị chặn
+   Không dùng màu để trang trí.
+   ========================================================================== */
+:root {
+  /* 4 token cấu trúc (trung tính) */
+  --surface: #edf1f3; /* mặt bàn */
+  --surface-raised: #f6f9fa; /* khối nổi 1 bậc: sơ đồ, hàng chờ duyệt */
+  --ink: #111a1f; /* chữ chính */
+  --ink-muted: #4e5c63; /* chữ phụ — 5.7:1 trên --surface, đạt WCAG AA */
+  --rule: #c9d4d9; /* đường kẻ 1px, thay cho shadow */
+
+  /* 3 token trạng thái (màu) */
+  --live: #0e7c86;
+  --need: #a05a00; /* 4.6:1 trên --surface */
+  --alert: #a32b2b; /* 4.8:1 trên --surface */
+
+  /* Biến chuẩn hoá mà shadcn/ui đọc. Gán từ token HUB để primitive của
+     shadcn (button/badge/dialog/...) tự động đúng hệ màu này — không phải
+     mỗi chỗ tự chọn lại. */
+  --background: var(--surface);
+  --foreground: var(--ink);
+  --card: var(--surface-raised);
+  --card-foreground: var(--ink);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--surface);
+  --secondary: var(--surface-raised);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--surface-raised);
+  --accent-foreground: var(--ink);
+  --destructive: var(--alert);
+  --destructive-foreground: #f6f9fa;
+  --border: var(--rule);
+  --input: var(--rule);
+  --ring: var(--live);
+
+  --radius: 5px; /* bo góc NHỎ — phép nhận diện bản vẽ kỹ thuật, khác thẻ SaaS */
+
+  /* Token trạng thái HUB, để utility class của Tailwind v4 sinh ra
+     `bg-live`, `text-need`, `border-need`… mà không cần cấu hình lần nữa. */
+  --color-live: var(--live);
+  --color-need: var(--need);
+  --color-alert: var(--alert);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-rule: var(--rule);
+}
+
+.dark {
+  --surface: #0d1216; /* xanh đen có sắc, KHÔNG phải đen tuyệt đối */
+  --surface-raised: #141c22;
+  --ink: #e6edf1;
+  --ink-muted: #8fa3ad; /* 7.4:1 trên --surface */
+  --rule: #26333a;
+
+  /* Giảm bão hoà ở dark để không chói: bản neon trên nền tối gây mỏi mắt và
+     biến bảng thành "phòng điều hành" — đúng khuôn mẫu cần tránh. */
+  --live: #3fb6c0;
+  --need: #e0a24a;
+  --alert: #e0705a;
+}
+
+@custom-variant dark (&:is(.dark *));
 
 /* Giao diện tối/sáng theo hệ thống (agents.md mục 12.1). */
 @layer base {
@@ -14,12 +94,48 @@
     color-scheme: light dark;
   }
   body {
-    @apply bg-white text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    @apply antialiased;
+    background-color: var(--surface);
+    color: var(--ink);
+  }
+  /* Focus luôn nhìn thấy được bằng bàn phím — không bao giờ `outline: none` mà
+     không thay bằng thứ tương đương. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 3px;
   }
 }
 
 @layer components {
   .field-input {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950;
+    @apply w-full px-3 py-2 text-sm outline-none transition;
+    background-color: var(--surface-raised);
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+  }
+  .field-input:focus-visible {
+    border-color: var(--live);
+  }
+
+  /* Số đo căn cột: dùng chữ số tabular của Inter thay vì nhảy sang font mono.
+     Phép phân biệt có chủ đích: mono dành cho *định danh máy sinh ra*
+     (run_id, tên tool), còn *số đo* chỉ cần các chữ số thẳng hàng. */
+  .hub-num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Tôn trọng `prefers-reduced-motion`: tắt mọi animation không thiết yếu.
+   Đặt ở cuối để đè lên mọi rule animation của shadcn/Tailwind. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

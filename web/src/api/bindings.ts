@@ -1,3 +1,7 @@
+export type { AgentListResponse } from "./generated/AgentListResponse";
+export type { AgentRelationDto } from "./generated/AgentRelationDto";
+export type { AgentReportDto } from "./generated/AgentReportDto";
+export type { AgentStatusDto } from "./generated/AgentStatusDto";
 export type { ApiError } from "./generated/ApiError";
 export type { AuditEntryDto } from "./generated/AuditEntryDto";
 export type { AuditListResponse } from "./generated/AuditListResponse";

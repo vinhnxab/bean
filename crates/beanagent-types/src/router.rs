@@ -102,6 +102,12 @@ pub enum RunEvent {
         allow_session_option: bool,
         /// Số giây được chờ trước khi thành DENY.
         timeout_seconds: u32,
+        /// Role của agent đang chờ duyệt; `None` khi RBAC tắt.
+        ///
+        /// Mang kèm từ lúc phát sự kiện (không phải tra lại ở tầng web) để HUB
+        /// gắn đúng agent cho hành động đang chờ, kể cả khi người dùng mới mở
+        /// app giữa chừng và chỉ nhận `Sync` chứ không có sự kiện nào.
+        role: Option<String>,
     },
     /// Một confirm đã được phân giải đúng một lần.
     ConfirmResolved {
@@ -215,4 +221,69 @@ pub struct Alert {
     pub summary: String,
     /// Các rủi ro chi tiết.
     pub risks: Vec<String>,
+}
+
+/// Trạng thái sống của một agent, **chỉ tính từ tín hiệu thật** trong Router.
+///
+/// Mỗi biến thể ánh xạ tới một nguồn quan sát được, không phải suy đoán:
+///
+/// * [`Self::Working`] — role đang có ít nhất một run active (Router `active`).
+/// * [`Self::AwaitingYou`] — role đang có confirm chờ trả lời (Router `confirms`).
+///   Đây là trạng thái cần **người dùng hành động**, nên nó được ưu tiên cao hơn
+///   `Working` trong [`AgentReport::status`] — một agent vừa chạy vừa chờ duyệt
+///   phải hiện "chờ bạn", vì đó là việc cần làm ngay.
+/// * [`Self::Idle`] — không run nào, không confirm nào.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStatus {
+    /// Không có việc nào đang chạy.
+    Idle,
+    /// Đang thực hiện lượt.
+    Working,
+    /// Đang chờ người dùng duyệt hành động.
+    AwaitingYou,
+}
+
+/// Quan hệ kiến trúc giữa các node trong sơ đồ HUB.
+///
+/// Đây là **hằng kiến trúc**, không phải dữ liệu runtime: nó mô tả cách hệ agent
+/// được cấu hình, và UI vẽ nó thành hình học (nét liền / nét đôi / nét đứt) để
+/// người dùng thấy quan hệ trước khi đọc chữ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRelation {
+    /// Manager điều phối agent con.
+    Manages,
+    /// Quan hệ four-eyes: agent này review công việc của agent kia và **không
+    /// tự duyệt** (`qa` không có tag `dev-write` — ràng buộc `Plan.md` M21.6).
+    Reviews,
+    /// Cảnh báo mức cao đi **thẳng** tới người quản trị, không qua Manager
+    /// (D14.11). Đây là kênh đặc biệt, vì vậy UI vẽ nét đứt tách khỏi phần còn lại.
+    AlertsDirectly,
+}
+
+/// Báo cáo chuẩn hoá về một agent, đúng hợp đồng `{status, summary, risks}`.
+///
+/// # Vì sao có loại này
+///
+/// Manager **không** được đọc dữ liệu thô của agent con. Thay vì đẩy lịch sử
+/// tool, kết quả tool hay log ra dashboard, mỗi agent tự **chuẩn hoá** việc nó
+/// đang làm thành đúng ba trường này. UI chỉ biết đọc báo cáo, không biết đọc
+/// dữ liệu thô — điều này giữ nguyên nguyên tắc đã đặt ra khi thiết kế
+/// Bean-Manager thay vì phá nó chỉ vì cần một dashboard.
+///
+/// `risks` dùng **cùng kiểu `Vec<String>` với [`Alert::risks`]** để không tồn
+/// tại hai từ vựng song song cho "rủi ro".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentReport {
+    /// Tên role, khớp `[[roles]].name` trong cấu hình.
+    pub role: String,
+    /// Trạng thái sống, suy ra từ Router.
+    pub status: AgentStatus,
+    /// Một dòng mô tả việc đang làm, đủ để quyết định có cần mở chi tiết không.
+    pub summary: String,
+    /// Rủi ro đang mở; rỗng khi không có gì cần cảnh báo.
+    pub risks: Vec<String>,
+    /// Quan hệ với Manager, để UI vẽ đúng hình học.
+    pub relation: AgentRelation,
 }

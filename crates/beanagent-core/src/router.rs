@@ -14,8 +14,8 @@ use beanagent_security::{AuditLog, SessionPolicy};
 use beanagent_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use beanagent_tools::{AlertSink, ToolRegistry, truncate_chars};
 use beanagent_types::{
-    Alert, Config, ConfirmId, ConfirmOutcome, Outbound, OutboundKind, Risk, RolePermissions,
-    RunEvent, RunId, SessionId,
+    AgentReport, AgentStatus, Alert, Config, ConfirmId, ConfirmOutcome, NO_ACCESS_ROLE, Outbound,
+    OutboundKind, Risk, RolePermissions, RunEvent, RunId, SessionId,
 };
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -28,6 +28,8 @@ use crate::store::{Store, StoreError};
 const DEFAULT_EVENT_CAPACITY: usize = 256;
 const OUTBOX_BATCH_SIZE: usize = 50;
 const PREVIEW_CHARS: usize = 2_000;
+/// Số lượng tối đa ghi trong `summary` của `AgentReport` (mục đích chỉ là dòng tóm tắt).
+const MAX_SUMMARY_COUNT: usize = 9;
 
 /// Adapter nhận input và gửi output; không chứa logic agent.
 #[async_trait::async_trait]
@@ -232,6 +234,8 @@ pub struct RunningInfo {
     pub run_id: RunId,
     /// Session của run.
     pub session_id: SessionId,
+    /// Role sở hữu run; `None` khi RBAC tắt.
+    pub role: Option<String>,
 }
 
 /// Confirm đang chờ, dùng để đồng bộ sau reconnect.
@@ -251,6 +255,8 @@ pub struct PendingConfirmInfo {
     pub allow_session_option: bool,
     /// Timeout còn lại/được yêu cầu, tính bằng giây.
     pub timeout_seconds: u32,
+    /// Role của agent đang chờ duyệt; `None` khi RBAC tắt.
+    pub role: Option<String>,
 }
 
 /// Snapshot atomically đọc từ Router state.
@@ -276,6 +282,12 @@ struct QueuedRun {
     cancel: CancellationToken,
     /// `Some` khi run do scheduler gọi; interactive run là `None`.
     background_allowed_tools: Option<Arc<HashSet<String>>>,
+    /// Role đã resolve khi run được xếp hàng; `None` khi RBAC tắt.
+    ///
+    /// Mang theo bản thân job (thay vì resolve lại lúc `finish`) để khi run kế tiếp
+    /// được kích hoạt, `ActiveRun` nhận đúng role mà lúc xếp hàng đã quyết định —
+    /// không phụ thuộc cấu hình có bị sửa giữa đường.
+    role: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -283,6 +295,9 @@ struct ActiveRun {
     channel: String,
     chat_id: String,
     cancel: CancellationToken,
+    /// Role đã resolve cho run này (M21.3) — để HUB quy đổi "đang chạy" về đúng
+    /// agent thay vì chỉ biết có run. `None` khi RBAC tắt.
+    role: Option<String>,
 }
 
 #[derive(Debug)]
@@ -294,6 +309,8 @@ struct PendingConfirm {
     risk: Risk,
     allow_session_option: bool,
     timeout_seconds: u32,
+    /// Role sở hữu run đang chờ duyệt; dùng để HUB gắn hàng đời duyệt về đúng agent.
+    role: Option<String>,
     sender: oneshot::Sender<Confirmation>,
 }
 
@@ -466,6 +483,7 @@ impl Router {
         self.enqueue(QueuedRun {
             run_id: run_id.clone(),
             session_id: session,
+            role: self.current_role(&incoming),
             incoming,
             cancel: CancellationToken::new(),
             background_allowed_tools: None,
@@ -493,6 +511,7 @@ impl Router {
         self.enqueue(QueuedRun {
             run_id: run_id.clone(),
             session_id: session,
+            role: self.current_role(&incoming),
             incoming,
             cancel: CancellationToken::new(),
             background_allowed_tools: Some(Arc::new(allowed_tools.into_iter().collect())),
@@ -584,6 +603,7 @@ impl Router {
                         channel: queued.incoming.channel.clone(),
                         chat_id: queued.incoming.chat_id.clone(),
                         cancel: queued.cancel.clone(),
+                        role: queued.role.clone(),
                     },
                 );
                 (true, None)
@@ -608,6 +628,24 @@ impl Router {
             router.execute(queued.clone()).await;
             router.finish(&queued.run_id, queued.session_id);
         });
+    }
+
+    /// Tên role hiển thị cho một user, dùng để gắn run/confirm về đúng agent.
+    ///
+    /// `None` khi RBAC tắt (`permissions_for` trả `unrestricted` với role `default`)
+    /// — khi đó không có "agent con" nào để quy và HUB sẽ bỏ qua trạng thái theo agent,
+    /// chỉ hiện phần Manager. Cố tình **không** trả `no-access`/`default` để tránh rò
+    /// tên role nội bộ ra ngoài, và không ép đọc `RwLock` khi đang giữ khoá khác.
+    fn current_role(&self, incoming: &Incoming) -> Option<String> {
+        let config = read_lock(&self.inner.config).ok()?;
+        if !config.rbac_enabled() {
+            return None;
+        }
+        let role = config.permissions_for(&incoming.user_id).role;
+        if role == NO_ACCESS_ROLE || role == "default" {
+            return None;
+        }
+        Some(role)
     }
 
     async fn execute(&self, queued: QueuedRun) {
@@ -886,6 +924,7 @@ impl Router {
                         channel: next.incoming.channel.clone(),
                         chat_id: next.incoming.chat_id.clone(),
                         cancel: next.cancel.clone(),
+                        role: next.role.clone(),
                     },
                 );
             }
@@ -926,8 +965,8 @@ impl Router {
         };
         let running = state
             .active
-            .keys()
-            .map(|run_id| RunningInfo {
+            .iter()
+            .map(|(run_id, active)| RunningInfo {
                 run_id: run_id.clone(),
                 session_id: state
                     .queues
@@ -936,6 +975,7 @@ impl Router {
                         (queue.active.as_ref() == Some(run_id)).then_some(*session)
                     })
                     .unwrap_or_else(|| SessionId::new(0)),
+                role: active.role.clone(),
             })
             .collect();
         let pending_confirms = state
@@ -949,12 +989,89 @@ impl Router {
                 risk: pending.risk,
                 allow_session_option: pending.allow_session_option,
                 timeout_seconds: pending.timeout_seconds,
+                role: pending.role.clone(),
             })
             .collect();
         RouterSnapshot {
             running,
             pending_confirms,
         }
+    }
+
+    /// Báo cáo chuẩn hoá `{status, summary, risks}` cho từng agent con.
+    ///
+    /// # Vì sao suy ra ở đây, không để UI tự đoán
+    ///
+    /// `status` chỉ được tính từ **tín hiệu quan sát được** trong `state`:
+    /// có run `active` thì `Working`, có confirm chờ thì `AwaitingYou`, còn lại
+    /// `Idle`. UI **không** được tự suy luận từ `running`/`pending_confirms` — nếu
+    /// để client tự chấm điểm, mỗi client có thể ra một kết luận khác nhau và
+    /// bộ lọc RBAC phía server trở nên vô nghĩa.
+    ///
+    /// `summary` là **văn bản tĩnh theo trạng thái**, không phải dữ liệu thô của
+    /// agent: đúng nguyên tắc "Manager không đọc dữ liệu thô của agent con".
+    /// `risks` chỉ liệt kê hành động đang chờ người dùng duyệt, vì đó là rủi ro
+    /// duy nhất mà HUB được phép nhắc.
+    ///
+    /// Danh sách role lấy từ `[[roles]]` — cấu hình là nguồn sự thật duy nhất về
+    /// "hệ này gồm những ai", nên thêm/bớt agent là một thay đổi cấu hình, không
+    /// phải sửa code UI.
+    #[must_use]
+    pub fn agent_reports(&self) -> Vec<AgentReport> {
+        let config = match read_lock(&self.inner.config) {
+            Ok(config) => config.clone(),
+            Err(_) => return Vec::new(),
+        };
+        let snapshot = self.snapshot();
+        config
+            .roles
+            .iter()
+            .map(|role| {
+                let name = role.name.clone();
+                let waiting = snapshot
+                    .pending_confirms
+                    .iter()
+                    .filter(|pending| pending.role.as_deref() == Some(name.as_str()))
+                    .count();
+                let working = snapshot
+                    .running
+                    .iter()
+                    .filter(|run| run.role.as_deref() == Some(name.as_str()))
+                    .count();
+                // `AwaitingYou` thắng `Working`: việc cần người dùng làm ngay phải
+                // hiện trước việc đang tự chạy.
+                let (status, summary) = if waiting > 0 {
+                    (
+                        AgentStatus::AwaitingYou,
+                        format!(
+                            "{} hành động đang chờ bạn duyệt",
+                            waiting.min(MAX_SUMMARY_COUNT)
+                        ),
+                    )
+                } else if working > 0 {
+                    (AgentStatus::Working, "đang thực hiện lượt".to_string())
+                } else {
+                    (AgentStatus::Idle, "không có việc nào đang chạy".to_string())
+                };
+                let risks = if waiting == 0 {
+                    Vec::new()
+                } else {
+                    snapshot
+                        .pending_confirms
+                        .iter()
+                        .filter(|pending| pending.role.as_deref() == Some(name.as_str()))
+                        .map(|pending| pending.prompt.clone())
+                        .collect()
+                };
+                AgentReport {
+                    role: name,
+                    status,
+                    summary,
+                    risks,
+                    relation: role.relation(),
+                }
+            })
+            .collect()
     }
 
     /// Huỷ active run của channel/chat; queued run không bị huỷ.
@@ -1363,6 +1480,13 @@ impl Router {
         let (sender, receiver) = oneshot::channel();
         let timeout = requested_timeout.min(self.inner.options.confirm_timeout);
         let timeout_seconds = u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX);
+        // Tra role của chính run đang chờ duyệt (không phải role resolve lại từ
+        // `actor`): `actor` là người sẽ *trả lời*, còn HUB cần biết *agent nào*
+        // đang chờ. Khi run đã kết thúc, `active` không còn ⇒ `None`, đúng như
+        // lúc đó confirm sẽ bị dọn theo `finish`.
+        let role = lock(&self.inner.state)
+            .ok()
+            .and_then(|state| state.active.get(run_id).and_then(|run| run.role.clone()));
         lock(&self.inner.state)?.confirms.insert(
             confirm_id.clone(),
             PendingConfirm {
@@ -1373,6 +1497,7 @@ impl Router {
                 risk,
                 allow_session_option: allow_session,
                 timeout_seconds,
+                role: role.clone(),
                 sender,
             },
         );
@@ -1384,6 +1509,7 @@ impl Router {
             risk,
             allow_session_option: allow_session,
             timeout_seconds,
+            role: role.clone(),
         });
         Ok((confirm_id, receiver))
     }

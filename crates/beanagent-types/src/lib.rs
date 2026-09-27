@@ -18,6 +18,7 @@ pub use llm::{LlmDelta, LlmResponse, LlmToolCallDelta, StopReason, Usage};
 pub use message::{Message, Role, ToolCall};
 pub use rbac::{ALL_TAGS, NO_ACCESS_ROLE, RolePermissions, WILDCARD_TAG};
 pub use router::{
-    Alert, AlertSeverity, ConfirmOutcome, Outbound, OutboundAction, OutboundKind, RunEvent,
+    AgentRelation, AgentReport, AgentStatus, Alert, AlertSeverity, ConfirmOutcome, Outbound,
+    OutboundAction, OutboundKind, RunEvent,
 };
 pub use tool::{Risk, ToolSpec};

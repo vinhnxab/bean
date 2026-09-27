@@ -1,4 +1,5 @@
 import type {
+  AgentListResponse,
   AuditListResponse,
   AuthMeResponse,
   CreateSessionRequest,
@@ -133,6 +134,13 @@ export const api = {
     }),
 
   logout: () => requestJson<LogoutResponse>("/api/auth/logout", { method: "POST", body: {} }),
+
+  /**
+   * Danh sách agent cho HUB. Server đã lọc theo RBAC **trước khi** trả, nên
+   * response chỉ chứa domain mà vai trò của người gọi được phép thấy — client
+   * không cần (và không được) lọc lần nữa bằng cách ẩn/hiện.
+   */
+  listAgents: (signal?: AbortSignal) => requestJson<AgentListResponse>("/api/agents", { signal }),
 
   listSessions: (query: SessionListOptions = {}, signal?: AbortSignal) =>
     requestJson<SessionListResponse>(

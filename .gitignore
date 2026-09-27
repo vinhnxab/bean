@@ -30,3 +30,6 @@ auth.toml
 .idea/
 .vscode/*
 !.vscode/settings.json
+
+# Ảnh chụp tự phê bình giao diện (sinh bằng `pnpm shot`)
+.screenshots/

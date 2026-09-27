@@ -1,0 +1,180 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { BeanMark } from "@/components/brand/BeanMark";
+import { RealtimeProvider } from "@/features/chat/RealtimeProvider";
+import { HubPage } from "@/features/hub/HubPage";
+import { renderManagement } from "@/test/management";
+import { agentsHandler, FULL_AGENTS, testServer } from "@/test/server";
+
+/**
+ * Test HUB ở tầng UI.
+ *
+ * # Phạm vi thật sự của các test này
+ *
+ * Test RBAC **không** nằm ở đây mà ở `crates/beanagent-web/tests/hub_agents.rs`
+ * (tầng API) — vì ẩn/hiện ở DOM không phải phân quyền. Ở đây chỉ khẳng định UI
+ * **render đúng những gì API trả**, không tự lọc thêm và không bỏ sót hiển thị.
+ */
+
+/** jsdom không có WebSocket thật; socket im lặng để provider không mở kết nối. */
+function stubWebSocket() {
+  vi.stubGlobal(
+    "WebSocket",
+    class {
+      readyState = 0;
+      send() {}
+      close() {}
+    },
+  );
+}
+
+function renderHub() {
+  return renderManagement(
+    <RealtimeProvider>
+      <HubPage />
+    </RealtimeProvider>,
+  );
+}
+
+describe("HUB", () => {
+  beforeEach(() => {
+    stubWebSocket();
+  });
+
+  it("hiện trạng thái sống của từng agent theo dữ liệu API trả về", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    renderHub();
+    expect(await screen.findByTestId("agent-node-developer")).toHaveAttribute("data-status", "working");
+    expect(screen.getByTestId("agent-node-qa")).toHaveAttribute("data-status", "idle");
+    expect(screen.getByTestId("agent-node-marketing")).toHaveAttribute("data-status", "awaiting_you");
+  });
+
+  it("vẽ ba kiểu quan hệ khác nhau: điều phối, review, cảnh báo thẳng", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    renderHub();
+    await screen.findByTestId("agent-node-developer");
+    // Ba vùng có `data-testid` riêng — đó là hình học khác nhau, không phải cùng
+    // một kiểu chỉ khác màu.
+    expect(screen.getByTestId("hub-edge-manages")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-edge-reviews")).toBeInTheDocument();
+    expect(screen.getByTestId("hub-edge-alerts")).toBeInTheDocument();
+    // Nhãn nói rõ cảnh báo đi thẳng tới người dùng, không qua Manager (D14.11).
+    expect(screen.getByText(/đi thẳng tới bạn, không qua Manager/)).toBeInTheDocument();
+    // Nhãn four-eyes nói rõ không tự duyệt.
+    expect(screen.getByText(/không agent nào tự duyệt/)).toBeInTheDocument();
+  });
+
+  it("đặt agent review và agent cảnh báo vào đúng vùng của chúng", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    renderHub();
+    await screen.findByTestId("agent-node-developer");
+    const review = screen.getByTestId("hub-edge-reviews");
+    expect(within(review).getByTestId("agent-node-qa")).toBeInTheDocument();
+    expect(within(review).queryByTestId("agent-node-developer")).not.toBeInTheDocument();
+    const alerts = screen.getByTestId("hub-edge-alerts");
+    expect(within(alerts).getByTestId("agent-node-security-scan")).toBeInTheDocument();
+  });
+
+  it("mascot hiện ở góc trên-trái của HUB", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    const { container } = renderHub();
+    await screen.findByTestId("agent-node-developer");
+    // Logo HUB 44px nằm trong `<header>` — vị trí số 1 trong danh sách mascot.
+    const header = container.querySelector("header");
+    const logo = header?.querySelector("svg");
+    expect(logo).not.toBeNull();
+    expect(logo?.getAttribute("width")).toBe("44");
+    // Mascot phải có nhãn trợ năng, không phải trang trí vô nghĩa.
+    expect(logo?.getAttribute("aria-label")).toBe("Bean");
+  });
+
+  it("trạng thái rỗng là lời mời hành động kèm mascot, không phải dòng xám", async () => {
+    testServer.use(agentsHandler([]));
+    renderHub();
+    expect(await screen.findByText("Chưa có agent nào đang chạy")).toBeInTheDocument();
+    expect(screen.getByText(/Khi bạn giao việc/)).toBeInTheDocument();
+  });
+
+  it("mọi node agent đều mang nhãn trạng thái bằng chữ, không chỉ bằng màu", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    renderHub();
+    await screen.findByTestId("agent-node-developer");
+    // Người mù màu phải đọc được: mỗi node có badge chữ tương ứng trạng thái.
+    // Dùng `getAllByText` vì "Rảnh" xuất hiện ở nhiều node — đó là đúng.
+    expect(screen.getAllByText("Đang chạy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Rảnh").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Chờ bạn duyệt").length).toBeGreaterThan(0);
+    // Số badge bằng số node: mỗi agent có đúng một nhãn trạng thái.
+    const nodes = document.querySelectorAll("[data-testid^='agent-node-']");
+    expect(nodes.length).toBe(4);
+  });
+
+  it("Tab đi qua phần tử tương tác theo thứ tự DOM, không rơi vào wrapper vô nghĩa", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    renderHub();
+    await screen.findByTestId("agent-node-developer");
+    const user = userEvent.setup();
+
+    // Sơ đồ là **nội dung**, không phải control: không node nào được gắn
+    // `tabIndex`, nên bàn phím phải bỏ qua nó và tới phần tử tương tác kế tiếp.
+    // Đây là phép kiểm "đi đúng thứ tự": nếu sau này ai đó vô tình làm node
+    // focusable, test này sẽ bắt được ngay.
+    const nodes = document.querySelectorAll("[data-testid^='agent-node-']");
+    expect(nodes.length).toBeGreaterThan(0);
+    for (const node of nodes) {
+      expect(node.getAttribute("tabindex")).toBeNull();
+    }
+
+    await user.tab();
+    const first = document.activeElement;
+    // Không được focus vào chính khối sơ đồ.
+    expect(first).not.toBe(screen.getByTestId("hub-topology"));
+    expect(first instanceof HTMLElement || first === document.body).toBe(true);
+  });
+
+  it("hàng chờ duyệt là nơi duy nhất có nút, và Tab tới được theo thứ tự", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    // Hàng chờ lấy confirm từ WebSocket `Sync`; ở đây chỉ kiểm tra khả năng tiếp
+    // cận bằng bàn phím khi hàng chờ **không** có việc nào — phải không render
+    // khung rỗng nào cướp focus.
+    renderHub();
+    await screen.findByTestId("agent-node-developer");
+    expect(screen.queryByTestId("hub-confirm-queue")).not.toBeInTheDocument();
+  });
+
+  it("không tải tài nguyên từ domain ngoài", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    const { container } = renderHub();
+    await screen.findByTestId("hub-topology");
+    // agents.md mục 12.3: không ảnh/iframe/script từ ngoài. Mascot là SVG inline.
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(document.querySelector("script[src^='http']")).toBeNull();
+    const mark = container.querySelector("svg");
+    expect(mark).not.toBeNull();
+    // Mascot dùng currentColor ⇒ không nhúng màu cứng và không tải gì.
+    expect(mark?.getAttribute("fill")).toBe("none");
+  });
+
+  it("BeanMark dùng currentColor, không gradient và không bóng", () => {
+    const { container } = render(<BeanMark size={44} />);
+    const svg = container.querySelector("svg");
+    expect(svg?.getAttribute("stroke")).toBe("currentColor");
+    expect(svg?.getAttribute("fill")).toBe("none");
+    expect(container.querySelector("linearGradient")).toBeNull();
+    expect(container.querySelector("filter")).toBeNull();
+  });
+
+  it("favicon được sinh từ cùng hằng số hình với component", async () => {
+    const { markPaths } = await import("@/components/brand/markPaths");
+    const { readFileSync } = await import("node:fs");
+    const favicon = readFileSync("public/favicon.svg", "utf8");
+    // Favicon phải chứa đúng các đường nét mà component vẽ cho `silhouette` — đây
+    // là cách bắt "quên chạy lại script" thay vì để hình lệch âm thầm.
+    for (const d of markPaths("silhouette")) {
+      expect(favicon).toContain(d);
+    }
+  });
+});

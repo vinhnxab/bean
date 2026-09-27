@@ -4,4 +4,8 @@ import type { RiskDto } from "./RiskDto";
 /**
  * Confirm đang chờ trong snapshot.
  */
-export type PendingConfirm = { confirm_id: string, session_id: number, run_id: string, prompt: string, risk: RiskDto, allow_session_option: boolean, timeout_seconds: number, };
+export type PendingConfirm = { confirm_id: string, session_id: number, run_id: string, prompt: string, risk: RiskDto, allow_session_option: boolean, timeout_seconds: number, 
+/**
+ * Role của agent đang chờ duyệt; `null` khi RBAC tắt.
+ */
+role: string | null, };

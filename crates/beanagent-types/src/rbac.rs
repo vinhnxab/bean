@@ -180,6 +180,50 @@ impl RolePermissions {
     pub fn usage_scope(&self) -> &str {
         &self.role
     }
+
+    /// Role này có quyền thấy **báo cáo** của một agent khác không?
+    ///
+    /// # Vì sao cần một hàm riêng, không tái dùng `allows`
+    ///
+    /// [`Self::allows`] trả lời "tôi có được **gọi** tool này không" — câu hỏi về
+    /// *quyền hành động*. HUB cần câu hỏi khác: "tôi có được **biết** agent này đang
+    /// làm gì không". Nguyên tắc chỉ đạt được khi cả hai cùng đúng:
+    ///
+    /// * `qa` không có `dev-write` nên không được *sửa* code — nhưng nó có
+    ///   `dev-read`/`test-run` thuộc **cùng domain** với `developer`, nên nó vẫn thấy
+    ///   được công việc đó. Đây đúng là bản chất four-eyes: phải thấy thì mới review.
+    /// * `finance-readonly` chỉ giữ `billing-read` — một domain riêng, không giao với
+    ///   `dev-write` lẫn `infra-scan`. Nó **không** được biết Developer hay
+    ///   Security-scan đang làm gì, đúng như test bắt buộc khẳng định.
+    ///
+    /// Vì vậy đây là quyết định **thứ hai, tách bạch**: cùng hệ tag RBAC, nhưng trả
+    /// lời cho câu hỏi *khả năng quan sát* chứ không phải *quyền hành động*.
+    ///
+    /// Quy tắc, theo đúng thứ tự (thứ tự này là bất biến bảo mật, không phải tuỳ chọn):
+    ///
+    /// 1. `deny_all` ⇒ không thấy gì — bất biến fail-closed D11.1.
+    /// 2. Tag `*` ⇒ thấy tất cả: đây là quản trị của chính hệ thống.
+    /// 3. Nếu có `allowed_tool_tags` (danh sách trắng tách domain M24) thì danh sách
+    ///    đó phải giao với tag của agent — kể cả khi tag của người xem có giao.
+    /// 4. Còn lại ⇒ thấy khi tập tag của người xem **giao** với tag của agent.
+    #[must_use]
+    pub fn can_view_agent(&self, agent_tags: &BTreeSet<String>) -> bool {
+        if self.deny_all {
+            return false;
+        }
+        if self.tags.contains(WILDCARD_TAG) {
+            return true;
+        }
+        if !self.allowed_tool_tags.is_empty()
+            && !self
+                .allowed_tool_tags
+                .iter()
+                .any(|tag| agent_tags.contains(tag))
+        {
+            return false;
+        }
+        self.tags.iter().any(|tag| agent_tags.contains(tag))
+    }
 }
 
 #[cfg(test)]
@@ -187,6 +231,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{RolePermissions, WILDCARD_TAG};
+
+    use std::collections::BTreeSet;
 
     /// Gọi [`RolePermissions::from_tags`] cho gọn trong test.
     fn from_tags(role: &str, items: &[&str]) -> RolePermissions {
@@ -250,5 +296,72 @@ mod tests {
         let perms = from_tags("developer", &["dev-write"]);
         assert_eq!(perms.usage_scope(), "developer");
         assert!(RolePermissions::unrestricted(WILDCARD_TAG).allows(&[], &[]));
+    }
+
+    // -----------------------------------------------------------------------
+    // `can_view_agent` — quyết định quan sát cho HUB (khác `allows`)
+    // -----------------------------------------------------------------------
+
+    fn tags(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn wildcard_role_sees_every_agent() {
+        let admin = RolePermissions::unrestricted("admin");
+        assert!(admin.can_view_agent(&tags(&["dev-write"])));
+        assert!(admin.can_view_agent(&tags(&["billing-read"])));
+        assert!(admin.can_view_agent(&tags(&[])));
+    }
+
+    #[test]
+    fn deny_all_role_sees_no_agent() {
+        let none = RolePermissions::deny_all("no-access");
+        assert!(!none.can_view_agent(&tags(&["dev-write"])));
+        assert!(!none.can_view_agent(&tags(&[])), "rỗng cũng phải bị chặn");
+    }
+
+    #[test]
+    fn finance_readonly_sees_only_billing_agent() {
+        // Đây là test bắt buộc của HUB: role tài chính không được biết trạng thái
+        // Developer lẫn Security-scan, và phải thấy chính nó.
+        let finance = from_tags("finance-readonly", &["billing-read"]);
+        assert!(finance.can_view_agent(&tags(&["billing-read"])));
+        assert!(
+            !finance.can_view_agent(&tags(&["dev-write"])),
+            "tách domain billing khỏi dev"
+        );
+        assert!(!finance.can_view_agent(&tags(&["infra-read", "infra-scan"])));
+        assert!(!finance.can_view_agent(&tags(&["dev-read", "test-run"])));
+        assert!(!finance.can_view_agent(&tags(&["marketing-read"])));
+    }
+
+    #[test]
+    fn review_role_sees_domain_it_reviews_but_cannot_act_on_it() {
+        // four-eyes: `qa` không được sửa code (`allows` = false) nhưng PHẢI thấy nó
+        // để review. Đây là lý do HUB cần quyết định quan sát tách khỏi quyền hành động.
+        let qa = from_tags("qa", &["dev-read", "test-run"]);
+        assert!(!qa.allows(&["dev-write"], &[]), "không được gọi tool ghi");
+        assert!(
+            qa.can_view_agent(&tags(&["dev-read", "test-run"])),
+            "phải thấy chính nó"
+        );
+        assert!(
+            !qa.can_view_agent(&tags(&["dev-write"])),
+            "Developer là domain khác"
+        );
+    }
+
+    #[test]
+    fn allowed_tool_tags_whitelist_narrows_visibility_further() {
+        // `marketing` có cả tag lẫn danh sách trắng: giao với chính nó thì thấy,
+        // nhưng bị danh sách trắng chặn với domain khác dù tag có thể trùng.
+        let marketing = RolePermissions::restricted_to(
+            "marketing",
+            tags(&["marketing-read", "marketing-draft"]),
+            tags(&["marketing-read", "marketing-draft"]),
+        );
+        assert!(marketing.can_view_agent(&tags(&["marketing-read"])));
+        assert!(!marketing.can_view_agent(&tags(&["dev-write"])));
     }
 }

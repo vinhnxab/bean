@@ -14,6 +14,7 @@ function pendingConfirm(overrides: Partial<ConfirmState> = {}): ConfirmState {
     risk: "confirm",
     allow_session_option: true,
     timeout_seconds: 2,
+    role: null,
     receivedAt: Date.now(),
     resolution: "pending",
     ...overrides,

@@ -3,4 +3,8 @@
 /**
  * Run đang chạy trong snapshot.
  */
-export type RunningInfo = { session_id: number, run_id: string, };
+export type RunningInfo = { session_id: number, run_id: string, 
+/**
+ * Role sở hữu run; `null` khi RBAC tắt.
+ */
+role: string | null, };

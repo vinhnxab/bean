@@ -18,10 +18,21 @@ export const DEFAULT_LANG: Lang = "vi";
 type I18nValue = {
   lang: Lang;
   setLang: (lang: Lang) => void;
-  t: (key: MessageKey) => string;
+  /**
+   * Dịch một khoá. `values` nội suy `{tên}` — dùng khi cần nhúng số đếm vào
+   * câu (ví dụ "Cần bạn duyệt (2)"). Không có `values` thì trả nguyên chuỗi.
+   */
+  t: (key: MessageKey, values?: Record<string, string | number>) => string;
 };
 
 const I18nContext = createContext<I18nValue | null>(null);
+
+/** Thay `{tên}` bằng giá trị tương ứng; khoá thiếu thì để nguyên placeholder. */
+function interpolate(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in values ? String(values[name]) : match,
+  );
+}
 
 /** Bọc ứng dụng để cung cấp ngôn ngữ hiện tại. */
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -31,7 +42,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     () => ({
       lang,
       setLang,
-      t: (key: MessageKey) => DICTIONARIES[lang][key],
+      t: (key, values) => {
+        const text = DICTIONARIES[lang][key];
+        return values ? interpolate(text, values) : text;
+      },
     }),
     [lang],
   );

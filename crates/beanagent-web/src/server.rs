@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::api_types::*;
-use crate::auth::{AuthError, AuthService, WEB_USER};
+use crate::auth::{AuthError, AuthService};
 
 /// Kích thước request HTTP tối đa.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -419,7 +419,7 @@ async fn login(
             _ => ApiFailure::internal(),
         })?;
     let mut response = Json(LoginResponse {
-        user_id: WEB_USER.to_string(),
+        user_id: state.config.web.user_id.clone(),
     })
     .into_response();
     response.headers_mut().insert(
@@ -484,6 +484,57 @@ async fn status(State(state): State<WebState>, jar: CookieJar) -> ApiResult<Json
         tokens_used: u64::from(usage.total()),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         channels,
+    }))
+}
+
+/// Danh sách agent cho HUB, **đã lọc theo RBAC trước khi tuần tự hoá**.
+///
+/// # Vì sao lọc ở đây chứ không ở client
+///
+/// Ràng buộc bắt buộc: role không có quyền phải **không nhận** dữ liệu đó trong
+/// response, chứ không phải "UI tự ẩn đi". Ẩn bằng CSS/JS vẫn để nguyên payload
+/// trong tab Network — đó là rò dữ liệu, không phải phân quyền.
+///
+/// Vì vậy `filter` chạy **trước** khi `AgentReportDto` được dựng: agent bị chặn
+/// không bao giờ tồn tại trong response, và tên role của nó cũng không lộ ra.
+///
+/// Quyết định dùng [`RolePermissions::can_view_agent`] — cùng hệ tag RBAC, tách
+/// khỏi `allows` vì đây là câu hỏi *quan sát*, không phải *quyền hành động*.
+async fn list_agents(
+    State(state): State<WebState>,
+    jar: CookieJar,
+) -> ApiResult<Json<AgentListResponse>> {
+    let user_id = require_user(&state, &jar).await?;
+    let permissions = state.config.permissions_for(&user_id);
+    let agents = state
+        .router
+        .agent_reports()
+        .into_iter()
+        .filter(|report| {
+            state
+                .config
+                .role(&report.role)
+                .is_some_and(|role| permissions.can_view_agent(&role.tag_set()))
+        })
+        .map(|report| AgentReportDto {
+            role: report.role,
+            status: match report.status {
+                beanagent_types::AgentStatus::Idle => AgentStatusDto::Idle,
+                beanagent_types::AgentStatus::Working => AgentStatusDto::Working,
+                beanagent_types::AgentStatus::AwaitingYou => AgentStatusDto::AwaitingYou,
+            },
+            summary: report.summary,
+            risks: report.risks,
+            relation: match report.relation {
+                beanagent_types::AgentRelation::Manages => AgentRelationDto::Manages,
+                beanagent_types::AgentRelation::Reviews => AgentRelationDto::Reviews,
+                beanagent_types::AgentRelation::AlertsDirectly => AgentRelationDto::AlertsDirectly,
+            },
+        })
+        .collect();
+    Ok(Json(AgentListResponse {
+        agents,
+        viewer_role: permissions.role,
     }))
 }
 
@@ -1066,6 +1117,7 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(auth_me))
         .route("/status", get(status))
+        .route("/agents", get(list_agents))
         .route("/sessions", get(list_sessions).post(create_session))
         .route(
             "/sessions/{id}",
@@ -1175,7 +1227,9 @@ async fn ws_handler(
         return ApiFailure::unauthorized().into_response();
     };
     let user_id = match state.auth.authenticate_token(&token).await {
-        Ok(info) if info.user_id == WEB_USER => info.user_id,
+        // So khớp với `[web].user_id` đang cấu hình: session phải thuộc đúng user mà
+        // instance này phục vụ, nếu không một phiên cũ của user khác có thể lọt vào.
+        Ok(info) if info.user_id == state.config.web.user_id => info.user_id,
         _ => return ApiFailure::unauthorized().into_response(),
     };
     let permit = match Arc::clone(&state.ws_connections).try_acquire_owned() {
@@ -1206,9 +1260,12 @@ async fn run_socket(
     let mut heartbeat = tokio::time::interval(WS_HEARTBEAT);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_activity = Instant::now();
-    if send_msg(&mut socket, &sync_msg(&state.router))
-        .await
-        .is_err()
+    if send_msg(
+        &mut socket,
+        &sync_msg(&state.router, &state.config, &user_id),
+    )
+    .await
+    .is_err()
     {
         return;
     }
@@ -1216,13 +1273,23 @@ async fn run_socket(
         tokio::select! {
             event = router_events.recv() => match event {
                 Ok(event) => {
-                    if let Some(message) = map_run_event(event)
-                        && send_msg(&mut socket, &message).await.is_err() { break; }
+                    if let Some(message) = map_run_event(event) {
+                        // Lọc theo vai trò của người xem trước khi gửi: `prompt` của
+                        // confirm có thể chứa nguyên văn lệnh shell, nên đây là dữ
+                        // liệu nhạy cảm, không phải thứ để gửi rồi cho client ẩn.
+                        if let Some(role) = event_role(&message)
+                            && !event_visible_to(&state.config, &user_id, role)
+                        {
+                            last_activity = Instant::now();
+                            continue;
+                        }
+                        if send_msg(&mut socket, &message).await.is_err() { break; }
+                    }
                     last_activity = Instant::now();
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, "WebSocket bị lag; gửi Sync mới");
-                    if send_msg(&mut socket, &sync_msg(&state.router)).await.is_err() { break; }
+                    if send_msg(&mut socket, &sync_msg(&state.router, &state.config, &user_id)).await.is_err() { break; }
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
@@ -1233,7 +1300,7 @@ async fn run_socket(
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::warn!(skipped, "WebSocket notification bị lag; gửi Sync mới");
-                        if send_msg(&mut socket, &sync_msg(&state.router)).await.is_err() { break; }
+                        if send_msg(&mut socket, &sync_msg(&state.router, &state.config, &user_id)).await.is_err() { break; }
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -1377,20 +1444,45 @@ async fn handle_cancel(state: &WebState, user_id: &str, session_id: i64) -> Resu
     Ok(())
 }
 
-fn sync_msg(router: &Router) -> ServerMsg {
+/// Dựng `Sync` cho **một** người xem, đã lọc theo RBAC của họ.
+///
+/// # Vì sao phải lọc
+///
+/// `Sync` vốn broadcast cho mọi kết nối. Khi web chỉ có một user `web:admin` thì
+/// vô hại, nhưng nếu không lọc thì đây là **đường rò dữ liệu chéo vai trò**:
+/// `finance-readonly` sẽ nhận `run_id` và cả `prompt` (nguyên văn lệnh shell) của
+/// run thuộc Developer/Security-scan — đúng loại rò mà `docs/security-review.md`
+/// đã cảnh báo cho `/api/audit`.
+///
+/// Lọc tại đây (trước khi tuần tự hoá) giữ đúng nguyên tắc: dữ liệu không thuộc
+/// quyền thì **không có trong payload**, không phải "UI không hiển thị".
+///
+/// `None` nghĩa là RBAC tắt — không có khái niệm agent con nào để phân quyền, nên
+/// ai cũng thấy (giữ nguyên hành vi một-người-dùng của M21).
+fn sync_msg(router: &Router, config: &Config, user_id: &str) -> ServerMsg {
+    let permissions = config.permissions_for(user_id);
+    let visible = |role: &Option<String>| match role {
+        None => true,
+        Some(name) => config
+            .role(name)
+            .is_none_or(|role| permissions.can_view_agent(&role.tag_set())),
+    };
     let snapshot = router.snapshot();
     ServerMsg::Sync {
         running: snapshot
             .running
             .into_iter()
+            .filter(|item| visible(&item.role))
             .map(|item| RunningInfo {
                 session_id: item.session_id.get(),
                 run_id: item.run_id.as_str().to_string(),
+                role: item.role,
             })
             .collect(),
         pending_confirms: snapshot
             .pending_confirms
             .into_iter()
+            .filter(|item| visible(&item.role))
             .map(|item| PendingConfirm {
                 confirm_id: item.confirm_id.as_str().to_string(),
                 session_id: item.session_id.get(),
@@ -1403,8 +1495,33 @@ fn sync_msg(router: &Router) -> ServerMsg {
                 },
                 allow_session_option: item.allow_session_option,
                 timeout_seconds: item.timeout_seconds,
+                role: item.role,
             })
             .collect(),
+    }
+}
+
+/// Sự kiệp run này có thuộc vai trò mà `user_id` được phép thấy không?
+///
+/// `map_run_event` không có ngữ cảnh người xem nên không thể lọc; hàm này chạy ở
+/// tầng socket, nơi đã xác thực `user_id`. Dùng cho sự kiện **trực tiếp** (không
+/// qua `Sync`) để đường rò dữ liệu chéo vai trò không mở lại qua kênh broadcast.
+fn event_visible_to(config: &Config, user_id: &str, role: &Option<String>) -> bool {
+    let Some(name) = role else {
+        return true;
+    };
+    let permissions = config.permissions_for(user_id);
+    config
+        .role(name)
+        .is_none_or(|role| permissions.can_view_agent(&role.tag_set()))
+}
+
+/// Sự kiện `ConfirmRequest` mang `role`; các sự kiện khác không (chúng không chứa
+/// dữ liệu thuộc domain của agent con) nên đi qua không cần lọc.
+fn event_role(message: &ServerMsg) -> Option<&Option<String>> {
+    match message {
+        ServerMsg::ConfirmRequest { role, .. } => Some(role),
+        _ => None,
     }
 }
 
@@ -1479,6 +1596,7 @@ fn map_run_event(event: RunEvent) -> Option<ServerMsg> {
             risk,
             allow_session_option,
             timeout_seconds,
+            role,
         } => ServerMsg::ConfirmRequest {
             session_id: session_id.get(),
             run_id: run_id.as_str().into(),
@@ -1491,6 +1609,7 @@ fn map_run_event(event: RunEvent) -> Option<ServerMsg> {
             },
             allow_session_option,
             timeout_seconds,
+            role,
         },
         RunEvent::ConfirmResolved {
             confirm_id,

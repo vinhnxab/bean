@@ -20,6 +20,9 @@ export function ChatLayout() {
   const [search, setSearch] = useState("");
   const [archived, setArchived] = useState(false);
   const sessions = useSessions({ q: search, archived });
+  // Trang chủ (HUB) không cần danh sách hội thoại: hội thoại là ngữ cảnh của
+  // trang chat, đặt cạnh sơ đồ hệ thống chỉ làm loãng và tốn nửa màn hình.
+  const showSessions = location.pathname !== "/";
   const createSession = useCreateSession();
   const logout = useLogout();
   const [actionError, setActionError] = useState(false);
@@ -87,80 +90,87 @@ export function ChatLayout() {
           className="space-y-1 border-b border-slate-200 p-3 dark:border-slate-800"
           aria-label={t("nav.main")}
         >
-          <NavItem to="/" end label={t("nav.chat")} icon="◌" onNavigate={() => setMobileOpen(false)} />
+          {/* HUB là mục đầu tiên vì `/` (trang chủ) giờ hiện trạng thái cả hệ agent;
+              "Trò chuyện" phải trỏ `/chat` vì `/` đã thuộc về HUB. */}
+          <NavItem to="/" end label={t("nav.hub")} icon="◈" onNavigate={() => setMobileOpen(false)} />
+          <NavItem to="/chat" label={t("nav.chat")} icon="◌" onNavigate={() => setMobileOpen(false)} />
           <NavItem to="/memory" label={t("nav.memory")} icon="◉" onNavigate={() => setMobileOpen(false)} />
           <NavItem to="/skills" label={t("nav.skills")} icon="◇" onNavigate={() => setMobileOpen(false)} />
           <NavItem to="/tasks" label={t("nav.tasks")} icon="◷" onNavigate={() => setMobileOpen(false)} />
           <NavItem to="/audit" label={t("nav.audit")} icon="≡" onNavigate={() => setMobileOpen(false)} />
           <NavItem to="/status" label={t("nav.status")} icon="●" onNavigate={() => setMobileOpen(false)} />
         </nav>
-        <div className="border-b border-slate-200 p-3 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={() => void newSession()}
-            disabled={createSession.isPending}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-          >
-            <span aria-hidden="true">＋</span>
-            {createSession.isPending ? t("common.loading") : t("chat.newChat")}
-          </button>
-          {actionError ? (
-            <p className="mt-2 text-xs text-rose-600" role="alert">
-              {t("chat.newError")}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center justify-between px-3 pt-3">
-          <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            {archived ? t("sessions.archived") : t("chat.sessions")}
-          </h2>
-          <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
-            <input
-              type="checkbox"
-              checked={archived}
-              onChange={(event) => setArchived(event.target.checked)}
-            />
-            {t("sessions.showArchived")}
-          </label>
-        </div>
-        <div className="px-3 py-2">
-          <label className="sr-only" htmlFor="session-search">
-            {t("sessions.search")}
-          </label>
-          <input
-            id="session-search"
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t("sessions.searchPlaceholder")}
-            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-          />
-        </div>
-        <nav className="flex-1 overflow-y-auto px-2" aria-label={t("chat.sessions")}>
-          {sessions.isPending ? (
-            <p className="px-3 py-2 text-sm text-slate-500">{t("chat.loading")}</p>
-          ) : null}
-          {sessions.isError ? (
-            <p className="px-3 py-2 text-sm text-rose-600" role="alert">
-              {t("chat.historyError")}
-            </p>
-          ) : null}
-          {!sessions.isPending && !sessions.isError && sessions.data?.sessions.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-slate-500">
-              {search ? t("sessions.noResults") : t("chat.noSessions")}
-            </p>
-          ) : null}
-          <ul className="space-y-1">
-            {sessions.data?.sessions.map((session) => (
-              <SessionRow
-                key={session.id}
-                session={session}
-                onDeleted={() => deleted(session.id)}
-                onNavigate={() => setMobileOpen(false)}
+        {showSessions ? (
+          <>
+            <div className="border-b border-slate-200 p-3 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => void newSession()}
+                disabled={createSession.isPending}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                <span aria-hidden="true">＋</span>
+                {createSession.isPending ? t("common.loading") : t("chat.newChat")}
+              </button>
+              {actionError ? (
+                <p className="mt-2 text-xs text-rose-600" role="alert">
+                  {t("chat.newError")}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between px-3 pt-3">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {archived ? t("sessions.archived") : t("chat.sessions")}
+              </h2>
+              <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={archived}
+                  onChange={(event) => setArchived(event.target.checked)}
+                />
+                {t("sessions.showArchived")}
+              </label>
+            </div>
+            <div className="px-3 py-2">
+              <label className="sr-only" htmlFor="session-search">
+                {t("sessions.search")}
+              </label>
+              <input
+                id="session-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("sessions.searchPlaceholder")}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-950"
               />
-            ))}
-          </ul>
-        </nav>
+            </div>
+            <nav className="flex-1 overflow-y-auto px-2" aria-label={t("chat.sessions")}>
+              {sessions.isPending ? (
+                <p className="px-3 py-2 text-sm text-slate-500">{t("chat.loading")}</p>
+              ) : null}
+              {sessions.isError ? (
+                <p className="px-3 py-2 text-sm text-rose-600" role="alert">
+                  {t("chat.historyError")}
+                </p>
+              ) : null}
+              {!sessions.isPending && !sessions.isError && sessions.data?.sessions.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-slate-500">
+                  {search ? t("sessions.noResults") : t("chat.noSessions")}
+                </p>
+              ) : null}
+              <ul className="space-y-1">
+                {sessions.data?.sessions.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    onDeleted={() => deleted(session.id)}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
+                ))}
+              </ul>
+            </nav>
+          </>
+        ) : null}
         <div className="space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
           <LanguageSelect />
           <button

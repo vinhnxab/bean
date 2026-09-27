@@ -64,7 +64,10 @@ describe("chat event state", () => {
     });
     useChatStore
       .getState()
-      .applySync({ type: "sync", running: [{ session_id: 1, run_id: "run-1" }], pending_confirms: [] }, true);
+      .applySync(
+        { type: "sync", running: [{ session_id: 1, run_id: "run-1", role: null }], pending_confirms: [] },
+        true,
+      );
     expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Xin");
 
     useChatStore.getState().applyServerMessage({

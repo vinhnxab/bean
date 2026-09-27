@@ -453,12 +453,69 @@ pub enum DecisionDto {
     Deny,
 }
 
+/// Trạng thái sống của agent, ánh xạ từ `beanagent_types::AgentStatus`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentStatusDto {
+    /// Rảnh.
+    Idle,
+    /// Đang chạy.
+    Working,
+    /// Đang chờ người dùng duyệt.
+    AwaitingYou,
+}
+
+/// Quan hệ kiến trúc với Manager, ánh xạ từ `beanagent_types::AgentRelation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentRelationDto {
+    /// Manager điều phối.
+    Manages,
+    /// Review kiểu four-eyes, không tự duyệt.
+    Reviews,
+    /// Cảnh báo thẳng tới người quản trị, không qua Manager.
+    AlertsDirectly,
+}
+
+/// Báo cáo chuẩn hoá `{status, summary, risks}` của một agent.
+///
+/// Đây là **báo cáo đã chuẩn hoá**, không phải dữ liệu thô: UI không có
+/// đường nào để đọc log hay output tool của agent con.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentReportDto {
+    /// Tên role.
+    pub role: String,
+    /// Trạng thái sống.
+    pub status: AgentStatusDto,
+    /// Một dòng tóm tắt.
+    pub summary: String,
+    /// Rủi ro đang mở.
+    pub risks: Vec<String>,
+    /// Quan hệ với Manager để UI vẽ đúng hình học.
+    pub relation: AgentRelationDto,
+}
+
+/// Danh sách agent đã được lọc theo RBAC của người gọi.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentListResponse {
+    /// Các agent mà vai trò của người gọi được phép thấy.
+    pub agents: Vec<AgentReportDto>,
+    /// Vai trò đã resolve của người gọi, để UI giải thích vì sao chỉ thấy phần này.
+    pub viewer_role: String,
+}
+
 /// Run đang chạy trong snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RunningInfo {
     pub session_id: i64,
     pub run_id: String,
+    /// Role sở hữu run; `null` khi RBAC tắt.
+    pub role: Option<String>,
 }
 
 /// Confirm đang chờ trong snapshot.
@@ -472,6 +529,8 @@ pub struct PendingConfirm {
     pub risk: RiskDto,
     pub allow_session_option: bool,
     pub timeout_seconds: u32,
+    /// Role của agent đang chờ duyệt; `null` khi RBAC tắt.
+    pub role: Option<String>,
 }
 
 /// Message client gửi lên WebSocket.
@@ -542,6 +601,8 @@ pub enum ServerMsg {
         risk: RiskDto,
         allow_session_option: bool,
         timeout_seconds: u32,
+        /// Role của agent đang chờ duyệt; `null` khi RBAC tắt.
+        role: Option<String>,
     },
     ConfirmResolved {
         confirm_id: String,

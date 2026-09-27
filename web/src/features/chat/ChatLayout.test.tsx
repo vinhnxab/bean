@@ -38,12 +38,16 @@ describe("ChatLayout sidebar", () => {
       }),
     );
     const user = userEvent.setup();
+    // Render ở route chat, không phải `/`: `/` giờ là HUB và cố tình **không** hiện
+    // danh sách hội thoại. Test sidebar phải đứng ở nơi sidebar thực sự xuất hiện.
     renderManagement(
       <Routes>
         <Route element={<ChatLayout />}>
-          <Route path="/" element={<div>chat</div>} />
+          <Route path="/" element={<div>hub</div>} />
+          <Route path="/sessions/:sessionId" element={<div>chat</div>} />
         </Route>
       </Routes>,
+      ["/sessions/4"],
     );
     expect(await screen.findByText("Kế hoạch hôm nay")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Tìm hội thoại"), "không có");
@@ -62,4 +66,19 @@ describe("ChatLayout sidebar", () => {
     await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
     await waitFor(() => expect(deleteCalled).toBe(true));
   }, 15000);
+
+  it("trang chủ HUB không lôi danh sách hội thoại vào", async () => {
+    testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
+    renderManagement(
+      <Routes>
+        <Route element={<ChatLayout />}>
+          <Route path="/" element={<div>hub</div>} />
+        </Route>
+      </Routes>,
+    );
+    // Sidebar hội thoại là ngữ cảnh của trang chat; đặt cạnh sơ đồ hệ agent chỉ
+    // chiếm nửa màn hình và làm loãng thứ người dùng cần thấy đầu tiên.
+    await waitFor(() => expect(screen.getByText("hub")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Tìm hội thoại")).not.toBeInTheDocument();
+  });
 });

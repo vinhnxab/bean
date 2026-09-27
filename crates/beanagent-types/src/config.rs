@@ -16,9 +16,17 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::rbac::{NO_ACCESS_ROLE, RolePermissions, WILDCARD_TAG};
+use crate::router::AgentRelation;
 
 /// Tên file cấu hình mặc định ở gốc workspace.
 pub const DEFAULT_CONFIG_FILE: &str = "BeanAgent.toml";
+
+/// Định danh `user_id` mặc định của kênh web.
+///
+/// Khai báo ở `beanagent-types` (không phải `beanagent-web`) vì `Config` cần giá trị
+/// này làm **mặc định serde** mà không được phụ thuộc vào crate web — hướng phụ thuộc
+/// của workspace là `types ← tools ← core ← web`.
+pub const DEFAULT_WEB_USER: &str = "web:admin";
 
 /// Nhóm tool hợp lệ cho `[tools] enabled` (agents.md mục 7.3).
 pub const KNOWN_TOOL_GROUPS: &[&str] = &[
@@ -155,6 +163,19 @@ pub const INFRA_READ_TAG: &str = "infra-read";
 /// đúng ba tag `infra-read`/`billing-read`/`memory-read`, nên danh tính "đọc bộ nhớ"
 /// phải là một tag tường minh chứ không phải "tool không gắn tag" (xem D16.1).
 pub const MEMORY_READ_TAG: &str = "memory-read";
+
+/// Tag RBAC cho phép **ghi** code (M21.2) — vai trò `developer`.
+///
+/// Tách riêng khỏi `infra-scan` để nguyên tắc four-eyes suy ra được: role review
+/// (`qa`) giữ `dev-read`/`test-run` nhưng tuyệt đối không có tag này, và
+/// `validate_rbac` chặn trường hợp vừa cấp vừa cấm.
+pub const DEV_WRITE_TAG: &str = "dev-write";
+
+/// Tag RBAC cho phép **đọc** code để review — không kèm quyền ghi.
+pub const DEV_READ_TAG: &str = "dev-read";
+
+/// Tag RBAC cho phép chạy bộ test.
+pub const TEST_RUN_TAG: &str = "test-run";
 
 /// `[billing]` — domain tài chính, read-only (M22a).
 ///
@@ -422,6 +443,46 @@ impl RoleConfig {
             .filter(|tag| !tag.is_empty())
             .collect()
     }
+
+    /// Quan hệ kiến trúc của role này với Manager, **suy ra từ tag được cấp**.
+    ///
+    /// # Vì sao suy ra từ tag chứ không khớp tên role
+    ///
+    /// Tên role (`developer`, `qa`, …) là lựa chọn của người cấu hình; cấu hình
+    /// hoàn toàn hợp lệ có thể đặt tên khác (`dev`, `reviewer`). Nếu UI hardcode
+    /// theo tên, một bản triển khai đổi tên sẽ **vẽ sai kiến trúc** mà không có
+    /// ai báo lỗi — kiểu hỏng âm thầm nguy hiểm nhất.
+    ///
+    /// Tag thì ngược lại: nó là hợp đồng RBAC đã được kiểm ở tầng code
+    /// (`validate_rbac`), và sửa đổi tên role không đổi được hành vi. Suy ra từ
+    /// tag nên sơ đồ luôn mô tả đúng hệ thống đang chạy.
+    ///
+    /// Thứ tự ưu tiên có chủ đích:
+    ///
+    /// 1. `infra-scan` → [`AgentRelation::AlertsDirectly`]. Đây là kênh D14.11:
+    ///    cảnh báo mức cao đi thẳng tới người quản trị, **không qua Manager**.
+    ///    Kiểm trước vì vai trò trực trật thường *cũng* đọc hạ tầng.
+    /// 2. Có tag đọc/kiểm thử nhưng **không** có tag ghi → [`AgentRelation::Reviews`].
+    ///    Đây chính là định nghĩa four-eyes ở tầng dữ liệu: agent review được
+    ///    đọc và chạy test nhưng không có quyền sửa, nên nó không thể tự duyệt
+    ///    thứ nó đang review. `qa` rơi vào nhánh này vì `validate_rbac` đã chặn
+    ///    việc nó giữ `dev-write`.
+    /// 3. Còn lại → [`AgentRelation::Manages`].
+    ///
+    /// [`AgentRelation`]: crate::router::AgentRelation
+    #[must_use]
+    pub fn relation(&self) -> AgentRelation {
+        let tags = self.tag_set();
+        if tags.contains(INFRA_SCAN_TAG) {
+            return AgentRelation::AlertsDirectly;
+        }
+        let can_write = tags.contains(DEV_WRITE_TAG);
+        let inspects = tags.contains(DEV_READ_TAG) || tags.contains(TEST_RUN_TAG);
+        if !can_write && inspects {
+            return AgentRelation::Reviews;
+        }
+        AgentRelation::Manages
+    }
 }
 
 /// Một project profile trong `[[projects]]` (M21.1).
@@ -629,8 +690,30 @@ pub struct WebConfig {
     pub allow_remote: bool,
     /// TTL của phiên đăng nhập (giờ).
     pub session_ttl_hours: u32,
+    /// Định danh (`user_id`) mà phiên đăng nhập web sẽ mang.
+    ///
+    /// # Vì sao phải cấu hình được
+    ///
+    /// Trước đây định danh này **ghim cứng** thành `web:admin` ở
+    /// `beanagent-web`, nên mọi phiên web đều là một user duy nhất và RBAC ở tầng
+    /// API không bao giờ có dữ liệu để lọc — `finance-readonly` không thể tồn tại
+    /// trên kênh web, dù cấu hình đã khai báo role đó.
+    ///
+    /// Đặt được ở đây thì một bản triển khai có thể bán giao diện web cho một user
+    /// có role riêng, và HUB chỉ trả về đúng domain mà user đó được phép thấy.
+    ///
+    /// Mặc định `web:admin` giữ nguyên hành vi một-người-dùng của v1. Giá trị này
+    /// phải có trong `agent.allowed_users` và được map trong `agent.user_roles`,
+    /// nếu không thì user đó là `no-access` (fail-closed theo D11.1) và HUB trống.
+    #[serde(default = "default_web_user")]
+    pub user_id: String,
     /// Tin `X-Forwarded-For`/`X-Real-IP` (chỉ khi chạy sau reverse proxy tin cậy — D4.3).
     pub trust_proxy: bool,
+}
+
+/// Định danh web mặc định; giữ hành vi một-người-dùng của v1 khi không khai báo.
+fn default_web_user() -> String {
+    DEFAULT_WEB_USER.to_string()
 }
 
 impl Default for WebConfig {
@@ -642,6 +725,7 @@ impl Default for WebConfig {
             allow_remote: false,
             session_ttl_hours: 168,
             trust_proxy: false,
+            user_id: default_web_user(),
         }
     }
 }

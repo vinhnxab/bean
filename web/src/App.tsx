@@ -6,6 +6,7 @@ import { ChatIndexPage } from "@/features/chat/ChatIndexPage";
 import { ChatLayout } from "@/features/chat/ChatLayout";
 import { ChatPage } from "@/features/chat/ChatPage";
 import { RealtimeProvider } from "@/features/chat/RealtimeProvider";
+import { HubPage } from "@/features/hub/HubPage";
 import { MemoryPage } from "@/features/memory/MemoryPage";
 import { SkillsPage } from "@/features/skills/SkillsPage";
 import { StatusPage } from "@/features/status/StatusPage";
@@ -24,7 +25,10 @@ export default function App() {
               </RealtimeProvider>
             }
           >
-            <Route index element={<ChatIndexPage />} />
+            {/* HUB là trang chủ: `/` hiện trạng thái cả hệ agent, chat nằm ở
+                `/sessions/:id` và `/chat` (giữ deep-link cũ còn dùng được). */}
+            <Route index element={<HubPage />} />
+            <Route path="chat" element={<ChatIndexPage />} />
             <Route path="sessions/:sessionId" element={<ChatPage />} />
             <Route path="memory" element={<MemoryPage />} />
             <Route path="skills" element={<SkillsPage />} />
