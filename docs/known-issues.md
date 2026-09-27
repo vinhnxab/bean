@@ -6,7 +6,7 @@ File này dành cho việc **nhớ lại quyết định đã chốt** và **ghi
 * Lý do kỹ thuật chi tiết của từng quyết định: `docs/decisions.md` (M5 = mục 8, `D8.1`–`D8.10`).
 * Yêu cầu gốc (đừng sửa file này để đổi phạm vi): `AGENTS.md`, bản prompt theo milestone: `PROMPTS.md`.
 
-Cập nhật lần cuối: 2026-09-27 (sau M25 — Bean làm MCP server read-only).
+Cập nhật lần cuối: 2026-09-27 (sau lượt vá K24 — rate-limit + nhật ký riêng cho MCP server).
 
 ---
 

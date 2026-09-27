@@ -226,7 +226,10 @@ xanh.
 
 > ✅ **Đã hoàn thành 2026-09-27.** Cả hai transport (stdio + streamable-HTTP/SSE), token lưu
 > hash, cổng expose cứng 3 tag + `Safe` chặn **trước** RBAC. Quyết định: `docs/decisions.md`
-> D16.1–D16.9. Tồn đọng: `docs/known-issues.md` K24 (chưa rate-limit `/mcp`, log chưa tách file).
+> D16.1–D16.13. K24 (rate-limit `/mcp` + log riêng) đã đóng 2026-09-27: giới hạn tần suất
+> **chỉ** cho transport HTTP, tái dùng đúng thuật toán khoá của `POST /api/auth/login`;
+> nhật ký riêng `audit/mcp.jsonl` ghi **song song** `audit.jsonl`. Tồn đọng còn lại: chưa
+> thử với Cline/Cursor **thật**.
 
 ```
 Thêm chế độ MCP server cho BeanAgent, để các coding agent khác (Cline, Cursor, OpenCode, Claude
