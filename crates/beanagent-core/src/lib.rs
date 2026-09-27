@@ -12,6 +12,8 @@
 //!   `RunEvent`, `Outbound`) + slash command xử lý trong lõi, `allowed_users`.
 //! * **M13**: `scheduler` (tick 30 giây, `trait Clock`, croner + chrono-tz, outbox retry).
 //! * **M15**: learning loop (reflection sinh skill nháp, chỉ kích hoạt khi người dùng duyệt).
+//! * **M25**: [`mcp_server`] — Bean đóng vai **MCP server read-only** cho agent khác
+//!   (Cline/Cursor/OpenCode/Claude Code). Cổng expose cứng + tái dùng `RolePermissions`.
 //!
 //! Trách nhiệm của crate này là **quyền quyết định**: run thuộc Router chứ không thuộc kết nối,
 //! confirm do Router cấp `confirm_id` và phân giải, huỷ chỉ khi có yêu cầu tường minh.
@@ -20,6 +22,7 @@
 pub mod agent;
 pub mod context;
 mod learning;
+pub mod mcp_server;
 pub mod prompt;
 pub mod router;
 pub mod run_io;

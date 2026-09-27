@@ -8,6 +8,7 @@
 //! * **M5/M6** — nhóm `memory`/`skills`: `memory_save`/`memory_search`, `load_skill`/`create_skill`.
 
 pub mod files;
+pub mod memory_query;
 
 /// Tên nhóm tool file trong `[tools] enabled` (xem `beanagent_types::config::KNOWN_TOOL_GROUPS`).
 pub const GROUP_FILES: &str = "files";
@@ -29,3 +30,12 @@ pub fn file_tools() -> Vec<Arc<dyn Tool>> {
 use std::sync::Arc;
 
 use crate::tool::Tool;
+
+/// Tool `memory_query` (M25) — đọc ghi chú dài hạn `MEMORY.md`/`USER.md`.
+///
+/// Tách khỏi nhóm `memory` của [`crate::memory_tools`] vì đây là tool **duy nhất** được
+/// expose qua MCP server (Plan.md M25 phạm vi cứng), và nó **không** chạm database.
+#[must_use]
+pub fn memory_query() -> Arc<dyn Tool> {
+    memory_query::tool()
+}

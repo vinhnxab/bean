@@ -368,3 +368,152 @@ fn half_configured_alert_is_rejected() {
     config.security_scan.alert_chat_id = "123".to_string();
     config.validate().expect("đủ cặp thì hợp lệ");
 }
+// ---------------------------------------------------------------------------
+// M25 — `[[mcp_clients]]` + `[mcp_server]`
+// ---------------------------------------------------------------------------
+
+/// Cấu hình M25 hợp lệ tối thiểu: một client `cline` với role `monitor`.
+fn mcp_config(extra: &str) -> String {
+    format!(
+        r#"
+[[roles]]
+name = "monitor"
+tool_tags = ["infra-read", "memory-read"]
+
+[[roles]]
+name = "admin"
+tool_tags = ["*"]
+
+[agent]
+user_roles = {{ "mcp-client:cline" = "monitor" }}
+
+[[mcp_clients]]
+name = "cline"
+role = "monitor"
+
+{extra}
+"#
+    )
+}
+
+#[test]
+fn valid_mcp_server_config_loads() {
+    let (_dir, path) = write_config(&mcp_config("[mcp_server]\nenabled = true\n"));
+    let config = Config::load(&path).expect("cấu hình M25 hợp lệ phải nạp được");
+    assert!(config.mcp_server.enabled);
+    assert!(!config.mcp_server.http_enabled);
+    assert_eq!(config.mcp_clients.len(), 1);
+    assert_eq!(config.mcp_clients[0].name, "cline");
+    assert_eq!(config.mcp_clients[0].role, "monitor");
+    assert_eq!(
+        Config::mcp_client_identity("cline"),
+        "mcp-client:cline".to_string()
+    );
+    // Tra theo tên dùng cho `[[mcp_clients]]`.
+    assert!(config.mcp_client("cline").is_some());
+    assert!(config.mcp_client("khong-co").is_none());
+}
+
+#[test]
+fn mcp_client_without_identity_in_user_roles_is_rejected() {
+    // Client có trong `[[mcp_clients]]` nhưng thiếu `mcp-client:<name>` trong
+    // `user_roles` ⇒ sẽ là `no-access` và không thấy tool nào. Chặn ngay lúc nạp
+    // cấu hình thay vì để người dùng tự tìm ra lúc client không thấy gì.
+    let body = mcp_config("[mcp_server]\nenabled = true\n").replace(
+        r#"user_roles = { "mcp-client:cline" = "monitor" }"#,
+        "user_roles = {}",
+    );
+    let (_dir, path) = write_config(&body);
+    let err = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("mcp-client:cline")),
+        "phải báo thiếu identity, nhận {err:?}"
+    );
+}
+
+#[test]
+fn mcp_client_role_must_match_user_roles_and_exist() {
+    // Role trong `[[mcp_clients]]` khác role trong `user_roles` ⇒ mâu thuẫn.
+    // Thêm một role thật sự tồn tại (`ops`) rồi trỏ `[[mcp_clients]]` sang nó, để
+    // nhánh kiểm "mâu thuẫn" chạy được (không vướng nhánh chặn role `admin`).
+    let body = mcp_config("[mcp_server]\nenabled = true\n").replace(
+        "[[roles]]\nname = \"admin\"",
+        "[[roles]]\nname = \"ops\"\ntool_tags = [\"infra-read\"]\n\n[[roles]]\nname = \"admin\"",
+    );
+    let body = body.replace("role = \"monitor\"", "role = \"ops\"");
+    let (_dir, path) = write_config(&body);
+    let err = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("khác")),
+        "phải báo mâu thuẫn role, nhận {err:?}"
+    );
+
+    // Role không tồn tại trong `[[roles]]`.
+    let body = mcp_config("").replace("role = \"monitor\"\n", "role = \"khong-co\"\n");
+    let (_dir, path) = write_config(&body);
+    let err = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("không tồn tại")),
+        "phải báo role không tồn tại, nhận {err:?}"
+    );
+}
+
+#[test]
+fn mcp_client_cannot_use_wildcard_admin_role() {
+    // Role `admin` giữ tag `*` — cấp ở đường MCP chỉ gây hiểu nhầm, vì cổng expose
+    // vẫn chặn mọi tool ghi/thực thi dù role có bao nhiêu quyền.
+    let body = mcp_config("").replace("role = \"monitor\"", "role = \"admin\"");
+    let (_dir, path) = write_config(&body);
+    let err = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("read-only")),
+        "phải chặn role admin cho MCP client, nhận {err:?}"
+    );
+}
+
+#[test]
+fn enabling_mcp_server_without_clients_is_rejected() {
+    // Bật MCP server mà không có client ⇒ không ai xác thực được, chỉ là bề mặt mở.
+    let (_dir, path) = write_config(&mcp_config("[mcp_server]\nenabled = true\n"));
+    let mut config = Config::load(&path).unwrap();
+    config.mcp_clients.clear();
+    let err = config.validate().unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("mcp-token")),
+        "phải nhắc chạy `auth mcp-token add`, nhận {err:?}"
+    );
+}
+
+#[test]
+fn mcp_http_bind_outside_loopback_requires_allow_remote() {
+    // Cùng nguyên tắc với `[web]` (mục 15.7): lộ cổng phải là hành động tường minh.
+    let body =
+        mcp_config("[mcp_server]\nenabled = true\nhttp_enabled = true\nbind = \"0.0.0.0:7879\"\n");
+    let (_dir, path) = write_config(&body);
+    let err = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("allow_remote")),
+        "phải bắt bật allow_remote, nhận {err:?}"
+    );
+
+    let body = body.replace(
+        "bind = \"0.0.0.0:7879\"",
+        "bind = \"0.0.0.0:7879\"\nallow_remote = true",
+    );
+    let (_dir, path) = write_config(&body);
+    Config::load(&path).expect("bật allow_remote thì hợp lệ");
+}
+
+#[test]
+fn mcp_client_name_must_be_clean() {
+    // Tên client nằm trong identity `mcp-client:<name>` và trong path/header ⇒ chặn
+    // ký tự lạ để khỏi tạo identity mơ hồ.
+    for bad in ["co ten", "co/ten", ""] {
+        let body = mcp_config("").replace("name = \"cline\"", &format!("name = \"{bad}\""));
+        let (_dir, path) = write_config(&body);
+        assert!(
+            Config::load(&path).is_err(),
+            "tên client `{bad}` phải bị từ chối"
+        );
+    }
+}

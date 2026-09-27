@@ -54,6 +54,54 @@ File mẫu đầy đủ là `BeanAgent.example.toml`. Các trường quan trọn
 - `[telegram]`: `enabled`, `token_env`, `allowed_user_ids`; user ID cũng phải có trong
   `agent.allowed_users` dưới dạng `telegram:<id>`.
 - `[[mcp_servers]]`: stdio command/args/env; `trust = false` làm mỗi MCP tool cần xác nhận.
+- `[mcp_server]` + `[[mcp_clients]]`: biến Bean thành **MCP server read-only** cho Cline/Cursor/
+  OpenCode/Claude Code (xem phần kế tiếp). Mặc định tắt.
+
+### Dùng Bean như MCP server (read-only)
+
+Agent khác gọi vào Bean để đọc dữ liệu Bean đang quản lý: log hạ tầng, chi phí cloud, ghi
+chú `MEMORY.md`/`USER.md`. **Không** có đường nào để ghi file hay chạy lệnh — cổng expose
+lọc theo tag + `Risk::Safe` ở tầng code, nên kể cả client gắn role `admin` cũng không gọi
+được tool ghi.
+
+```toml
+[mcp_server]
+enabled = true
+
+[[roles]]
+name = "monitor"
+tool_tags = ["infra-read", "memory-read"]
+
+[agent]
+# Bắt buộc: nếu thiếu dòng này thì client là `no-access` và không thấy tool nào
+# (BeanAgent sẽ báo lỗi ngay lúc nạp cấu hình).
+user_roles = { "mcp-client:cline" = "monitor" }
+
+[[mcp_clients]]
+name = "cline"
+role = "monitor"
+```
+
+```sh
+BeanAgent auth mcp-token add cline      # in token MỘT LẦN duy nhất
+BeanAgent auth mcp-token list          # xem client đã cấp
+BeanAgent auth mcp-token revoke cline  # thu hồi
+```
+
+**stdio (khuyến nghị, cùng máy với IDE)** — trong Cline/Cursor trỏ:
+
+```json
+{ "command": "BeanAgent", "args": ["mcp", "serve"],
+  "env": { "BEANAGENT_MCP_TOKEN": "<token vừa sinh>" } }
+```
+
+**HTTP (Bean chạy từ xa)** — `BeanAgent mcp serve --http`, client POST tới
+`{public_origin}/mcp` với header `Authorization: Bearer <token>`. Mặc định chỉ bind
+loopback; muốn lộ ra ngoài phải đặt `allow_remote = true` **và** đặt sau reverse proxy
+TLS/Tailscale (giống `[web]`).
+
+Token là bí mật dài hạn nằm trong thư mục dự án — **đừng commit** nó. Bean chỉ lưu
+SHA-256 trong `data.dir/beanagent.db`; thu hồi bằng `auth mcp-token revoke`.
 
 ### OpenRouter (và mọi endpoint tương thích OpenAI)
 

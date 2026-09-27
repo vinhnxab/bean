@@ -72,9 +72,12 @@ tool_tags = ["infra-read", "infra-scan"]
 # M22 — Monitor: chỉ đọc log/CVE qua MCP. Gắn server SIEM/CVE với
 # `tool_tags = ["infra-read"]` trong `[[mcp_servers]]` để chỉ role này (và it-security)
 # thấy được tool đó. M22 KHÔNG thêm tool quét chủ động — chỉ đọc.
+#
+# Tag `memory-read` (M25) là tag cho tool `memory_query` (đọc `MEMORY.md`/`USER.md`) —
+# đây là một trong ba tag được phép expose qua MCP server.
 [[roles]]
 name = "monitor"
-tool_tags = ["infra-read"]
+tool_tags = ["infra-read", "memory-read"]
 
 [[roles]]
 name = "finance-readonly"
@@ -244,3 +247,46 @@ tool_tags = []
 # args = ["run", "--rm", "-i", "--network", "none", "ghcr.io/example/siem-mcp:1.0"]
 # trust = false
 # tool_tags = ["infra-read"]
+
+# ---------------------------------------------------------------------------
+# M25 — Bean đóng vai MCP SERVER (read-only) cho Cline/Cursor/OpenCode/Claude Code.
+# ---------------------------------------------------------------------------
+# Đây là chiều NGƯỢC của `[[mcp_servers]]` ở trên: ở đó Bean là client gọi MCP server khác,
+# ở đây Bean là server để agent khác gọi vào.
+#
+# PHẠM VI CỨNG (không thương lượng): chỉ expose tool mang tag `infra-read`, `billing-read`
+# hoặc `memory-read` **và** có `Risk::Safe`. Mọi tool ghi/thực thi (`dev-write`,
+# `infra-scan`, `marketing-publish`…) bị chặn ở tầng code, kể cả khi client gắn role
+# `admin` có tag `*`. Không có "cho phép trong phiên" vì client MCP không có ai bấm nút.
+#
+# Cách dùng nhanh:
+#   1. Thêm `[[mcp_clients]]` + `mcp-client:<tên>` trong `[agent].user_roles` (bên dưới).
+#   2. `BeanAgent auth mcp-token add <tên>`  → in token MỘT LẦN.
+#   3. stdio (khuyến nghị, cùng máy): trong Cline/Cursor trỏ command là
+#        `BeanAgent mcp serve`  và env `BEANAGENT_MCP_TOKEN=<token>`.
+#      HTTP (Bean chạy từ xa): `BeanAgent mcp serve --http`, client gửi
+#        header `Authorization: Bearer <token>` tới `POST {public_origin}/mcp`.
+#
+# Lưu ý an toàn: token là **bí mật dài hạn** nằm trong thư mục dự án của bạn — đừng commit
+# nó. Bean chỉ lưu SHA-256 trong `data.dir/beanagent.db`; thu hồi bằng
+# `BeanAgent auth mcp-token revoke <tên>`.
+[mcp_server]
+enabled = false                          # bật tường minh: đây là bề mặt tấn công mới
+http_enabled = false                     # true ⇒ thêm streamable-HTTP/SSE cạnh stdio
+bind = "127.0.0.1:7879"
+public_origin = "http://127.0.0.1:7879"
+allow_remote = false                     # bind ngoài loopback ⇒ phải true + reverse proxy TLS
+token_ttl_hours = 8760                   # 8760 = 1 năm; 0 = không hết hạn
+# allowed_hosts = []                     # thêm `Host` được phép (chống DNS rebinding);
+                                          # rỗng ⇒ chỉ nhận Host loopback
+
+# Mỗi client là một danh tính riêng (`mcp-client:<name>`), tách hoàn toàn khỏi
+# `telegram:<id>` / `web:admin`: token của client bị lộ KHÔNG biến thành quyền của bạn.
+# `role` phải tồn tại trong `[[roles]]` và KHÔNG được là `admin` (validate chặn).
+# [[mcp_clients]]
+# name = "cline"
+# role = "monitor"
+
+# Identity của client MCP phải xuất hiện trong `[agent].user_roles`, nếu không client sẽ
+# là `no-access` và không thấy tool nào (validate chặn ngay lúc nạp cấu hình):
+# user_roles = { "mcp-client:cline" = "monitor" }

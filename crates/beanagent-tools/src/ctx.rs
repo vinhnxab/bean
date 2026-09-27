@@ -80,4 +80,19 @@ impl ToolCtx {
         self.alerts = Some(alerts);
         self
     }
+
+    /// Gắn kênh cảnh báo nếu có (M25: đường MCP dùng để `ToolCtx` có cùng khả năng
+    /// gửi cảnh báo chủ động như run chat).
+    #[must_use]
+    pub fn with_alerts_opt(mut self, alerts: Option<Arc<dyn AlertSink>>) -> Self {
+        self.alerts = alerts;
+        self
+    }
+
+    /// Đổi project profile (M21.1).
+    #[must_use]
+    pub fn with_project_name(mut self, project: impl Into<String>) -> Self {
+        self.project = project.into();
+        self
+    }
 }

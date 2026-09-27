@@ -49,6 +49,10 @@ beanagent-memory.workspace = true
 beanagent-security.workspace = true
 beanagent-skills.workspace = true
 beanagent-tools.workspace = true
+# M25: `ServiceExt::oneshot` để chuyển tiếp request HTTP sang `StreamableHttpService`,
+# và mốc thời gian khi cấp/thu hồi token client MCP.
+tower.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

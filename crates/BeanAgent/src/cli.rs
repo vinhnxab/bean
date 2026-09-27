@@ -29,6 +29,29 @@ pub enum Command {
 
     /// Tiện ích xác thực cho giao diện web.
     Auth(AuthArgs),
+
+    /// Chạy BeanAgent ở chế độ **MCP server read-only** (M25) cho Cline/Cursor/OpenCode…
+    Mcp(McpArgs),
+}
+
+/// Tham số của `mcp`.
+#[derive(Debug, Args)]
+pub struct McpArgs {
+    /// Lệnh con của `mcp`.
+    #[command(subcommand)]
+    pub command: McpCommand,
+}
+
+/// Các lệnh con của `mcp`.
+#[derive(Debug, Subcommand)]
+pub enum McpCommand {
+    /// Chạy MCP server. Mặc định `stdio` (Bean cùng máy với IDE);
+    /// `--http` dùng streamable-HTTP/SSE (Bean chạy remote, sau reverse proxy).
+    Serve {
+        /// Dùng transport streamable-HTTP thay vì stdio.
+        #[arg(long)]
+        http: bool,
+    },
 }
 
 /// Tham số của `chat`.
@@ -64,6 +87,34 @@ pub struct AuthArgs {
 pub enum AuthCommand {
     /// Đặt mật khẩu cho giao diện web (lưu hash argon2id vào `data.dir/auth.toml`).
     SetPassword,
+
+    /// Quản lý token của client MCP (M25): `add` / `list` / `revoke`.
+    McpToken(McpTokenArgs),
+}
+
+/// Tham số của `auth mcp-token`.
+#[derive(Debug, Args)]
+pub struct McpTokenArgs {
+    /// Lệnh con của `mcp-token`.
+    #[command(subcommand)]
+    pub command: McpTokenCommand,
+}
+
+/// Các lệnh con của `auth mcp-token`.
+#[derive(Debug, Subcommand)]
+pub enum McpTokenCommand {
+    /// Cấp token mới cho một client (in token thô **một lần duy nhất**).
+    Add {
+        /// Tên client, phải có trong `[[mcp_clients]]`.
+        name: String,
+    },
+    /// Liệt kê client đã được cấp token.
+    List,
+    /// Thu hồi token của một client.
+    Revoke {
+        /// Tên client cần thu hồi.
+        name: String,
+    },
 }
 
 impl Cli {

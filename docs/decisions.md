@@ -497,3 +497,24 @@ cho ranh giới mức nghiêm trọng và việc lỗi gửi không làm hỏng 
 **Bằng chứng:** `crates/beanagent-marketing/tests/marketing.rs` (13 test) — đủ ba yêu cầu kiểm thử
 bắt buộc của M24: marketing không thấy/gọi được tool ngoài tag, `marketing_publish` luôn
 Confirm kể cả sau allow-in-session, `marketing_draft` không có network call.
+
+## 16. Bean làm MCP server read-only (D16.x — 2026-09-27, milestone M25)
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D16.1 | Cổng expose **cứng** `MCP_EXPOSED_TAGS` + `Risk::Safe`, kiểm **trước** RBAC | `RolePermissions::allows` trả `true` cho *mọi* tool khi role giữ tag `*`. Nếu chỉ dựa vào RBAC thì client MCP gắn role `admin` sẽ thấy và gọi được `write_file`/`run_shell`/`security_scan` — vi phạm phạm vi cứng của M25 (*"kể cả nếu client tự xưng có quyền cao"*). | Cổng này **thắt trên** RBAC chứ không thay thế nó: tool phải qua cả hai. Tool `Confirm` cũng bị loại vì client MCP không có ai bấm nút xác nhận. |
+| D16.2 | Cổng nằm ở `beanagent-core`, `Router::call_tool_as` gọi lại **cùng** `Config::permissions_for` + `RolePermissions::allows` | `Plan.md` mục 4.3 cấm rải logic RBAC. Đường MCP không đi qua `Router::submit` (đó là vòng lặp agent có LLM) nên cần một điểm gọi thứ hai — nhưng nó **áp dụng** kết quả quyết định, không viết lại. | Handler `ServerHandler` không tự so sánh tag; test chứng minh cả hai lớp không thể lệch. |
+| D16.3 | Token lưu **hash SHA-256** trong bảng `mcp_clients`, **không** đặt trong `BeanAgent.toml` | `Plan.md` M25 nói "lưu hash". Nhưng cấu hình thường được commit còn `data.dir` thì không — đặt hash ở config là rò bí mật vào git. | `[[mcp_clients]]` chỉ là **chính sách** (ai → role nào); credential nằm trong `data.dir/beanagent.db`, thu hồi bằng `auth mcp-token revoke`. |
+| D16.4 | Xác thực **trước khi tạo handler**, không phải trong `initialize` | Yêu cầu M25 là "từ chối ở bước handshake". Kiểm sớm hơn một bước còn tốt hơn: client không biết Bean tồn tại, không thấy tool nào, không gửi được tham số nào xuống tầng dưới. | stdio thiếu/sai token ⇒ tiến trình thoát trước khi đọc stdin; HTTP ⇒ `401` trước khi chạm `StreamableHttpService`. |
+| D16.5 | Tham số được làm sạch trong `Router::call_tool_as`, **không** ở handler | `call_tool_as` là ranh giới duy nhất đi vào tool từ phía ngoài; đặt ở handler thì một caller mới sau này có thể quên. | Lớp làm sạch không thể bị bỏ sót, và test gọi thẳng `call_tool_as` vẫn được bảo vệ. |
+| D16.6 | `memory_query` mang tag riêng `memory-read`, không dùng lại nhóm `memory` | M25 đòi expose "đúng ba tag". Tool untagged sẽ bị mọi role thấy, và tag tường minh giúp người đọc cấu hình hiểu ngay đường MCP đọc được gì. | Thêm một hằng tag; role muốn đọc ghi chú qua MCP phải được cấp `memory-read` một cách tường minh. |
+| D16.7 | `validate_mcp_server` chặn ở tầng cấu hình: thiếu identity, lệch role, role `admin`, HTTP bind ngoài loopback, bật mà không có client | Cùng nguyên tắc `forbid_tags` của M21.6: cấu hình sai phải chết lúc nạp chứ không "phát hiện khi client không thấy tool nào". | Người dùng không thể vô tình cấp `no-access` cho client hay lộ cổng MCP ra ngoài. |
+| D16.8 | Mỗi client có **service HTTP riêng** được cache lại, không dựng mới mỗi request | `StreamableHttpService` giữ `LocalSessionManager` bên trong. Dựng mỗi request ⇒ session tạo ở `initialize` biến mất ngay và client không gọi được `tools/call`. Đồng thời cô lập session của client này khỏi client khác. | Bộ nhớ đệm theo `mcp-client:<name>`; mỗi client giữ đúng một tập session riêng. |
+| D16.9 | Log của toàn hệ thống ghi ra **stderr** | Ở `mcp serve` (stdio) thì stdout **chính là** kênh JSON-RPC; một dòng log trộn vào đó khiến client không đọc được phản hồi nào. | Đây là lỗi thật do smoke test mới bắt được, không phải lý thuyết. |
+
+**Bằng chứng:** `crates/beanagent-core/tests/mcp_server.rs` (6 test) — đủ bốn yêu cầu kiểm thử
+bắt buộc của M25: token không hợp lệ bị từ chối trước handshake, `finance-readonly` chỉ
+thấy tool `billing-read`, gọi thẳng `dev_write` bị **từ chối** ở tầng thực thi, tham số
+chứa chuỗi giống SQL/FTS injection bị làm sạch; cộng `admin_wildcard_cannot_reach_write_tools_through_mcp`
+cho thấy tag `*` không vượt được cổng. Smoke test thật (stdio + streamable-HTTP) đã xác minh
+`initialize` → `tools/list` → `tools/call` với session thật.

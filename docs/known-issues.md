@@ -6,7 +6,7 @@ File này dành cho việc **nhớ lại quyết định đã chốt** và **ghi
 * Lý do kỹ thuật chi tiết của từng quyết định: `docs/decisions.md` (M5 = mục 8, `D8.1`–`D8.10`).
 * Yêu cầu gốc (đừng sửa file này để đổi phạm vi): `AGENTS.md`, bản prompt theo milestone: `PROMPTS.md`.
 
-Cập nhật lần cuối: 2026-09-26 (sau khi vá S1).
+Cập nhật lần cuối: 2026-09-27 (sau M25 — Bean làm MCP server read-only).
 
 ---
 
@@ -63,6 +63,7 @@ Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung b�
 | K21 | **Future-incompatibility warning từ `proc-macro-error2 v2.0.1`.** | `cargo report future-incompatibilities --id 1` báo `E0365` vì crate re-export `proc_macro` bằng `pub use proc_macro;`; Rust hiện tại chỉ cảnh báo nhưng tương lai có thể thành hard error. Dependency là gián tiếp: `teloxide 0.17.0` → `aquamarine 0.6.0` → `proc-macro-error2 2.0.1`, chỉ dùng lúc build vì là proc-macro, không phải lỗ hổng runtime; `make check` vẫn xanh. | Chờ upstream sửa hoặc cập nhật `aquamarine`/`teloxide` khi có bản tương thích; không tự patch dependency chỉ để im warning. Sau khi nâng Rust/dependency, chạy lại `cargo report future-incompatibilities`. | thấp | Backlog khi Rust/CI nâng version |
 | K22 | **`docker_timeout_kills_container` flaky khi chạy song song.** | Test spawn container thật rồi đợi `docker kill`; khi `cargo test` chạy nhiều suite cùng lúc, container kế vẫn ở trạng thái `Created` nên assert "container mồ côi còn sống" fail. Chạy riêng (`cargo test -p beanagent-security --test sandbox_docker`) thì PASS, và `cargo test --workspace` chạy lại cũng xanh — nên là **race của test/máy**, không phải hồi quy logic sandbox. Thêm nữa máy dev không có sẵn image `beanagent-sandbox:latest` (phải `make build-sandbox`/docker build). | Serialize các test docker (một suite, chạy tuần tự `--test-threads=1`) hoặc poll container thay vì đo trạng thái ngay; CI nên build image trước và chạy phần docker ở job riêng. | trung bình | Khi thêm CI |
 | ~~K23~~ | ~~Cảnh báo mức cao M23 chưa nối vào `Router::notify`.~~ **ĐÃ XÓA (2026-09-26)** | Đã nối xong: `AlertSink` trait ở `beanagent-tools` (tool không phụ thuộc Router ⇒ không phụ thuộc vòng), `ToolCtx.alerts`, Router cài `RouterAlertSink` bọc quanh `notify`, cảnh báo `High` đi tới `alert_channel`/`alert_chat_id` và lỗi gửi rơi vào **outbox** như mọi outbound khác. Test: `security_scan_high_alert_reaches_the_main_channel` (gọi tool thật → cảnh báo thật tới channel), `high_severity_scan_sends_direct_alert`, `low_severity_scan_does_not_send_alert`, `alert_failure_does_not_break_the_tool`, `failed_alert_goes_to_outbox_instead_of_being_lost`. | — | — | — |
+| K24 | **MCP server (M25) chưa có giới hạn tần suất và log truy cập chưa tách file riêng.** Đường `/mcp` xác thực bằng token dài hạn và audit **từng lời gọi tool**, nhưng chưa có `governor`/lockout như `POST /api/auth/login`, và log nằm chung `audit.jsonl` với `channel = mcp-client:<id>`. | Token lộ có thể bị dò liên tục; nhật ký trộn kênh làm việc phát hiện lạm dụng chậm hơn `Plan.md` M25 mục 5 mong đợi. | Thêm rate-limit theo token/IP cho `POST /mcp` và `audit/mcp.jsonl` riêng. Ưu tiên khi bật `mcp_server.http_enabled = true` (bề mặt có thể công khai); stdio thì token nằm trong tiến trình của chính người dùng nên rủi ro thấp hơn nhiều. | trung bình | Milestone sau M25 (hardening) |
 
 ---
 

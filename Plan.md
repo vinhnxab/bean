@@ -10,7 +10,7 @@ milestone M18 trở đi; 4 file cũ chỉ còn giá trị tham khảo lý do/ph�
 
 ## 0. Tóm tắt quyết định đã chốt hôm nay
 
-- **Kênh**: chỉ Telegram + Web (đã có). **Bỏ hẳn Discord, Slack và WhatsApp** (2026-09-26, xem mục 5.0).
+- **Kênh**: chỉ Telegram + Web (đã có). Discord cân nhắc nếu rẻ. **Bỏ hẳn Slack và WhatsApp.**
 - **S1**: bạn tự vá, theo prompt đã soạn ở `va-S1-va-cap-nhat-tai-lieu.md`. Mọi milestone hạ
   tầng chạm Nhóm 2 trở lên (quét chủ động) hoặc developer-mode cho dự án ngoài đều **chờ S1 vá
   xong** mới bật.
@@ -90,35 +90,34 @@ Nếu một thiết kế buộc phải phá 1 trong 3 điều trên, coding agen
 
 ## 5. Roadmap milestone cuối cùng, theo thứ tự
 
-**M21 → M22 → M22a → M23 → M24 ✅**. Toàn bộ roadmap đã hoàn thành. Bảo vệ vật lý và kiến trúc B: để backlog, không có số milestone.
+**M18 → M21 → M22 → M22a → M23 (chờ S1) → M24 → M25**. WhatsApp/Slack: loại khỏi roadmap. Bảo vệ
+vật lý và kiến trúc B: để backlog, không có số milestone. M25 có thể làm song song M22-M24 vì
+chỉ phụ thuộc M21 (RBAC).
 
-### 5.0 — M18 (Discord adapter): **ĐÃ LOẠI BỎ** (2026-09-26)
+### M18 — Discord adapter (tuỳ chọn, chỉ làm nếu rẻ)
 
-Chủ dự án quyết **bỏ hẳn Discord** khỏi hệ thống để giữ đơn giản. M18 không bao giờ được code.
+```
+Thêm Discord làm channel adapter mới, đi qua Router hiện có — KHÔNG tạo luồng xử lý riêng.
+Trước khi code: đọc lại Router/Channel trait hiện tại và adapter Telegram, liệt kê lại cho tôi
+các bất biến Telegram đang đảm bảo (allowlist, reconnect/backoff, xác nhận Confirm/Dangerous,
+một token/instance) trước khi thiết kế Discord. Chờ tôi duyệt danh sách đó rồi mới code.
 
-**Lý do** (rút ra khi khảo sát bất biến Telegram trước khi thiết kế Discord):
+Việc cần làm:
+1. Adapter Discord dùng thư viện Rust trưởng thành (serenity hoặc twilight — nêu lý do chọn).
+2. Danh tính map vào agent.allowed_users với tiền tố discord:<id>, tách biệt hoàn toàn khỏi
+   telegram:<id>.
+3. Cơ chế Confirm/Dangerous dùng Discord button component tương đương inline keyboard Telegram;
+   Dangerous vẫn không có nút trong phiên.
+4. Người gửi không thuộc allowed_users bị Router chặn trước khi vào agent — test tương tự
+   "callback người lạ bị bỏ qua" đã có cho Telegram.
+5. Reconnect/backoff riêng theo rate limit Discord, không tái dùng tham số của Telegram.
+6. KHÔNG tạo context builder riêng cho Discord — dùng đúng context builder chung.
 
-1. **Mất bất biến "một token/instance".** Telegram trả `409 Conflict` nên chặn trùng token bằng tín hiệu
-   API. Discord **cho phép nhiều shard với cùng token**, không có tín hiệu tương đương ⇒ phải tự viết
-   cơ chế claim mới (heartbeat trên đĩa) — thêm bề mặt lỗi chỉ để thêm một kênh chat.
-2. **Vòng đời interaction khác hẳn.** Discord bắt buộc trả lời interaction trong **3 giây** nếu
-   không `defer`, và interaction **hết hạn ~15 phút**. Phải thêm `defer` + TTL dọn rác cho bảng
-   confirm — Telegram không cần vì Router tự quản lý hết hạn 300s.
-3. **Sẽ phải port lại ~44 bất biến Telegram** (allowlist 2 lớp, chống giả mạo callback, dedup,
-   rate limit, confirm 3 nút, backoff, redact secret…) — chi phí lớn hơn nhiều so với giá trị thêm.
-4. M18 vốn đã ghi *"tuỳ chọn, chỉ làm nếu rẻ"*, chưa từng có nhu cầu vận hành thực tế.
+Test bắt buộc: người lạ bị chặn, Confirm/Dangerous qua mock transport, reconnect sau khi rớt kết
+nối giả lập. make check xanh. KHÔNG động vào S1/K1 hay bất kỳ tool file/shell nào.
+```
 
-**Hệ quả:** Slack/WhatsApp đã bỏ từ trước ⇒ **Telegram + Web là hai kênh cuối cùng**. Bảng tag ở mục
-2/2b và toàn bộ milestone M22–M24 giữ nguyên; không milestone nào phụ thuộc Discord.
-
-> Tài liệu `docs/telegram-invariants.md` (danh sách 44 bất biến + phân tích 3 điểm không port được ở
-> trên) **đã bị xoá** cùng M18. Lý do bỏ đã rút gọn vào mục này.
-
-### M21 — Project profile + RBAC + Developer/QA role (bản hợp nhất cuối cùng) — ✅ **ĐÃ XONG 2026-09-26**
-
-Bằng chứng: `crates/beanagent-core/tests/rbac.rs` (7 test) + `store::tests::usage_by_role_is_independent_between_roles`.
-Quyết định thiết kế: `docs/decisions.md` mục 11 (D11.1–D11.9). Điểm đã chốt trước khi code:
-`no-access` là **deny-all** (D11.1) và RBAC chỉ bật khi `agent.user_roles` khác rỗng (D11.2).
+### M21 — Project profile + RBAC + Developer/QA role (bản hợp nhất cuối cùng)
 
 ```
 Ràng buộc kiến trúc bắt buộc (giữ đường lui sang mô hình nhiều tiến trình sau này):
@@ -159,10 +158,7 @@ Test bắt buộc:
 make check xanh.
 ```
 
-### M22 — Monitor agent (Nhóm 1, giám sát read-only) — ✅ **ĐÃ XONG 2026-09-26**
-
-Bằng chứng: `crates/beanagent-mcp-test-server/tests/mcp_client.rs` (3 test M22, dùng MCP stdio thật).
-Quyết định thiết kế: `docs/decisions.md` mục 12 (D12.1–D12.5).
+### M22 — Monitor agent (Nhóm 1, giám sát read-only)
 
 ```
 Thêm role/agent con "monitor" (tag infra-read). Kết nối MCP server cho SIEM/log (Wazuh/ELK) và
@@ -173,12 +169,7 @@ Test: dữ liệu MCP trả về được bọc untrusted-content đúng như to
 không thấy tool ngoài tag infra-read. make check xanh.
 ```
 
-### M22a — Finance-readonly (Nhóm 0, billing) — ✅ **ĐÃ XONG 2026-09-26**
-
-Đi hướng **generic** (chủ dự án chọn thay vì chốt hẳn AWS/Azure/GCP): endpoint + credential lấy
-từ cấu hình, đổi provider chỉ sửa `BeanAgent.toml`. Bằng chứng:
-`crates/beanagent-billing/tests/billing.rs` (4 test). Quyết định: `docs/decisions.md` mục 13
-(D13.1–D13.5).
+### M22a — Finance-readonly (Nhóm 0, billing)
 
 ```
 Thêm domain "billing-read" cho role finance-readonly, tách biệt hoàn toàn khỏi tag infra-*.
@@ -193,10 +184,10 @@ Test: role finance-readonly gọi được billing-read, không gọi/không th�
 make check xanh.
 ```
 
-### M23 — Security-scan agent (Nhóm 2, quét trong scope) — ✅ ĐÃ XONG
+### M23 — Security-scan agent (Nhóm 2, quét trong scope) — CHỈ làm sau khi S1 đã vá
 
 ```
-[Xác nhận S1 đã vá (2026-09-26) và `infra_scope` rỗng = fail-closed. Xem `docs/decisions.md` D14.x.]
+[CHỜ xác nhận S1 đã vá và make check xanh trước khi bắt đầu milestone này.]
 
 Thêm role/agent con "security-scan" (tag infra-scan). Thêm [[infra_scope]] vào cấu hình, mọi
 tool quét (nmap/OpenVAS/Trivy qua MCP hoặc tool nội bộ) phải kiểm tra target nằm trong targets
@@ -211,7 +202,7 @@ Test: target ngoài scope bị từ chối dù model "quyết" chạy; output sc
 dẫn injection không khiến agent hành động thêm mà không hỏi lại. make check xanh.
 ```
 
-### M24 — Marketing agent — ✅ ĐÃ XONG
+### M24 — Marketing agent
 
 ```
 Thêm role "marketing" theo RBAC đã có (M21). Domain tách biệt hoàn toàn khỏi infra/dev/finance.
@@ -231,6 +222,52 @@ cầu Confirm kể cả gọi liên tiếp cùng phiên; marketing-draft không 
 xanh.
 ```
 
+### M25 — Bean làm MCP server (chỉ read-only), để hiện diện trong IDE/tool khác (Cline/Cursor/OpenCode/Claude Code)
+
+> ✅ **Đã hoàn thành 2026-09-27.** Cả hai transport (stdio + streamable-HTTP/SSE), token lưu
+> hash, cổng expose cứng 3 tag + `Safe` chặn **trước** RBAC. Quyết định: `docs/decisions.md`
+> D16.1–D16.9. Tồn đọng: `docs/known-issues.md` K24 (chưa rate-limit `/mcp`, log chưa tách file).
+
+```
+Thêm chế độ MCP server cho BeanAgent, để các coding agent khác (Cline, Cursor, OpenCode, Claude
+Code...) có thể gọi vào Bean như một MCP tool ngay trong phiên làm việc của họ. Chỉ làm SAU khi
+M21 (RBAC theo tag) đã xong — milestone này tái dùng nguyên cơ chế role/tag, không viết lại.
+
+Phạm vi cứng, không thương lượng trong milestone này:
+- CHỈ expose tool thuộc tag infra-read, billing-read, và một tool memory-query (đọc MEMORY.md/
+  USER.md hiện có, KHÔNG cho sửa).
+- TUYỆT ĐỐI không expose bất kỳ tool nào có thể ghi/thực thi (dev-write, infra-scan, Nhóm 3
+  remediation, marketing-publish...) qua đường MCP server trong milestone này, kể cả nếu client
+  gọi vào tự xưng có quyền cao — việc đó để milestone sau, sau khi có xác thực client mạnh hơn
+  và đã vận hành thử phần read-only ổn định.
+
+Việc cần làm:
+1. Chọn transport: nếu Bean chạy trên máy cùng IDE, hỗ trợ stdio như MCP server thông thường.
+   Nếu Bean chạy remote (theo mô hình web đã có, sau reverse proxy) thì cần transport HTTP/SSE
+   có xác thực — dùng lại đúng cơ chế auth đã có (không tạo hệ xác thực song song), ví dụ token
+   dài hạn sinh riêng cho từng MCP client, lưu hash giống auth.toml hiện tại.
+2. Danh tính mỗi MCP client map vào agent.user_roles với tiền tố riêng (mcp-client:<id>),
+   tách biệt hoàn toàn khỏi telegram:<id>/discord:<id> — một client bị lộ token không tự động
+   có quyền như bạn dùng qua Telegram.
+3. Router lọc tool expose ra ngoài theo đúng role của client, TÁI DÙNG cơ chế required_tags đã
+   có ở M21 — không viết lại logic lọc quyền riêng cho đường MCP server.
+4. Tham số mà client bên ngoài (Cline/Cursor...) truyền vào khi gọi tool Bean PHẢI được coi là
+   input không tin cậy — áp dụng đúng nguyên tắc "query của model là dữ liệu không tin cậy" đã
+   có trong known-issues.md (làm sạch trước khi dùng trong truy vấn nội bộ), không tin tưởng chỉ
+   vì request tới từ một coding agent "có vẻ đáng tin".
+5. Log riêng mọi request qua MCP server (client nào, tool nào, thời điểm) — đây là bề mặt mới,
+   cần audit tách biệt để dễ phát hiện nếu một token bị lộ.
+
+Test bắt buộc:
+- Client không có token hợp lệ bị từ chối ngay ở bước handshake.
+- Client với role finance-readonly chỉ thấy đúng tool billing-read khi liệt kê tool khả dụng.
+- Thử gọi trực tiếp một tool KHÔNG nằm trong danh sách expose (ví dụ cố gọi thẳng tên tool
+  dev-write) bị từ chối, không phải chỉ ẩn khỏi danh sách.
+- Tham số đầu vào từ client chứa chuỗi giống SQL/FTS injection bị làm sạch, không lọt xuống tầng
+  dưới nguyên văn.
+make check xanh.
+```
+
 ---
 
 ## 6. Backlog — chưa có số milestone, chờ quyết định thêm
@@ -241,22 +278,19 @@ xanh.
   hơn thực sự — 3 ràng buộc ở mục 4 đã giữ đường lui, không cần làm sớm.
 - **Sub-agent song song** (kiểu Hermes) và **remote/serverless terminal backend**: để sau, không
   cấp thiết cho quy mô hiện tại.
+- **LSP-bridge MCP server** (Bean làm MCP *client* nối vào Language Server để hiểu code sâu hơn,
+  thu hẹp khoảng cách với OpenCode): rẻ hơn tự viết LSP integration, chỉ cần thêm một entry
+  `[[mcp_servers]]` — cân nhắc làm sau M25 nếu Developer role cần sửa codebase lớn/phức tạp hơn.
+- **Checkpoint/rollback cho Developer role** (học từ Cline): snapshot workspace trước khi agent
+  chạy tác vụ nhiều bước, cho phép rollback — đáng làm, rẻ, tăng an toàn rõ rệt; chưa gán số
+  milestone, nên gộp vào M21 hoặc làm milestone riêng ngay sau nếu muốn.
+- **Extension mỏng cho VS Code** (chỉ là webview gọi lại Web adapter, không thêm trí tuệ): giá
+  trị thấp so với M25, ưu tiên sau cùng nếu vẫn muốn có UI trong editor.
 
 ---
 
 ## 7. Câu hỏi mở còn lại
 
-**Không còn câu hỏi chặn tiến độ M21/M22/M22a/M23/M24.**
-
-* **S1 đã vá xong** (commit `9415c5d`, `make check` xanh) ⇒ chốt chặn của **M23 đã mở**, không còn
-  cần xác nhận thêm.
-* **M18 (Discord) đã loại bỏ** (mục 5.0) — không phải câu hỏi mở nữa.
-
-* **`[[infra_scope]]` đang RỖNG — cần bạn điền target thật khi muốn dùng.** Chủ dự án đã chốt
-  (2026-09-26) khởi đầu với scope rỗng: code + test đầy đủ, mọi lần quét bị từ chối ở tầng
-  code. Bỏ comment `[[infra_scope]]` trong `BeanAgent.example.toml` để mở.
-* **`GET /api/status` chưa hiện hạn mức per-role.** Muốn UI thấy "role này còn bao nhiêu hạn mức"
-  thì thêm endpoint đọc `usage_by_role`.
-* **Cảnh báo mức cao M23 đã nối xong** (2026-09-26, đóng K23): `AlertSink` → `ToolCtx.alerts`
-  → `Router::notify`. Cảnh báo `High` tới kênh chính, lỗi gửi rơi vào outbox. Cần `docker
-  pull instrumentisto/nmap` + bỏ comment `[[infra_scope]]` mới dùng được thật.
+Không còn câu hỏi chặn tiến độ M18/M21/M22/M22a/M24/M25. **M23 vẫn chờ bạn xác nhận S1 đã vá
+xong** trước khi giao cho coding agent. ~~M25 chờ M21 xong.~~ → M21 đã xong (`6a5d063`) và
+M25 đã hoàn thành 2026-09-27.

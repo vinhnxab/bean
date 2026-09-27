@@ -13,14 +13,14 @@ use beanagent_memory::{SqliteStore, Store};
 use beanagent_types::config::Config;
 use rpassword::prompt_password;
 
-use crate::cli::{AuthArgs, AuthCommand};
+use crate::cli::{AuthArgs, AuthCommand, McpTokenCommand};
 
 /// Chạy lệnh `auth`.
 ///
 /// # Errors
 /// Luôn trả lỗi ở M1.
 pub async fn run(args: &AuthArgs, config_path: Option<&Path>) -> Result<()> {
-    match args.command {
+    match &args.command {
         AuthCommand::SetPassword => {
             let config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
             let data_dir = expand_tilde(&config.data.dir);
@@ -64,6 +64,106 @@ pub async fn run(args: &AuthArgs, config_path: Option<&Path>) -> Result<()> {
                 auth_path.display()
             );
             Ok(())
+        }
+        AuthCommand::McpToken(args) => mcp_token(&args.command, config_path).await,
+    }
+}
+
+/// Sinh token 256 bit, trả về dạng hex.
+fn new_mcp_token() -> Result<String> {
+    beanagent_core::mcp_server::new_token().map_err(|error| anyhow::anyhow!(error))
+}
+
+/// `auth mcp-token add|list|revoke` (M25).
+///
+/// Token thô **chỉ in một lần** và Bean chỉ lưu SHA-256 trong `mcp_clients` — đúng
+/// cách `auth set-password` xử lý mật khẩu (mục 15.6).
+async fn mcp_token(command: &McpTokenCommand, config_path: Option<&Path>) -> Result<()> {
+    let config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
+    let data_dir = expand_tilde(&config.data.dir);
+    std::fs::create_dir_all(&data_dir)
+        .with_context(|| format!("không tạo được data.dir {}", data_dir.display()))?;
+    let store: Arc<dyn Store> = Arc::new(
+        SqliteStore::open(&data_dir.join("beanagent.db"))
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
+            .context("mở database token MCP")?,
+    );
+    match command {
+        McpTokenCommand::Add { name } => {
+            let name = name.trim();
+            // Chặn ở tầng CLI: cấp token cho client không có trong `[[mcp_clients]]` là
+            // vô nghĩa — `authenticate()` sẽ từ chối vì không tìm thấy trong cấu hình.
+            let entry = config.mcp_client(name).with_context(|| {
+                format!("client `{name}` chưa có trong [[mcp_clients]] của BeanAgent.toml")
+            })?;
+            let token = new_mcp_token()?;
+            let ttl = config.mcp_server.token_ttl_hours;
+            let expires = beanagent_core::mcp_server::auth::expiry_from(ttl);
+            store
+                .create_mcp_client(
+                    &beanagent_core::mcp_server::hash_token(&token),
+                    name,
+                    &entry.role,
+                    &chrono::Utc::now().to_rfc3339(),
+                    &expires,
+                )
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))
+                .context("lưu hash token")?;
+            println!(
+                "Token cho client `{name}` (role `{}`) — CHỈ HIỆN MỘT LẦN:",
+                entry.role
+            );
+            println!("{token}");
+            println!();
+            println!("Lưu ngay vào file cấu hình MCP của IDE. Cấp lại sẽ vô hiệu token này.");
+            if ttl == 0 {
+                println!("Token không hết hạn (mcp_server.token_ttl_hours = 0).");
+            } else {
+                println!("Hết hạn lúc: {expires}");
+            }
+            println!();
+            println!("Cho stdio, truyền qua biến môi trường:");
+            println!("  BEANAGENT_MCP_TOKEN={token}");
+            println!("Cho HTTP, header: Authorization: Bearer {token}");
+            Ok(())
+        }
+        McpTokenCommand::List => {
+            let clients = store
+                .list_mcp_clients()
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            if clients.is_empty() {
+                println!("Chưa có client MCP nào được cấp token.");
+                return Ok(());
+            }
+            println!("{:<20} {:<20} {:<26} CẤP LÚC", "CLIENT", "ROLE", "HẾT HẠN");
+            for client in clients {
+                println!(
+                    "{:<20} {:<20} {:<26} {}",
+                    client.name,
+                    client.role,
+                    if client.expires_at.is_empty() {
+                        "không".to_string()
+                    } else {
+                        client.expires_at.clone()
+                    },
+                    client.created_at
+                );
+            }
+            Ok(())
+        }
+        McpTokenCommand::Revoke { name } => {
+            let removed = store
+                .delete_mcp_client(name.trim())
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            if removed {
+                println!("Đã thu hồi token của client `{name}`.");
+                Ok(())
+            } else {
+                bail!("client `{name}` chưa có token nào được cấp")
+            }
         }
     }
 }

@@ -36,6 +36,19 @@ const MEMORY_SEARCH_LIMIT: usize = 20;
 /// Độ dài preview của message trả về từ `memory_search`.
 const MEMORY_HIT_PREVIEW_CHARS: usize = 500;
 
+/// Thông tin một client MCP đã cấu quyền (M25).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct McpClientInfo {
+    /// Tên client (không kèm tiền tố).
+    pub name: String,
+    /// Role mà client được cấp (tương ứng identity `mcp-client:<name>`).
+    pub role: String,
+    /// Thời điểm cấp token (RFC3339 UTC).
+    pub created_at: String,
+    /// Thời điểm hết hạn (RFC3339 UTC); rỗng ⇒ không hết hạn.
+    pub expires_at: String,
+}
+
 /// Lỗi store.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -442,6 +455,32 @@ pub trait Store: Send + Sync {
     /// Xoá toàn bộ phiên đăng nhập (khi đổi mật khẩu).
     async fn delete_all_web_sessions(&self) -> Result<(), StoreError>;
 
+    /// Cấp token cho một client MCP: chỉ lưu **hash** token (M25).
+    ///
+    /// `token_hash` là SHA-256 hex (64 ký tự) của token thô. Token thô chỉ in một lần
+    /// lúc `BeanAgent auth mcp-token add` rồi không lưu ở đâu (mục 15.6).
+    async fn create_mcp_client(
+        &self,
+        token_hash: &str,
+        name: &str,
+        role: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Tra client MCP theo hash token; `None` khi token sai hoặc đã hết hạn.
+    async fn get_mcp_client(
+        &self,
+        token_hash: &str,
+        now: &str,
+    ) -> Result<Option<McpClientInfo>, StoreError>;
+
+    /// Liệt kê client MCP đã cấp token (theo thời điểm cấp tăng dần).
+    async fn list_mcp_clients(&self) -> Result<Vec<McpClientInfo>, StoreError>;
+
+    /// Thu hồi token của một client theo tên; `false` khi không có client đó.
+    async fn delete_mcp_client(&self, name: &str) -> Result<bool, StoreError>;
+
     /// Đọc phần tóm tắt của phiên (`None` khi chưa có).
     async fn summary(&self, session: SessionId) -> Result<Option<String>, StoreError>;
 
@@ -603,6 +642,7 @@ pub struct MemoryStore {
     usage: RwLock<BTreeMap<String, Usage>>,
     usage_by_role: RwLock<BTreeMap<(String, String), Usage>>,
     web_sessions: RwLock<Vec<(Vec<u8>, WebSessionInfo)>>,
+    mcp_clients: RwLock<Vec<(String, McpClientInfo)>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
     next_task_id: RwLock<u64>,
@@ -620,6 +660,7 @@ impl Default for MemoryStore {
             usage: RwLock::new(BTreeMap::new()),
             usage_by_role: RwLock::new(BTreeMap::new()),
             web_sessions: RwLock::new(Vec::new()),
+            mcp_clients: RwLock::new(Vec::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
             next_task_id: RwLock::new(1),
@@ -1239,6 +1280,75 @@ impl Store for MemoryStore {
         Ok(())
     }
 
+    /// (M25) Cấp token client MCP — chỉ lưu hash, giống `web_sessions`.
+    ///
+    /// Cấp lại cho cùng một tên ⇒ xoá bản ghi cũ trước, nên không tồn tại hai token
+    /// cùng lúc cho một client (tránh việc thu hồi "token mới" nhưng token cũ vẫn sống).
+    async fn create_mcp_client(
+        &self,
+        token_hash: &str,
+        name: &str,
+        role: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError> {
+        let info = McpClientInfo {
+            name: name.to_string(),
+            role: role.to_string(),
+            created_at: created_at.to_string(),
+            expires_at: expires_at.to_string(),
+        };
+        let mut clients = self.mcp_clients.write().await;
+        // Xoá theo **tên** (khớp SQL `DELETE ... WHERE name = ?1`): cấp lại cho cùng một
+        // client phải làm token cũ mất hiệu lực, nếu không sẽ tồn tại hai token cùng
+        // lúc và `revoke` chỉ xoá được một. Đây đúng là loại lệch hành vi K7 cảnh báo.
+        clients.retain(|(hash, info)| hash != token_hash && info.name != name);
+        clients.push((token_hash.to_string(), info));
+        Ok(())
+    }
+
+    /// (M25) `expires_at` rỗng ⇒ không hết hạn; ngược lại phải còn hạn tới `now`.
+    async fn get_mcp_client(
+        &self,
+        token_hash: &str,
+        now: &str,
+    ) -> Result<Option<McpClientInfo>, StoreError> {
+        Ok(self
+            .mcp_clients
+            .read()
+            .await
+            .iter()
+            .find(|(hash, info)| {
+                hash == token_hash && (info.expires_at.is_empty() || info.expires_at.as_str() > now)
+            })
+            .map(|(_, info)| info.clone()))
+    }
+
+    /// (M25) Sắp xếp theo thời điểm cấp rồi tên để `list` có thứ tự ổn định.
+    async fn list_mcp_clients(&self) -> Result<Vec<McpClientInfo>, StoreError> {
+        let mut list: Vec<McpClientInfo> = self
+            .mcp_clients
+            .read()
+            .await
+            .iter()
+            .map(|(_, info)| info.clone())
+            .collect();
+        list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        Ok(list)
+    }
+
+    /// (M25) Thu hồi token của client theo tên.
+    async fn delete_mcp_client(&self, name: &str) -> Result<bool, StoreError> {
+        let mut clients = self.mcp_clients.write().await;
+        let before = clients.len();
+        clients.retain(|(_, info)| info.name != name);
+        Ok(clients.len() != before)
+    }
+
     async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
         let mut memories = self.memories.write().await;
         let mut next = self.next_memory_id.write().await;
@@ -1678,6 +1788,15 @@ CREATE TABLE IF NOT EXISTS usage_by_role (
   PRIMARY KEY (day, role)
 );
 CREATE INDEX IF NOT EXISTS web_sessions_expiry ON web_sessions(expires_at);
+-- M25: token client MCP. Chỉ lưu HASH token (không lưu token thô), `expires_at` rỗng
+-- ⇒ không hết hạn. `name` là khoá chính xác để cấp lại/thu hồi theo tên client.
+CREATE TABLE IF NOT EXISTS mcp_clients (
+  token_hash TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL DEFAULT ''
+);
 ";
 
 /// Pragma bắt buộc (agents.md mục 8.1): WAL cho đọc/ghi song song, khoá ngoại bật.
@@ -1877,6 +1996,28 @@ enum DbCommand {
     },
     DeleteAllWebSessions {
         reply: Reply<()>,
+    },
+    // (M25) Token client MCP: chỉ lưu hash, tách khỏi `web_sessions` vì TTL và
+    // vòng đời khác nhau (token MCP dài hạn, không phải phiên đăng nhập).
+    CreateMcpClient {
+        token_hash: String,
+        name: String,
+        role: String,
+        created_at: String,
+        expires_at: String,
+        reply: Reply<()>,
+    },
+    GetMcpClient {
+        token_hash: String,
+        now: String,
+        reply: Reply<Option<McpClientInfo>>,
+    },
+    ListMcpClients {
+        reply: Reply<Vec<McpClientInfo>>,
+    },
+    DeleteMcpClient {
+        name: String,
+        reply: Reply<bool>,
     },
     MemorySave {
         text: String,
@@ -2413,6 +2554,56 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn create_mcp_client(
+        &self,
+        token_hash: &str,
+        name: &str,
+        role: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError> {
+        let token_hash = token_hash.to_string();
+        let name = name.to_string();
+        let role = role.to_string();
+        let created_at = created_at.to_string();
+        let expires_at = expires_at.to_string();
+        self.request(move |reply| DbCommand::CreateMcpClient {
+            token_hash,
+            name,
+            role,
+            created_at,
+            expires_at,
+            reply,
+        })
+        .await
+    }
+
+    async fn get_mcp_client(
+        &self,
+        token_hash: &str,
+        now: &str,
+    ) -> Result<Option<McpClientInfo>, StoreError> {
+        let token_hash = token_hash.to_string();
+        let now = now.to_string();
+        self.request(move |reply| DbCommand::GetMcpClient {
+            token_hash,
+            now,
+            reply,
+        })
+        .await
+    }
+
+    async fn list_mcp_clients(&self) -> Result<Vec<McpClientInfo>, StoreError> {
+        self.request(|reply| DbCommand::ListMcpClients { reply })
+            .await
+    }
+
+    async fn delete_mcp_client(&self, name: &str) -> Result<bool, StoreError> {
+        let name = name.to_string();
+        self.request(move |reply| DbCommand::DeleteMcpClient { name, reply })
+            .await
+    }
+
     async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
         let text = text.to_string();
         let tags = tags.to_string();
@@ -2742,6 +2933,36 @@ fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::DeleteAllWebSessions { reply } => {
             let _ = reply.send(delete_all_web_sessions(conn));
         }
+        DbCommand::CreateMcpClient {
+            token_hash,
+            name,
+            role,
+            created_at,
+            expires_at,
+            reply,
+        } => {
+            let _ = reply.send(create_mcp_client(
+                conn,
+                &token_hash,
+                &name,
+                &role,
+                &created_at,
+                &expires_at,
+            ));
+        }
+        DbCommand::GetMcpClient {
+            token_hash,
+            now,
+            reply,
+        } => {
+            let _ = reply.send(get_mcp_client(conn, &token_hash, &now));
+        }
+        DbCommand::ListMcpClients { reply } => {
+            let _ = reply.send(list_mcp_clients(conn));
+        }
+        DbCommand::DeleteMcpClient { name, reply } => {
+            let _ = reply.send(delete_mcp_client(conn, &name));
+        }
         DbCommand::MemorySave { text, tags, reply } => {
             let _ = reply.send(memory_save_row(conn, &text, &tags));
         }
@@ -2907,6 +3128,23 @@ fn run_migration(conn: &Connection) -> Result<(), StoreError> {
             StoreError::Internal(format!("migration v5 usage_by_role thất bại: {err}"))
         })?;
         conn.pragma_update(None, "user_version", 5)
+            .map_err(internal)?;
+        version = 5;
+    }
+    if version < 6 {
+        // M25: token client MCP (chỉ lưu hash). `IF NOT EXISTS` ⇒ chạy lại vô hại, kể cả
+        // DB mới đã có bảng này trong `SCHEMA_SQL` (migration v1).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS mcp_clients (
+               token_hash TEXT PRIMARY KEY,
+               name TEXT NOT NULL UNIQUE,
+               role TEXT NOT NULL,
+               created_at TEXT NOT NULL,
+               expires_at TEXT NOT NULL DEFAULT ''
+             );",
+        )
+        .map_err(|err| StoreError::Internal(format!("migration v6 mcp_clients thất bại: {err}")))?;
+        conn.pragma_update(None, "user_version", 6)
             .map_err(internal)?;
     }
     Ok(())
@@ -3530,6 +3768,86 @@ fn delete_all_web_sessions(conn: &Connection) -> Result<(), StoreError> {
     conn.execute("DELETE FROM web_sessions", [])
         .map_err(internal)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Token client MCP (M25)
+// ---------------------------------------------------------------------------
+
+/// Cấp token client MCP. Cấp lại cho cùng tên ⇒ xoá bản ghi cũ, nên không bao giờ
+/// có hai token cùng lúc cho một client (đồng bộ với `MemoryStore`).
+fn create_mcp_client(
+    conn: &Connection,
+    token_hash: &str,
+    name: &str,
+    role: &str,
+    created_at: &str,
+    expires_at: &str,
+) -> Result<(), StoreError> {
+    let tx = conn.unchecked_transaction().map_err(internal)?;
+    tx.execute("DELETE FROM mcp_clients WHERE name = ?1", params![name])
+        .map_err(internal)?;
+    tx.execute(
+        "INSERT INTO mcp_clients(token_hash, name, role, created_at, expires_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![token_hash, name, role, created_at, expires_at],
+    )
+    .map_err(internal)?;
+    tx.commit().map_err(internal)?;
+    Ok(())
+}
+
+/// `expires_at` rỗng ⇒ không hết hạn (giống `MemoryStore`).
+fn get_mcp_client(
+    conn: &Connection,
+    token_hash: &str,
+    now: &str,
+) -> Result<Option<McpClientInfo>, StoreError> {
+    conn.query_row(
+        "SELECT name, role, created_at, expires_at FROM mcp_clients \
+         WHERE token_hash = ?1 AND (expires_at = '' OR expires_at > ?2)",
+        params![token_hash, now],
+        |row| {
+            Ok(McpClientInfo {
+                name: row.get(0)?,
+                role: row.get(1)?,
+                created_at: row.get(2)?,
+                expires_at: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(internal)
+}
+
+fn list_mcp_clients(conn: &Connection) -> Result<Vec<McpClientInfo>, StoreError> {
+    let mut statement = conn
+        .prepare(
+            "SELECT name, role, created_at, expires_at FROM mcp_clients ORDER BY created_at, name",
+        )
+        .map_err(internal)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(McpClientInfo {
+                name: row.get(0)?,
+                role: row.get(1)?,
+                created_at: row.get(2)?,
+                expires_at: row.get(3)?,
+            })
+        })
+        .map_err(internal)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(internal)?);
+    }
+    Ok(out)
+}
+
+fn delete_mcp_client(conn: &Connection, name: &str) -> Result<bool, StoreError> {
+    Ok(conn
+        .execute("DELETE FROM mcp_clients WHERE name = ?1", params![name])
+        .map_err(internal)?
+        > 0)
 }
 
 fn create_session_row(
@@ -4190,8 +4508,8 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        // 5 = đã chạy tới migration `usage_by_role` (M21.7).
-        assert_eq!(version, 5);
+        // 6 = đã chạy tới migration `mcp_clients` (M25).
+        assert_eq!(version, 6);
     }
 
     /// M21.7: ngân sách token **tách theo role** — role này dùng hết hạn mức thì role

@@ -25,9 +25,12 @@ croner.workspace = true
 chrono-tz.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+# M25: Bean làm MCP server (ServerHandler + transport stdio/HTTP).
+rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

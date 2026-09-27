@@ -147,6 +147,13 @@ pub enum RouterError {
     /// OS không cấp được entropy.
     #[error("không sinh được ID ngẫu nhiên: {0}")]
     Random(String),
+    /// (M25) Client MCP gọi thẳng tool ngoài danh sách được expose.
+    ///
+    /// Tách khỏi [`Self::Forbidden`] vì đây không phải "sai vai trò" mà là **gọi thẳng
+    /// tên tool không thuộc bề mặt MCP** — `Plan.md` M25 yêu cầu phải *từ chối*, chứ không
+    /// được chỉ ẩn khỏi `tools/list`.
+    #[error("tool `{0}` không được expose qua MCP server")]
+    ToolNotExposed(String),
 }
 
 impl RouterError {
@@ -169,6 +176,7 @@ impl RouterError {
             Self::NoRuntime => "no_runtime",
             Self::StatePoisoned => "router_state",
             Self::Random(_) => "random_unavailable",
+            Self::ToolNotExposed(_) => "tool_not_exposed",
         }
     }
 }
@@ -998,6 +1006,103 @@ impl Router {
             .map(|(run_id, _)| run_id.clone())
     }
 
+    // -----------------------------------------------------------------------
+    // M25 — đường MCP server (read-only)
+    // -----------------------------------------------------------------------
+
+    /// Registry tool (dùng cho cổng expose MCP — M25).
+    #[must_use]
+    pub fn registry(&self) -> &Arc<ToolRegistry> {
+        &self.inner.registry
+    }
+
+    /// Resolve quyền cho một client MCP (M25).
+    ///
+    /// # Errors
+    /// [`RouterError::StatePoisoned`] nếu không đọc được cấu hình.
+    ///
+    /// Đây là **cùng** hàm quyết định [`Config::permissions_for`] mà run chat dùng
+    /// (M21.3) — không có bản sao logic nào cho đường MCP (ràng buộc `Plan.md` mục 4.3).
+    pub fn mcp_permissions(&self, user_id: &str) -> Result<RolePermissions, RouterError> {
+        let config = read_lock(&self.inner.config)?;
+        Ok(config.permissions_for(user_id))
+    }
+
+    /// Gọi tool **trực tiếp** theo danh tính client MCP, không qua vòng lặp agent (M25).
+    ///
+    /// Vì sao không dùng `submit()`: MCP client gọi một tool cụ thể đã biết tên, không cần
+    /// LLM chọn tool, không cần context, không cần confirm. Chạy qua agent loop sẽ tốn
+    /// token vô nghĩa và mở thêm bề mặt (system prompt, lịch sử).
+    ///
+    /// # Errors
+    /// * [`RouterError::ToolNotExposed`] — tool không qua được cổng expose
+    ///   [`crate::mcp_server::expose_gate`] (tag + `Safe` + RBAC). Client gọi thẳng tên
+    ///   tool không thuộc bề mặt MCP sẽ bị chặn ở đây, không phải chỉ ẩn khỏi danh sách.
+    /// * [`RouterError::Internal`] — không lấy được workspace/tool.
+    ///
+    /// # Tham số từ client
+    ///
+    /// Tham số được **làm sạch ở đây** ([`crate::mcp_server::sanitize_client_args`]),
+    /// không phải ở handler: đây là ranh giới duy nhất đi vào tool từ phía ngoài nên
+    /// không thể bị bỏ sót nếu sau này thêm một caller mới. Handler chỉ tiếp thụ kết quả.
+    pub async fn call_tool_as(
+        &self,
+        user_id: &str,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> Result<String, RouterError> {
+        let args = crate::mcp_server::sanitize_client_args(&args);
+        let permissions = self.mcp_permissions(user_id)?;
+        match crate::mcp_server::expose_gate(tool_name, &self.inner.registry, &permissions) {
+            crate::mcp_server::ExposeDecision::Allow => {}
+            decision => {
+                tracing::warn!(
+                    user_id,
+                    tool = tool_name,
+                    ?decision,
+                    "từ chối gọi tool qua MCP server"
+                );
+                return Err(RouterError::ToolNotExposed(tool_name.to_string()));
+            }
+        }
+        let tool = self
+            .inner
+            .registry
+            .get(tool_name)
+            .ok_or_else(|| RouterError::ToolNotExposed(tool_name.to_string()))?;
+        let workspace = self
+            .inner
+            .registry
+            .workspace_opt()
+            .ok_or_else(|| RouterError::Internal("registry chưa gắn workspace".into()))?;
+        let ctx = beanagent_tools::ToolCtx::for_project(
+            workspace,
+            // MCP không có hội thoại; dùng session 0 làm giá trị trung tính cho
+            // trường `session` mà tool chỉ dùng để ghi log/audit.
+            SessionId::new(0),
+            self.inner.shutdown.clone(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .with_alerts_opt(self.alert_sink());
+        let result = tool.call(&ctx, args).await;
+        if let Some(log) = &self.inner.audit {
+            let mut entry = beanagent_security::entry_now(
+                0,
+                user_id,
+                tool_name,
+                &serde_json::json!({"via": "mcp"}),
+            );
+            entry.ok = Some(result.is_ok());
+            entry.decision = if result.is_ok() { "allow" } else { "deny" };
+            entry.decided_by = user_id.to_string();
+            entry.error = result.as_ref().err().map(ToString::to_string);
+            if let Err(error) = log.record(&entry) {
+                tracing::warn!(error = %error, "không ghi được audit MCP");
+            }
+        }
+        result.map_err(|error| RouterError::Internal(error.to_string()))
+    }
+
     fn session_busy(&self, session: SessionId) -> bool {
         lock(&self.inner.state).is_ok_and(|state| {
             state
@@ -1669,6 +1774,7 @@ fn router_error_code(error: &RouterError) -> &'static str {
         RouterError::NoRuntime => "no_runtime",
         RouterError::StatePoisoned => "router_state",
         RouterError::Random(_) => "random_unavailable",
+        RouterError::ToolNotExposed(_) => "tool_not_exposed",
     }
 }
 

@@ -33,7 +33,7 @@ use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
 };
 use beanagent_skills::{SkillCatalog, skill_tools};
-use beanagent_tools::{ToolRegistry, mcp::McpRuntime};
+use beanagent_tools::{ToolRegistry, builtin::memory_query, mcp::McpRuntime};
 use beanagent_types::{Config, Outbound, RunEvent, RunId};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -250,6 +250,12 @@ pub(crate) async fn build_registry(
                 .register(tool)
                 .context("đăng ký tool memory thất bại")?;
         }
+        // (M25) `memory_query` là tool chỉ đọc, tách khỏi `memory_save`/`memory_search`:
+        // đây là tool duy nhất về bộ nhớ được expose qua MCP server, và nó không chạm
+        // database nên vẫn dùng được khi chưa cấu hình store.
+        registry
+            .register(memory_query())
+            .context("đăng ký tool memory_query thất bại")?;
     }
     if config.tools.enabled.iter().any(|g| g == "skills") {
         for tool in skill_tools(skills) {

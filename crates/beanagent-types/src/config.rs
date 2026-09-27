@@ -146,6 +146,16 @@ pub use crate::rbac::{MARKETING_DRAFT_TAG, MARKETING_PUBLISH_TAG, MARKETING_READ
 /// quét lẫn `run_shell` — nguyên lý four-eyes: vai trò này cần cả hai.
 pub const INFRA_SCAN_TAG: &str = "infra-scan";
 
+/// Tag RBAC chỉ đọc hạ tầng (M22) — đọc log/CVE/uptime qua MCP client.
+pub const INFRA_READ_TAG: &str = "infra-read";
+
+/// Tag RBAC của tool `memory_query` (M25) — đọc `MEMORY.md`/`USER.md`, **không** cho sửa.
+///
+/// Tag riêng, không dùng lại `memory` group: M25 yêu cầu đường MCP server chỉ expose
+/// đúng ba tag `infra-read`/`billing-read`/`memory-read`, nên danh tính "đọc bộ nhớ"
+/// phải là một tag tường minh chứ không phải "tool không gắn tag" (xem D16.1).
+pub const MEMORY_READ_TAG: &str = "memory-read";
+
 /// `[billing]` — domain tài chính, read-only (M22a).
 ///
 /// Tách biệt hoàn toàn khỏi domain `infra-*`: tool ở đây chỉ **đọc chi phí**, không đụng
@@ -687,6 +697,65 @@ pub struct McpServerConfig {
     pub tool_tags: Vec<String>,
 }
 
+/// Tiền tố danh tính của client MCP (M25) — **tách biệt hoàn toàn** khỏi `telegram:`/`web:`.
+///
+/// `Router::authorize` yêu cầu `user_id` bắt đầu bằng `<channel>:`; MCP client đi qua
+/// cổng riêng nên identity này được dựng từ `[[mcp_clients]].name`.
+pub const MCP_CLIENT_PREFIX: &str = "mcp-client:";
+
+/// Một client MCP được phép gọi vào Bean (M25, `[[mcp_clients]]`).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpClientConfig {
+    /// Tên client (kebab-case), ví dụ `cline`, `cursor`, `opencode`.
+    ///
+    /// Danh tính đầy đủ là `mcp-client:<name>` — **tách biệt hoàn toàn** khỏi
+    /// `telegram:<id>` / `web:admin` (Plan.md M25 mục 2): token của một client bị lộ
+    /// không tự động đổi thành quyền của bạn qua Telegram.
+    pub name: String,
+    /// Role mà client này dùng; phải có trong `[[roles]]` và trong
+    /// `agent.user_roles["mcp-client:<name>"]` (validate kiểm ở tầng code).
+    ///
+    /// Cấu hình này là **chính sách**, không phải credential: hash token nằm trong
+    /// SQLite (`data.dir/beanagent.db`) nên `BeanAgent.toml` — thường được commit —
+    /// không bao giờ chứa bí mật (xem `Store::create_mcp_client`).
+    pub role: String,
+}
+
+/// `[mcp_server]` — Bean đóng vai **MCP server** read-only (M25).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpServerConfigSettings {
+    /// Bật chế độ MCP server. Mặc định `false` (bề mặt tấn công mới, phải bật tường minh).
+    pub enabled: bool,
+    /// Bật transport HTTP (streamable-HTTP/SSE). stdio luôn khả dụng qua `BeanAgent mcp`.
+    pub http_enabled: bool,
+    /// Địa chỉ bind cho transport HTTP; mặc định chỉ loopback, giống `[web]` (mục 15.7).
+    pub bind: SocketAddr,
+    /// Origin công khai của endpoint MCP (kiểm `Host`/`Origin` khi bật HTTP).
+    pub public_origin: String,
+    /// Cho phép bind ngoài loopback — phải đặt sau reverse proxy TLS/Tailscale.
+    pub allow_remote: bool,
+    /// TTL của token client (giờ). `0` ⇒ không hết hạn.
+    pub token_ttl_hours: u32,
+    /// Cho phép truy cập theo `Host` khác `public_origin` (mặc định chỉ loopback).
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Default for McpServerConfigSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            http_enabled: false,
+            bind: SocketAddr::from(([127, 0, 0, 1], 7879)),
+            public_origin: "http://127.0.0.1:7879".to_string(),
+            allow_remote: false,
+            token_ttl_hours: 8760,
+            allowed_hosts: Vec::new(),
+        }
+    }
+}
+
 /// Cấu hình gốc của BeanAgent (`BeanAgent.toml`).
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -725,6 +794,10 @@ pub struct Config {
     pub telegram: TelegramConfig,
     /// `[[mcp_servers]]`.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// `[[mcp_clients]]` — client MCP nào được phép gọi vào Bean (M25).
+    pub mcp_clients: Vec<McpClientConfig>,
+    /// `[mcp_server]` — Bean đóng vai MCP server read-only (M25).
+    pub mcp_server: McpServerConfigSettings,
 }
 
 /// Secret đã đọc từ biến môi trường.
@@ -819,6 +892,7 @@ impl Config {
         self.validate_infra_scope()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
+        self.validate_mcp_server()?;
         self.validate_paths()
     }
 }
@@ -872,6 +946,20 @@ impl Config {
     #[must_use]
     pub fn role(&self, name: &str) -> Option<&RoleConfig> {
         self.roles.iter().find(|role| role.name == name)
+    }
+
+    /// Tra client MCP theo tên trong `[[mcp_clients]]`.
+    #[must_use]
+    pub fn mcp_client(&self, name: &str) -> Option<&McpClientConfig> {
+        self.mcp_clients
+            .iter()
+            .find(|client| client.name.trim() == name)
+    }
+
+    /// Identity đầy đủ của một client MCP (M25): `mcp-client:<name>`.
+    #[must_use]
+    pub fn mcp_client_identity(name: &str) -> String {
+        format!("{MCP_CLIENT_PREFIX}{name}")
     }
 
     /// Ngân sách context token **riêng cho role** (M21.7).
@@ -980,6 +1068,85 @@ impl Config {
                     "agent.user_roles[`{user}`] trỏ tới role `{role}` không tồn tại trong [[roles]]"
                 )));
             }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[[mcp_clients]]` + `[mcp_server]` (M25).
+    ///
+    /// Chặn ở **tầng config** những cấu hình làm MCP server vô nghĩa hoặc không an toàn, để
+    /// không phải "phát hiện khi model tự gọi" (nguyên tắc đã dùng cho `forbid_tags` M21.6):
+    ///
+    /// * client phải có identity `mcp-client:<name>` trong `agent.user_roles` và role đó
+    ///   phải tồn tại — nếu không, `permissions_for()` trả `no-access` và client chỉ
+    ///   thấy danh sách rỗng mà không ai hiểu vì sao;
+    /// * client **không** được dùng role `admin` (tag `*`) — vai trò "mọi quyền" không có
+    ///   nghĩa trên bề mặt MCP read-only, và cho phép nó sẽ khiến người đọc cấu hình tưởng
+    ///   rằng client có thể ghi/thực thi (M25 phạm vi cứng);
+    /// * HTTP bật mà bind ngoài loopback thì phải `allow_remote = true`.
+    fn validate_mcp_server(&self) -> Result<(), ConfigError> {
+        let mut seen = BTreeSet::new();
+        for client in &self.mcp_clients {
+            let name = client.name.trim();
+            if name.is_empty() {
+                return Err(invalid("[[mcp_clients]] có client thiếu tên"));
+            }
+            if !seen.insert(name.to_string()) {
+                return Err(invalid(format!(
+                    "[[mcp_clients]] có client trùng tên `{name}`"
+                )));
+            }
+            if name.contains('/') || name.contains('\\') || name.contains(char::is_whitespace) {
+                return Err(invalid(format!(
+                    "[[mcp_clients]].name = `{name}` chứa ký tự không hợp lệ (kebab-case, không khoảng trắng hay dấu gạch chéo)"
+                )));
+            }
+            if self.role(&client.role).is_none() {
+                return Err(invalid(format!(
+                    "[[mcp_clients]].role = `{}` của `{name}` không tồn tại trong [[roles]]",
+                    client.role
+                )));
+            }
+            if self
+                .role(&client.role)
+                .is_some_and(|role| role.tag_set().contains(WILDCARD_TAG))
+            {
+                return Err(invalid(format!(
+                    "[[mcp_clients]].role = `{}` của `{name}` giữ tag `*` (admin) — MCP server \
+                     M25 chỉ read-only, cấp mọi quyền ở đây chỉ gây hiểu nhầm",
+                    client.role
+                )));
+            }
+            let identity = format!("{MCP_CLIENT_PREFIX}{name}");
+            match self.agent.user_roles.get(&identity) {
+                None => {
+                    return Err(invalid(format!(
+                        "thiếu `{identity}` trong agent.user_roles — client MCP `{name}` sẽ \
+                         resolve thành no-access và không thấy tool nào"
+                    )));
+                }
+                Some(mapped) if mapped != &client.role => {
+                    return Err(invalid(format!(
+                        "agent.user_roles[`{identity}`] = `{mapped}` khác [[mcp_clients]].role = `{}`",
+                        client.role
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+        if self.mcp_server.http_enabled
+            && !self.mcp_server.bind.ip().is_loopback()
+            && !self.mcp_server.allow_remote
+        {
+            return Err(invalid(
+                "[mcp_server].bind ngoài loopback yêu cầu allow_remote = true; nếu public, phải đặt sau reverse proxy TLS/Tailscale/VPN",
+            ));
+        }
+        if self.mcp_server.enabled && self.mcp_clients.is_empty() {
+            return Err(invalid(
+                "[mcp_server].enabled = true nhưng [[mcp_clients]] rỗng — không client nào được xác thực; \
+                 chạy `BeanAgent auth mcp-token add <tên>` để sinh token",
+            ));
         }
         Ok(())
     }
