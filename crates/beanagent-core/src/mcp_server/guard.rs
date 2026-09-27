@@ -37,9 +37,6 @@ use beanagent_types::config::McpServerConfigSettings;
 
 use crate::mcp_server::auth::hash_token;
 
-/// Hệ số nhân mặc định cho trần theo IP so với trần theo token.
-pub const DEFAULT_IP_MULTIPLIER: u32 = 5;
-
 /// Kết quả một lần kiểm tra giới hạn tần suất.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitVerdict {
@@ -84,6 +81,11 @@ struct Inner {
 impl McpRateLimiter {
     /// Dựng từ cấu hình. Trần `0` nghĩa là tắt lớp lưu lượng tương ứng (lớp chống dò
     /// token luôn bật — nó không phải thứ tuỳ chọn).
+    ///
+    /// Nguồn sự thật của mặc định (120/phút, ×5 theo IP) là
+    /// [`McpServerConfigSettings::default`], **không** phải hằng số ở đây — crate
+    /// `beanagent-core` không thể tham chiếu ngược lại `beanagent-types` cho hằng số,
+    /// nên chép lại sẽ tạo ra hai nơi sở thật và một trong hai sẽ nói dối.
     #[must_use]
     pub fn new(settings: &McpServerConfigSettings) -> Self {
         let per_minute = settings.rate_limit_per_minute;

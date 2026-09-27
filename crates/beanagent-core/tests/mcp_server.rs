@@ -349,12 +349,12 @@ fn exposed_tool_list_is_sorted_and_stable() {
 // K24 — giới hạn tần suất + nhật ký riêng `audit/mcp.jsonl`
 // ---------------------------------------------------------------------------
 
+/// Cấu hình HTTP **lấy thẳng mặc định** từ `McpServerConfigSettings` thay vì chép
+/// số: nếu mặc định đổi, test này phải đổi theo chứ không âm thầm kiểm một giá trị cũ.
 fn http_settings() -> beanagent_types::config::McpServerConfigSettings {
     beanagent_types::config::McpServerConfigSettings {
         enabled: true,
         http_enabled: true,
-        rate_limit_per_minute: 120,
-        rate_limit_ip_multiplier: 5,
         ..Default::default()
     }
 }
