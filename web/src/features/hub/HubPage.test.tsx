@@ -167,6 +167,29 @@ describe("HUB", () => {
     expect(container.querySelector("filter")).toBeNull();
   });
 
+  it("không mang nghĩa nào bằng chuyển động, và reduced-motion có lưới an toàn", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    const { container } = renderHub();
+    await screen.findByTestId("hub-topology");
+
+    // Trạng thái agent phải đọc được khi **tắt hẳn** chuyển động. Nếu sau này
+    // ai thêm `animate-pulse` vào chấm trạng thái để "cho sống", test này đỏ và
+    // bắt họ phải cân nhắc lại — đó là lý do có test.
+    const moving = Array.from(container.querySelectorAll("*")).filter((el) =>
+      Array.from(el.classList).some((c) => c.startsWith("animate-")),
+    );
+    expect(moving).toEqual([]);
+
+    // Lưới an toàn toàn cục: tắt animation/transition/scroll khi người dùng
+    // bật `prefers-reduced-motion`. Không có cái này thì lưới trên chỉ là ý thức.
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("src/index.css", "utf8");
+    const block = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(block).toContain("animation-duration: 0.01ms !important");
+    expect(block).toContain("transition-duration: 0.01ms !important");
+    expect(block).toContain("scroll-behavior: auto !important");
+  });
+
   it("favicon được sinh từ cùng hằng số hình với component", async () => {
     const { markPaths } = await import("@/components/brand/markPaths");
     const { readFileSync } = await import("node:fs");
