@@ -517,3 +517,38 @@ fn mcp_client_name_must_be_clean() {
         );
     }
 }
+
+#[test]
+fn mcp_http_without_rate_limit_is_rejected() {
+    // K24: bật transport HTTP (bề mặt có thể công khai) mà tắt trần tần suất thì cấu
+    // hình phải chết lúc nạp, không âm thầm chạy không giới hạn.
+    let body = mcp_config(
+        "[mcp_server]\nenabled = true\nhttp_enabled = true\nrate_limit_per_minute = 0\n",
+    );
+    let (_dir, path) = write_config(&body);
+    let err = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(message) if message.contains("rate_limit_per_minute")),
+        "phải chặn HTTP không giới hạn tần suất, nhận {err:?}"
+    );
+    // stdio (http_enabled = false) thì `0` vẫn hợp lệ: không có bề mặt từ xa.
+    let (_dir, path) = write_config(&mcp_config(
+        "[mcp_server]\nenabled = true\nrate_limit_per_minute = 0\n",
+    ));
+    Config::load(&path).expect("stdio thì không cần trần tần suất");
+}
+
+#[test]
+fn mcp_rate_limit_defaults_and_overrides() {
+    let (_dir, path) = write_config(&mcp_config("[mcp_server]\nenabled = true\n"));
+    let config = Config::load(&path).unwrap();
+    assert_eq!(config.mcp_server.rate_limit_per_minute, 120);
+    assert_eq!(config.mcp_server.rate_limit_ip_multiplier, 5);
+
+    let (_dir, path) = write_config(&mcp_config(
+        "[mcp_server]\nenabled = true\nrate_limit_per_minute = 300\nrate_limit_ip_multiplier = 2\n",
+    ));
+    let config = Config::load(&path).unwrap();
+    assert_eq!(config.mcp_server.rate_limit_per_minute, 300);
+    assert_eq!(config.mcp_server.rate_limit_ip_multiplier, 2);
+}

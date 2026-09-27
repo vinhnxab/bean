@@ -50,6 +50,15 @@ pub enum McpServerError {
     /// Cấu hình sai (thiếu client, bind sai…).
     #[error("cấu hình MCP server không hợp lệ: {0}")]
     Config(String),
+    /// Vượt giới hạn tần suất trên transport HTTP (K24).
+    ///
+    /// Tách riêng [`Self::Auth`] để tầng HTTP trả `429` + `Retry-After` thay vì `401`:
+    /// client hiểu "chậm lại" khác hẳn "token của bạn sai", và `429` là mã chuẩn để
+    /// client MCP tự thử lại thay vì báo lỗi cho người dùng.
+    ///
+    /// `Duration` không implement `Display` nên phải tự định dạng.
+    #[error("vượt giới hạn tần suất MCP; thử lại sau {} giây", .0.as_secs())]
+    RateLimited(std::time::Duration),
 }
 
 /// Bối cảnh dùng chung cho cả hai transport.
@@ -62,12 +71,18 @@ pub struct ServeContext {
     pub router: Arc<Router>,
     /// Bộ xác thực token.
     pub auth: Arc<McpAuth>,
-    /// Audit log (tuỳ chọn).
+    /// Audit log **chung** (audit.jsonl) — giữ nguyên để `/api/audit` và trang Audit
+    /// trong UI không mất bản ghi MCP (K24, xem `docs/decisions.md` D16.10).
     pub audit: Option<Arc<beanagent_security::AuditLog>>,
+    /// Nhật ký riêng của MCP (audit/mcp.jsonl) — mục tiêu K24: phát hiện lạm dụng
+    /// không phải lọc giữa các kênh khác.
+    pub mcp_audit: Option<Arc<beanagent_security::AuditLog>>,
     /// Cấu hình đầy đủ (chỉ đọc `mcp_server` + tra client).
     pub config: Arc<beanagent_types::Config>,
     /// Token huỷ: dừng êm server.
     pub shutdown: CancellationToken,
+    /// Giới hạn tần suất — **chỉ** dùng ở `authenticate_http` (K24).
+    pub limiter: Arc<crate::mcp_server::guard::McpRateLimiter>,
 }
 
 impl ServeContext {
@@ -89,8 +104,102 @@ impl ServeContext {
                 identity,
                 permissions,
                 audit: self.audit.clone(),
+                mcp_audit: self.mcp_audit.clone(),
             },
         ))
+    }
+
+    /// Xác thực cho transport **stdio**.
+    ///
+    /// Cố ý **không** có tham số limiter (K24): token tới từ biến môi trường mà chính
+    /// tiến trình của bạn đặt, nên không có bề mặt tấn công từ xa để giới hạn. Thêm
+    /// limiter ở đây sẽ chỉ làm vỡ phiên làm việc dài.
+    ///
+    /// # Errors
+    /// Giống [`McpAuth::authenticate`].
+    pub async fn authenticate_stdio(
+        &self,
+        token: &str,
+    ) -> Result<crate::mcp_server::auth::McpClientIdentity, McpServerError> {
+        self.auth
+            .authenticate(&self.config, token)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Ghi sự kiện **bị từ chối trước khi** tới handler (auth fail, rate-limit) vào cả
+    /// hai nhật ký.
+    ///
+    /// Ở thời điểm này chưa có danh tính client (token chưa hợp lệ) nên `channel` ghi là
+    /// `mcp-server` và IP nằm trong `args`. `retry_after_seconds = 0` nghĩa là không
+    /// phải lỗi tần suất.
+    ///
+    /// Vì sao ở đây chứ không ở [`crate::mcp_server::BeanMcpHandler`]: handler chỉ được
+    /// dựng **sau** bước xác thực, mà sự kiện cần ghi chính xảy ra **trước** bước đó.
+    /// Ghi cả hai file để nhất quán với D16.10.
+    pub fn record_denied(&self, ip: std::net::IpAddr, event: &str, retry_after_seconds: u64) {
+        let mut entry = beanagent_security::entry_now(
+            0,
+            "mcp-server",
+            event,
+            &serde_json::json!({
+                "via": "mcp",
+                "ip": ip.to_string(),
+                "retry_after_seconds": retry_after_seconds,
+            }),
+        );
+        entry.ok = Some(false);
+        entry.decision = "deny";
+        entry.decided_by = "mcp-server".into();
+        for (target, log) in [
+            ("audit.jsonl", self.audit.as_ref()),
+            ("mcp.jsonl", self.mcp_audit.as_ref()),
+        ] {
+            if let Some(log) = log
+                && let Err(error) = log.record(&entry)
+            {
+                tracing::warn!(error = %error, file = target, "không ghi được audit MCP");
+            }
+        }
+    }
+
+    /// Xác thực cho transport **HTTP** — có giới hạn tần suất (K24).
+    ///
+    /// Thứ tự cố ý là **giới hạn trước, tra DB sau**: `authenticate` băm token rồi tra
+    /// bảng `mcp_clients`; nếu tra trước thì một kẻ dò token có thể bắn hàng loạt truy
+    /// vấn vào SQLite.
+    ///
+    /// # Errors
+    /// [`McpServerError::RateLimited`] khi vượt ngưỡng; [`McpServerError::Auth`] khi
+    /// token sai/hết hạn.
+    pub async fn authenticate_http(
+        &self,
+        token: Option<&str>,
+        ip: std::net::IpAddr,
+    ) -> Result<crate::mcp_server::auth::McpClientIdentity, McpServerError> {
+        use crate::mcp_server::guard::LimitVerdict;
+        if let LimitVerdict::Limited { retry_after, .. } = self.limiter.check(token, ip) {
+            return Err(McpServerError::RateLimited(retry_after));
+        }
+        let Some(token) = token else {
+            // Không có token là một lần thất bại xác thực: phải tính vào bộ đếm để
+            // kẻ dò không lách được bằng cách bỏ trống header.
+            self.limiter.record_auth_failure(None, ip);
+            return Err(McpServerError::Auth(
+                crate::mcp_server::auth::McpAuthError::InvalidToken,
+            ));
+        };
+        match self.auth.authenticate(&self.config, token).await {
+            Ok(identity) => {
+                self.limiter.record_auth_success(token);
+                self.limiter.record_request(token, ip);
+                Ok(identity)
+            }
+            Err(error) => {
+                self.limiter.record_auth_failure(Some(token), ip);
+                Err(McpServerError::Auth(error))
+            }
+        }
     }
 }
 
@@ -115,7 +224,8 @@ pub fn bearer_token(header: Option<&str>) -> Option<&str> {
 pub async fn serve_stdio(ctx: ServeContext) -> Result<(), McpServerError> {
     let token = std::env::var(TOKEN_ENV)
         .map_err(|_| McpServerError::Auth(crate::mcp_server::auth::McpAuthError::InvalidToken))?;
-    let identity = ctx.auth.authenticate(&ctx.config, &token).await?;
+    // Đường stdio **không** đi qua limiter (K24) — xem `authenticate_stdio`.
+    let identity = ctx.authenticate_stdio(&token).await?;
     tracing::info!(client = %identity.name, role = %identity.role, "MCP server stdio sẵn sàng");
     let handler = ctx.handler_for(identity)?;
     handler.audit_event("mcp_handshake", true, None);

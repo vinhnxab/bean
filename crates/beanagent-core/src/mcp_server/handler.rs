@@ -53,8 +53,11 @@ pub struct HandlerDeps {
     pub identity: McpClientIdentity,
     /// Quyền đã resolve cho client (dùng cho `tools/list`).
     pub permissions: RolePermissions,
-    /// Audit log để ghi lại thao tác cấp quyền (tuỳ chọn).
+    /// Audit log **chung** (audit.jsonl) — giữ nguyên hành vi M25 (K24, D16.10).
     pub audit: Option<Arc<AuditLog>>,
+    /// Nhật ký riêng của MCP (audit/mcp.jsonl) — tách riêng để phát hiện lạm dụng
+    /// (K24). Ghi **song song**, không thay thế bản ghi chung.
+    pub mcp_audit: Option<Arc<AuditLog>>,
 }
 
 /// Handler phục vụ một client MCP đã xác thực.
@@ -81,8 +84,12 @@ impl BeanMcpHandler {
     }
 
     /// Ghi một sự kiện xác thực/phiên vào audit (client nào, tool nào, lúc nào — M25 mục 5).
+    ///
+    /// Ghi **song song** vào `audit.jsonl` và `mcp.jsonl` (K24, D16.10). Không thay thế:
+    /// `/api/audit` và trang Audit trong UI đọc `audit.jsonl` và đang hiển thị bản ghi
+    /// `channel = mcp-client:*`; bỏ đi sẽ làm mất lịch sử mà không ai hỏi. Lỗi ghi log
+    /// không được làm hỏng request nào — chỉ cảnh báo (mục 6).
     pub fn audit_event(&self, event: &str, ok: bool, error: Option<&str>) {
-        let Some(log) = &self.deps.audit else { return };
         let mut entry = beanagent_security::entry_now(
             0,
             &self.deps.identity.user_id,
@@ -93,8 +100,15 @@ impl BeanMcpHandler {
         entry.decision = if ok { "allow" } else { "deny" };
         entry.decided_by = self.deps.identity.user_id.clone();
         entry.error = error.map(str::to_string);
-        if let Err(error) = log.record(&entry) {
-            tracing::warn!(error = %error, "không ghi được audit MCP");
+        for (target, log) in [
+            ("audit.jsonl", self.deps.audit.as_ref()),
+            ("mcp.jsonl", self.deps.mcp_audit.as_ref()),
+        ] {
+            if let Some(log) = log
+                && let Err(error) = log.record(&entry)
+            {
+                tracing::warn!(error = %error, file = target, "không ghi được audit MCP");
+            }
         }
     }
 
@@ -181,6 +195,24 @@ impl ServerHandler for BeanMcpHandler {
             .router
             .call_tool_as(&self.deps.identity.user_id, &tool_name, raw)
             .await;
+        // Nhật ký riêng `mcp.jsonl` (K24): `Router::call_tool_as` đã ghi bản audit chung
+        // ở đúng một điểm, nên ở đây **chỉ** ghi thêm vào file MCP chứ không thay thế
+        // hay kiểm tra gì thêm — quyền vẫn quyết định ở `call_tool_as` (D16.5 giữ nguyên).
+        if let Some(log) = &self.deps.mcp_audit {
+            let mut entry = beanagent_security::entry_now(
+                0,
+                &self.deps.identity.user_id,
+                &tool_name,
+                &serde_json::json!({"via": "mcp", "role": self.deps.identity.role}),
+            );
+            entry.ok = Some(result.is_ok());
+            entry.decision = if result.is_ok() { "allow" } else { "deny" };
+            entry.decided_by = self.deps.identity.user_id.clone();
+            entry.error = result.as_ref().err().map(ToString::to_string);
+            if let Err(error) = log.record(&entry) {
+                tracing::warn!(error = %error, "không ghi được mcp.jsonl");
+            }
+        }
         Ok(match result {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
             // Lỗi tool ⇒ `CallToolResult::error` (tool-level) chứ không phải

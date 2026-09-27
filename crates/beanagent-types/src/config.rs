@@ -740,6 +740,17 @@ pub struct McpServerConfigSettings {
     pub token_ttl_hours: u32,
     /// Cho phép truy cập theo `Host` khác `public_origin` (mặc định chỉ loopback).
     pub allowed_hosts: Vec<String>,
+    /// Số request/phút tối đa cho **một token** trên transport HTTP (K24).
+    ///
+    /// Chỉ có tác dụng khi `http_enabled = true`. `0` = không giới hạn. Mặc định 120
+    /// đủ rộng cho một phiên coding dài (agent gọi tool liên tục) nhưng vẫn chặn được
+    /// token lộ bị dùng để quét dữ liệu.
+    pub rate_limit_per_minute: u32,
+    /// Hệ số nhân thêm cho giới hạn theo **IP** so với giới hạn theo token.
+    ///
+    /// IP phải rộng hơn vì nhiều client hợp lệ có thể đi chung một IP (reverse proxy,
+    /// NAT, nhiều IDE trên cùng máy). `0` = tắt giới hạn theo IP.
+    pub rate_limit_ip_multiplier: u32,
 }
 
 impl Default for McpServerConfigSettings {
@@ -752,6 +763,8 @@ impl Default for McpServerConfigSettings {
             allow_remote: false,
             token_ttl_hours: 8760,
             allowed_hosts: Vec::new(),
+            rate_limit_per_minute: 120,
+            rate_limit_ip_multiplier: 5,
         }
     }
 }
@@ -1146,6 +1159,15 @@ impl Config {
             return Err(invalid(
                 "[mcp_server].enabled = true nhưng [[mcp_clients]] rỗng — không client nào được xác thực; \
                  chạy `BeanAgent auth mcp-token add <tên>` để sinh token",
+            ));
+        }
+        // K24: bề mặt HTTP có thể công khai nên phải có trần tần suất. Cấu hình sai
+        // (bật HTTP mà đặt 0) phải chết lúc nạp chứ không âm thầm mở đường không giới hạn.
+        if self.mcp_server.http_enabled && self.mcp_server.rate_limit_per_minute == 0 {
+            return Err(invalid(
+                "[mcp_server].http_enabled = true mà rate_limit_per_minute = 0 — transport HTTP là \
+                 bề mặt có thể công khai, cần trần tần suất để chặn dò token; đặt 0 chỉ hợp lệ \
+                 khi bạn tự chịu trách nhiệm (ví dụ chỉ bind loopback)",
             ));
         }
         Ok(())

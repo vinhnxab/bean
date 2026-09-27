@@ -254,6 +254,14 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         )
         .await?;
         let system = ctx.system;
+        // (K1, `D9.7`) Phiên đã compact ⇒ context mang `sessions.summary`, tức dữ liệu
+        // tổng hợp từ lịch sử có thể chứa nội dung không tin cậy. Bật cờ **ngay từ đầu
+        // lượt** để mọi tool `Confirm` trở lên phải hỏi lại ngay cả khi lượt này không
+        // chạy tool đọc nội dung nào (mục 15.4 yêu cầu hai điều kiện kèm nhau: bọc thẻ
+        // VÀ bật cờ — bọc thẻ một mình chỉ là soft control).
+        if ctx.summary_present {
+            untrusted_seen.store(true, Ordering::SeqCst);
+        }
         let mut messages = ctx.messages;
         if messages.is_empty() {
             // Provider (Anthropic) từ chối `messages: []`. Sau `append` ở trên lịch sử

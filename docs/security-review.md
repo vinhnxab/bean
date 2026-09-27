@@ -12,20 +12,23 @@
 > Toàn bộ mã nguồn sản phẩm giữ nguyên. Thay đổi duy nhất trong repo là file test
 > mới `crates/beanagent-core/tests/untrusted_file.rs` (chưa commit) dùng làm bằng chứng.
 
-### Cập nhật sau review (2026-09-26)
+### Cập nhật sau review (2026-09-26, 2026-09-27)
 
-S1 **đã được khắc phục**; nội dung dưới đây giữ nguyên làm bản ghi tại thời điểm review
-(2026-09-25, commit `399992d`) và không còn phản ánh trạng thái hiện tại.
+S1 (2026-09-26), K1 và S2 (2026-09-27) **đã được khắc phục**; nội dung dưới đây giữ nguyên
+làm bản ghi tại thời điểm review (2026-09-25, commit `399992d`) và không còn phản ánh trạng
+thái hiện tại.
 
 * **Đã vá:** bọc `<untrusted_content>` cho `read_file`/`grep`/`glob`/`list_dir` và output
   `run_shell`; bật cờ `untrusted_seen`; cắt vẫn ở ranh giới UTF-8; thêm
   `Tool::marks_untrusted()` để khai báo tường minh thay vì suy luận qua nội dung output.
-* **Bằng chứng:** `crates/beanagent-core/tests/untrusted_file.rs` (2 test, trước đây FAIL)
-  và `crates/beanagent-security/tests/untrusted_tools.rs` (11 test, gồm test hồi quy toàn
-  registry) — tất cả PASS.
-* **Thiết kế và đánh đổi:** `docs/decisions.md` mục 9 (D9.1, D9.2).
-* **Còn mở:** **K1** (`sessions.summary` chèn thẳng vào system prompt) — cùng lớp lỗi,
-  đi qua `context.rs`, chưa sửa. Các phát hiện S2–S4 dưới đây cũng chưa sửa.
+* **Bằng chứng:** `crates/beanagent-core/tests/untrusted_file.rs` (2 test, trước đây FAIL),
+  `crates/beanagent-security/tests/untrusted_tools.rs` (11 test, gồm test hồi quy toàn
+  registry), `crates/beanagent-core/tests/untrusted_summary.rs` (3 test, K1),
+  `crates/BeanAgent/src/chat.rs` + `crates/beanagent-tools/src/text.rs` (8 test, S2) —
+  tất cả PASS.
+* **Thiết kế và đánh đổi:** `docs/decisions.md` mục 9 (D9.1, D9.2) và mục 9b (D9.7, D9.8).
+* **Còn mở:** các phát hiện **S3–S4** (mục 3.3, 3.4) — đều là ghi chú thông tin, không phải
+  lỗ hổng khai thác được.
 
 ---
 
@@ -202,7 +205,7 @@ không đổi schema tool, không ảnh hưởng UI. Hai test sẽ chuyển từ
 
 ## 3. Các phát hiện khác
 
-### 3.1. K1 — Prompt injection qua `sessions.summary` (CAO, đã ghi nhận trước)
+### 3.1. K1 — Prompt injection qua `sessions.summary` (ĐÃ KHẮC PHỤC 2026-09-27)
 
 `docs/known-issues.md` đã ghi K1. Xác nhận **vẫn còn tồn tại** tại commit `399992d`:
 
@@ -214,11 +217,15 @@ system.push_str(summary.trim());
 
 Summary do LLM sinh từ lịch sử (có thể chứa nội dung web/MCP không tin cậy) được chèn thẳng
 vào **system prompt** mà không gắn nhãn — biến dữ liệu không tin cậy thành chỉ dẫn cấp hệ thống.
-Đây là **cùng lớp lỗi với S1** qua đường khác; nên sửa chung một lượt.
 
-### 3.2. S2 — Terminal escape injection qua CLI (THẤP–TRUNG BÌNH)
+**Đã vá:** bọc trong `<untrusted_content>` bằng lại `wrap_bounded` **và** bật `untrusted_seen`
+khi context có summary. Phương án bị loại và lý do, cùng đánh đổi UX đã được chủ dự án xác
+nhận: `docs/decisions.md` D9.7. Bằng chứng: `crates/beanagent-core/tests/untrusted_summary.rs`.
 
-`crates/BeanAgent/src/chat.rs:346` in thẳng `output_preview` (output của tool) ra terminal:
+### 3.2. S2 — Terminal escape injection qua CLI (ĐÃ KHẮC PHỤC 2026-09-27)
+
+**Trạng thái ban đầu (2026-09-25, commit `399992d`):** `crates/BeanAgent/src/chat.rs` in
+thẳng `output_preview` (output của tool) ra terminal:
 
 ```rust
 println!("{output_preview}");
@@ -229,7 +236,22 @@ Output của `run_shell`/`read_file` có thể chứa chuỗi escape ANSI/OSC do
 xác nhận** để người dùng bấm nhầm, hoặc dùng OSC 52 cài sẵn nội dung clipboard để người dùng
 dán nhầm lệnh khác.
 
-**Đề xuất:** lọc chuỗi C0/C1 và chuỗi `ESC`/`OSC` khỏi mọi nội dung không tin cậy trước khi in.
+**Đã vá:**
+
+* Hàm dùng chung `beanagent_tools::text::strip_terminal_escapes` — nuốt **trọn chuỗi escape**
+  (CSI/OSC/DCS, cả dạng 7-bit `ESC` lẫn 8-bit C1), không chỉ bỏ ký tự mở đầu. Giữ `\n`/`\t`
+  để output nhiều dòng vẫn đọc được; **mọi chữ thường giữ nguyên** (kể cả `[`/`]` không đi
+  kèm `ESC`).
+* CLI lấy danh sách tool untrusted từ **chính khai báo `Tool::marks_untrusted()`** (D9.1) lúc
+  khởi động ⇒ không có danh sách tool thứ hai phải đồng bộ thủ công.
+* `render_event` nhận `&mut dyn Write` để assert trên **buffer thật** thay vì terminal thật.
+
+**Bằng chứng:** `crates/BeanAgent/src/chat.rs` (4 test) + `crates/beanagent-tools/src/text.rs`
+(4 test). Test `trusted_tool_output_is_not_filtered` cố tình đưa chuỗi escape vào output của
+tool **không** untrusted để chứng minh không lọc thừa (D9.5).
+
+**Phạm vi còn mở (không phải hồi quy):** lọc áp dụng ở adapter CLI. Web render bằng React
+(escape theo DOM) và Telegram gửi plain text nên không dính bề mặt này.
 
 ### 3.3. S3 — `GET /api/audit` không giới hạn theo người dùng (THÔNG TIN)
 

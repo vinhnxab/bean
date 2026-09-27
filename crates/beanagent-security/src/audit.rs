@@ -17,6 +17,9 @@ use std::sync::{Mutex, OnceLock};
 use regex::Regex;
 use serde::Serialize;
 
+/// Tên file audit chung — `mục 15.8` nói "mọi tool call", nên đây là nơi mặc định.
+pub const AUDIT_FILE: &str = "audit.jsonl";
+
 /// Lỗi audit log.
 #[derive(Debug, thiserror::Error)]
 pub enum AuditError {
@@ -59,13 +62,35 @@ pub struct AuditLog {
 }
 
 impl AuditLog {
-    /// Mở (và tự tạo thư mục + file) audit log trong `dir`.
+    /// Mở (và tự tạo thư mục + file) audit log `audit.jsonl` trong `dir`.
     ///
     /// # Errors
     /// [`AuditError::Io`] khi không tạo được thư mục hoặc không mở được file ghi.
     pub fn open(dir: &Path) -> Result<Self, AuditError> {
+        Self::open_named(dir, AUDIT_FILE)
+    }
+
+    /// Mở một file JSONL **khác** trong cùng thư mục audit.
+    ///
+    /// K24 dùng để tách `mcp.jsonl` khỏi `audit.jsonl`. `file_name` phải là tên file đơn
+    /// giản (không có separator) — nếu không, một tên cấu hình độc hại có thể ghi đè
+    /// file tuỳ ý ngoài thư mục audit.
+    ///
+    /// # Errors
+    /// [`AuditError::Io`] khi tên file không hợp lệ, không tạo được thư mục, hoặc không
+    /// mở được file ghi.
+    pub fn open_named(dir: &Path, file_name: &str) -> Result<Self, AuditError> {
+        if file_name.is_empty()
+            || file_name.contains('/')
+            || file_name.contains('\\')
+            || file_name.contains("..")
+        {
+            return Err(AuditError::Internal(format!(
+                "tên file audit không hợp lệ: {file_name}"
+            )));
+        }
         fs::create_dir_all(dir)?;
-        let path = dir.join("audit.jsonl");
+        let path = dir.join(file_name);
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
         Ok(Self {
             file: Mutex::new(file),

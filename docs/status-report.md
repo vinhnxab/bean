@@ -12,9 +12,12 @@
 - **M1–M16:** phần lớn chức năng theo đặc tả v1 đã được viết, tích hợp và kiểm thử tự động.
 - **M17(A) — streaming token:** đã hoàn thành cho Anthropic và OpenAI-compatible, gồm SSE parser, `TextDelta` qua Router/WebSocket, UI hiện chữ dần và test reconnect/refetch.
 - **Kênh chat:** Telegram + web là bộ cuối cùng. **M18 (Discord) đã bị loại bỏ ngày 2026-09-26** — không có trong roadmap (`Plan.md` mục 5.0).
-- Cổng chất lượng gần nhất: `make check`, `make audit` và `make e2e` đều xanh; release build và headless build thành công.
-- Điểm yếu lớn nhất còn lại theo `docs/known-issues.md` là **K1: prompt injection qua `sessions.summary`** (mức cao).
-- **S1 — prompt injection qua `read_file`/`grep`/`glob`/`list_dir`/`run_shell` — đã khắc phục (2026-09-26).** Đây là cùng lớp lỗi với K1 nhưng đã có test tái hiện bằng tool thật chứng minh khai thác được. Bản vá: 5 tool đó bọc `<untrusted_content>` + bật `untrusted_seen`, thêm `Tool::marks_untrusted()` và test hồi quy. Chi tiết: `docs/security-review.md` mục 2, `docs/decisions.md` D9.1, `docs/known-issues.md` S1.
+- **Cổng chất hiện tại:** `make check`, `make audit` và `make e2e` đều xanh; release build và headless build thành công.
+- **Điểm yếu mức cao theo `docs/known-issues.md`: đã đóng hết.** Trước đây điểm yếu lớn nhất còn lại là K1 (mức cao) — nay **đã khắc phục 2026-09-27**. Việc còn mở nằm ở nhóm độ bền DB và kiểm thử thực tế, không phải bảo mật.
+- **S1 — prompt injection qua `read_file`/`grep`/`glob`/`list_dir`/`run_shell` — đã khắc phục (2026-09-26).** Chi tiết: `docs/security-review.md` mục 2, `docs/decisions.md` D9.1.
+- **K1 — prompt injection qua `sessions.summary` — đã khắc phục (2026-09-27).** Đây là nửa còn lại của cùng lớp lỗi với S1 nhưng đi qua `context.rs`. Vá: bọc `<untrusted_content>` **và** bật `untrusted_seen` khi context có summary. Đánh đổi đã được duyệt: phiên đã compact mất "cho phép trong phiên" cho tool `Confirm`/`Dangerous` tới hết phiên (`docs/decisions.md` D9.7, `docs/known-issues.md` K1 + K1-followup).
+- **S2 — terminal escape injection qua CLI — đã khắc phục (2026-09-27).** Lọc trọn chuỗi ESC/OSC cho output của mọi tool `marks_untrusted()` trước khi in ở CLI; tool không untrusted giữ nguyên hành vi (`docs/decisions.md` D9.8, `docs/security-review.md` mục 3.2).
+- **Còn mở trong báo cáo review:** S3 (`/api/audit` chưa lọc theo người dùng) và S4 (`allowed_tools` cấp quyền vĩnh viễn) — đều là **ghi chú thông tin**, cần rà lại khi chuyển multi-user / khi thêm cảnh báo UI.
 - Chưa nên coi là production-ready hoàn toàn vì chưa có kiểm thử provider thật, Telegram thật, soak test 24 giờ, E2E memory/learning đầy đủ, CI và triển khai thực tế.
 
 ## 2. Trạng thái theo milestone
@@ -24,7 +27,7 @@
 | **M1 — Skeleton** | ✅ Hoàn thành | `d5ef85a` | Cargo workspace 10 crate, config TOML, types, `FakeProvider`, CLI `chat/serve/auth`, web Vite/React/TS, Makefile | — |
 | **M2 — Provider** | 🟡 Code + test xanh | `53a8d3c` | Anthropic Messages API, OpenAI-compatible, retry/backoff, wiremock; M17 bổ sung SSE | Chưa có một lượt chat với API key thật (K12) |
 | **M3 — Tools + agent loop** | ✅ Hoàn thành | `81632aa` | Registry, file/shell tools, giới hạn bước, timeout, cancel, chống lặp, audit flow | — |
-| **M4 — Security** | ✅ Tự động | `5545cc2` | Path jail, Docker sandbox, policy Safe/Confirm/Dangerous, allow-in-session, deny-list, audit, untrusted wrapper | K1 chưa xử lý; rủi ro môi trường thật cần vận hành theo README |
+| **M4 — Security** | ✅ Tự động | `5545cc2` | Path jail, Docker sandbox, policy Safe/Confirm/Dangerous, allow-in-session, deny-list, audit, untrusted wrapper | K1 đã đóng 2026-09-27 (D9.7); rủi ro môi trường thật cần vận hành theo README |
 | **M5 — Memory** | 🟡 Code + test xanh | `c22bde5`, `b29ae73` | SQLite, FTS5, context budget, compaction an toàn, `MEMORY.md`/`USER.md`, memory tools, `/new`, persistence | Chưa có E2E memory bền vững (K11) và hội thoại dài với provider thật (K12) |
 | **M6 — Skills** | 🟡 Code + fake flow | `0a1187c` | Loader, progressive disclosure, `load_skill`, `create_skill`, skill draft | Chưa chứng minh model thật luôn nạp và làm theo skill |
 | **M7 — Web tools** | ✅ Tự động | `2582f6c` | `web_fetch`, `web_search`, HTML→text, untrusted wrapper, chống SSRF/redirect/DNS rebinding | Chưa smoke test với API tìm kiếm thật |
@@ -185,7 +188,10 @@ cp BeanAgent.example.toml BeanAgent.toml
 | Nhóm | Mục | Mức | Tóm tắt |
 |---|---|---:|---|
 | An toàn | S1 | đã đóng | `read_file`/`grep`/`glob`/`list_dir`/output `run_shell` đã bọc `<untrusted_content>` và bật `untrusted_seen`; thêm `Tool::marks_untrusted()` + test hồi quy toàn registry — xem `docs/known-issues.md` S1, `docs/decisions.md` D9.1 |
-| An toàn | K1 | cao | `sessions.summary` có thể chứa dữ liệu không tin cậy nhưng được chèn vào system prompt; cần gắn nhãn untrusted hoặc chuyển khỏi system |
+| An toàn | K1 | **đã đóng** (2026-09-27) | `sessions.summary` đã bọc `<untrusted_content>` **và** bật `untrusted_seen` khi context có summary (`TurnContext::summary_present`). Đánh đổi đã được duyệt: phiên đã compact mất "cho phép trong phiên" cho `Confirm`/`Dangerous` tới hết phiên — xem `docs/decisions.md` D9.7 |
+| An toàn | S2 | **đã đóng** (2026-09-27) | Lọc trọn chuỗi ESC/OSC cho output của mọi tool `marks_untrusted()` trước khi in ở CLI; tool không untrusted giữ nguyên hành vi — xem `docs/decisions.md` D9.8 |
+| An toàn | S3, S4 | thông tin | `/api/audit` chưa lọc theo người dùng (chấp nhận được khi v1 một người dùng); `allowed_tools` cấp quyền vĩnh viễn — UI nên cảnh báo khi task có tool `Dangerous` |
+| An toàn | K1-followup | thấp | Cân nhắc chỉ bật cờ khi summary thực sự tổng hợp từ nội dung untrusted; **chưa làm ngay**, cần dữ liệu dùng thật |
 | Độ bền DB | K2–K4 | trung bình | Context đọc toàn bộ lịch sử; store worker không timeout; một writer có thể bị query FTS chặn |
 | Store semantics | K5–K7 | trung bình | Memory search lẫn message lượt hiện tại; `clear` chưa xoá summary; `MemoryStore`/`SqliteStore` có thể lệch hành vi |
 | Search | K8–K9 | thấp | BM25 chỉ tương đối theo nguồn; cú pháp FTS bị giới hạn |
@@ -232,7 +238,8 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 
 ## 9. Khuyến nghị thứ tự tiếp theo
 
-1. **An toàn:** xử lý K1 trước khi dùng dữ liệu web/MCP thật vào compaction.
+1. **An toàn:** S1, K1, S2 đã đóng. Việc còn lại là rà S3/S4 khi chuyển multi-user và khi
+   thêm cảnh báo UI cho task `Dangerous`; cân nhắc `K1-followup` nếu dùng thật thấy mỏi tay.
 2. **Vận hành tối thiểu:** tạo `BeanAgent.toml`, đặt secret qua biến môi trường, chạy một smoke test provider thật và một smoke test Telegram thật.
 3. **E2E bền vững:** đóng gói K11 và K18; kiểm tra restart, scheduler, learning draft và skill activation.
 4. **Độ bền:** xử lý hoặc ghi nhận rõ K2–K7 trước khi có phiên dài và DB lớn.
@@ -252,7 +259,8 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [ ] Scheduler thật đã kiểm chứng.
 - [ ] MCP server bên thứ ba đã kiểm thử.
 - [x] S1 đã xử lý (2026-09-26).
-- [ ] K1 đã xử lý hoặc chấp nhận rủi ro rõ ràng.
+- [x] K1 đã xử lý (2026-09-27) — bọc `<untrusted_content>` + bật `untrusted_seen` khi có summary.
+- [x] S2 đã xử lý (2026-09-27) — lọc escape terminal cho output tool untrusted ở CLI.
 - [ ] E2E memory và learning đầy đủ.
 - [ ] Soak test 24 giờ.
 - [ ] CI và quy trình deploy/backup production.

@@ -39,12 +39,14 @@
 
 pub mod auth;
 pub mod gate;
+pub mod guard;
 pub mod handler;
 pub mod sanitize;
 pub mod transport;
 
 pub use auth::{McpAuth, McpClientIdentity, hash_token, new_token};
 pub use gate::{ExposeDecision, MCP_EXPOSED_TAGS, expose_gate};
+pub use guard::{LimitVerdict, McpRateLimiter};
 pub use handler::{BeanMcpHandler, HandlerDeps};
 pub use sanitize::sanitize_client_args;
 pub use transport::{

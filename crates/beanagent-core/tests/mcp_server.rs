@@ -20,7 +20,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use beanagent_core::mcp_server::auth::McpAuth;
-use beanagent_core::mcp_server::{self, ExposeDecision, expose_gate};
+use beanagent_core::mcp_server::transport::ServeContext;
+use beanagent_core::mcp_server::{
+    self, ExposeDecision, McpClientIdentity, McpRateLimiter, McpServerError, expose_gate,
+};
 use beanagent_core::{Router, RouterDeps};
 use beanagent_llm::FakeProvider;
 use beanagent_memory::{MemoryStore, Store};
@@ -340,4 +343,330 @@ fn exposed_tool_list_is_sorted_and_stable() {
     let mut sorted = first.clone();
     sorted.sort();
     assert_eq!(first, sorted);
+}
+
+// ---------------------------------------------------------------------------
+// K24 — giới hạn tần suất + nhật ký riêng `audit/mcp.jsonl`
+// ---------------------------------------------------------------------------
+
+fn http_settings() -> beanagent_types::config::McpServerConfigSettings {
+    beanagent_types::config::McpServerConfigSettings {
+        enabled: true,
+        http_enabled: true,
+        rate_limit_per_minute: 120,
+        rate_limit_ip_multiplier: 5,
+        ..Default::default()
+    }
+}
+
+fn loopback() -> std::net::IpAddr {
+    std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+}
+
+/// Dựng `ServeContext` thật (không mock) để test đi qua **đúng** đường HTTP mà
+/// `BeanAgent mcp serve --http` dùng: `authenticate_http`.
+fn serve_context(
+    settings: beanagent_types::config::McpServerConfigSettings,
+    audit: Option<Arc<beanagent_security::AuditLog>>,
+    mcp_audit: Option<Arc<beanagent_security::AuditLog>>,
+) -> (TempDir, ServeContext, Arc<MemoryStore>) {
+    let (_workspace, router, mut config, _billing) = setup();
+    config.mcp_server = settings.clone();
+    let store = Arc::new(MemoryStore::default());
+    let ctx = ServeContext {
+        router,
+        auth: Arc::new(McpAuth::new(store.clone())),
+        audit,
+        mcp_audit,
+        config: Arc::new(config),
+        shutdown: tokio_util::sync::CancellationToken::new(),
+        limiter: Arc::new(McpRateLimiter::new(&settings)),
+    };
+    // Workspace của `setup()` đã bị TempDir của chính nó giữ; ta tạo thêm một thư mục
+    // tạm để giữ `TempDir` sống suốt test (registry đã sao chép đường dẫn rồi).
+    (TempDir::new().unwrap(), ctx, store)
+}
+
+/// Cấp token thật cho `cline` trong store đã dựng.
+async fn issue_token(store: &MemoryStore) -> String {
+    let token = mcp_server::new_token().unwrap();
+    store
+        .create_mcp_client(
+            &mcp_server::hash_token(&token),
+            "cline",
+            "finance-readonly",
+            &chrono::Utc::now().to_rfc3339(),
+            "",
+        )
+        .await
+        .unwrap();
+    token
+}
+
+/// Test K24 (1): dò token trên transport HTTP bị khoá y như `POST /api/auth/login`
+/// (5 lần sai/60s) rồi trả `RateLimited` — **không** phải `401` mãi mãi.
+#[tokio::test]
+async fn http_transport_locks_out_after_repeated_token_failures() {
+    let (_dir, ctx, store) = serve_context(http_settings(), None, None);
+    let _good = issue_token(&store).await;
+    let bad = mcp_server::new_token().unwrap();
+
+    // 5 lần sai: vẫn là lỗi xác thực, chưa bị khoá.
+    for attempt in 1..=5 {
+        let error = ctx
+            .authenticate_http(Some(&bad), loopback())
+            .await
+            .expect_err("token sai phải bị từ chối");
+        assert!(
+            matches!(error, McpServerError::Auth(_)),
+            "lần {attempt} phải mới là lỗi xác thực, chưa phải khoá: {error}"
+        );
+    }
+    // Lần thứ 6: đã khoá. `McpServerError::RateLimited` là điều kiện để tầng HTTP trả
+    // **429** kèm `Retry-After`; nếu đổi thành biến thể khác thì client sẽ bị báo
+    // nhầm "token sai" và người dùng đi sửa cấu hình vô ích.
+    let locked = ctx
+        .authenticate_http(Some(&bad), loopback())
+        .await
+        .expect_err("sau ngưỡng login phải bị khoá");
+    let retry_after = match locked {
+        McpServerError::RateLimited(retry_after) => retry_after,
+        other => {
+            assert!(
+                matches!(other, McpServerError::RateLimited(_)),
+                "phải trả RateLimited để HTTP trả 429, thực tế: {other:?}"
+            );
+            std::time::Duration::ZERO
+        }
+    };
+    assert!(
+        retry_after >= std::time::Duration::from_secs(1),
+        "Retry-After phải >= 1 giây: {retry_after:?}"
+    );
+    // Token **đúng** cũng bị chặn khi IP đã bị khoá — đánh đổi có chủ ý của lớp chống
+    // brute-force (nếu không, kẻ dò chỉ cần tự dùng token lợi để lách).
+    assert!(matches!(
+        ctx.authenticate_http(Some(&_good), loopback()).await,
+        Err(McpServerError::RateLimited(_))
+    ));
+}
+
+/// Test K24 (2): dưới ngưỡng, token hợp lệ vẫn chạy bình thường — không rate-limit nhầm
+/// traffic thật. Đây là hồi quy quan trọng nhất: quá tay ở đây là vỡ phiên coding dài.
+#[tokio::test]
+async fn valid_token_below_the_limit_keeps_working() {
+    let (_dir, ctx, store) = serve_context(http_settings(), None, None);
+    let token = issue_token(&store).await;
+
+    // 100 lần liên tiếp, xa dưới trần 120/phút, mỗi lần đều phải xác thực được.
+    for request in 1..=100 {
+        let identity = ctx.authenticate_http(Some(&token), loopback()).await;
+        assert!(
+            identity.is_ok(),
+            "request {request} hợp lệ phải qua (lỗi: {:?})",
+            identity.err()
+        );
+        let identity = identity.expect("đã assert là Ok ở trên");
+        assert_eq!(identity.user_id, "mcp-client:cline");
+        assert_eq!(identity.role, "finance-readonly");
+    }
+}
+
+/// Test K24 (2b): vượt trần lưu lượng thì **đã xác thực** cũng bị chặn — đây là lớp
+/// chống *token lộ bị dùng*, khác hẳn lớp chống dò token ở test trên.
+#[tokio::test]
+async fn valid_token_above_the_volume_limit_is_limited() {
+    let mut settings = http_settings();
+    settings.rate_limit_per_minute = 3;
+    settings.rate_limit_ip_multiplier = 0; // chỉ kiểm lớp theo token
+    let (_dir, ctx, store) = serve_context(settings, None, None);
+    let token = issue_token(&store).await;
+
+    for request in 1..=3 {
+        assert!(
+            ctx.authenticate_http(Some(&token), loopback())
+                .await
+                .is_ok(),
+            "request {request} phải được cho qua"
+        );
+    }
+    let limited = ctx
+        .authenticate_http(Some(&token), loopback())
+        .await
+        .expect_err("request thứ 4 vượt trần 3/phút");
+    assert!(
+        matches!(limited, McpServerError::RateLimited(_)),
+        "{limited}"
+    );
+    // Trần lưu lượng theo IP tắt (`multiplier = 0`) không được kéo sập trần theo token.
+    assert!(matches!(limited, McpServerError::RateLimited(_)));
+}
+
+/// Test K24 (3): stdio **KHÔNG** bị áp rate-limit. Cùng bộ limiter đó mà HTTP dùng,
+/// nhưng 1000 lần xác thực stdio vẫn phải qua — hành vi M25 giữ nguyên.
+#[tokio::test]
+async fn stdio_transport_is_never_rate_limited() {
+    let (_dir, ctx, store) = serve_context(http_settings(), None, None);
+    let token = issue_token(&store).await;
+    let bad = mcp_server::new_token().unwrap();
+
+    // Trước hết chứng minh limiter **đang hoạt động** trên HTTP: dùng nó "hết" đi.
+    for _ in 0..10 {
+        let _ = ctx.authenticate_http(Some(&bad), loopback()).await;
+    }
+    assert!(
+        matches!(
+            ctx.authenticate_http(Some(&token), loopback()).await,
+            Err(McpServerError::RateLimited(_))
+        ),
+        "HTTP phải bị khoá (điều kiện tiên quyết của test này)"
+    );
+
+    // Giờ đi qua stdio: vượt xa mọi ngưỡng mà vẫn không bị chặn.
+    for request in 1..=1000 {
+        let identity = ctx.authenticate_stdio(&token).await;
+        assert!(
+            identity.is_ok(),
+            "stdio #{request} phải qua (lỗi: {:?})",
+            identity.err()
+        );
+        let identity = identity.expect("đã assert là Ok ở trên");
+        assert_eq!(identity.user_id, "mcp-client:cline");
+    }
+    // Kể cả khi chính token đó đã bị HTTP khoá vì dò thất bại, stdio vẫn không sao —
+    // hai transport dùng chung *cấu hình* nhưng không dùng chung *bộ đếm*.
+    assert!(ctx.authenticate_stdio(&token).await.is_ok());
+}
+
+/// Test K24 (4): một request qua MCP xuất hiện trong `audit/mcp.jsonl` với đủ thông tin
+/// (client nào, tool nào, thời điểm) — và `audit.jsonl` **vẫn còn** bản ghi (D16.10:
+/// ghi song song, không thay thế).
+#[tokio::test]
+async fn mcp_request_is_written_to_the_dedicated_log() {
+    let audit_dir = TempDir::new().unwrap();
+    let shared = Arc::new(beanagent_security::AuditLog::open(audit_dir.path()).unwrap());
+    let dedicated =
+        Arc::new(beanagent_security::AuditLog::open_named(audit_dir.path(), "mcp.jsonl").unwrap());
+    let (_dir, ctx, _store) = serve_context(
+        http_settings(),
+        Some(shared.clone()),
+        Some(dedicated.clone()),
+    );
+
+    // Đi qua đúng handler mà transport HTTP dùng, rồi gọi tool thật trên router.
+    let identity = McpClientIdentity {
+        name: "cline".into(),
+        user_id: "mcp-client:cline".into(),
+        role: "finance-readonly".into(),
+    };
+    let handler = ctx.handler_for(identity).unwrap();
+    handler.audit_event("mcp_handshake", true, None);
+    let (_workspace, router, _config, _billing) = setup();
+    assert!(
+        router
+            .call_tool_as(
+                "mcp-client:cline",
+                "billing_read_cost",
+                serde_json::json!({})
+            )
+            .await
+            .is_ok(),
+        "tool được expose phải chạy được"
+    );
+    handler.audit_event("mcp_tools_list", true, None);
+
+    // Nhật ký riêng: JSONL hợp lệ, có client + tool + thời điểm.
+    let mcp_log = std::fs::read_to_string(audit_dir.path().join("mcp.jsonl")).unwrap();
+    let lines: Vec<&str> = mcp_log.lines().collect();
+    assert_eq!(lines.len(), 2, "mỗi sự kiện MCP một dòng: {mcp_log}");
+    let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(first["channel"], "mcp-client:cline", "phải biết client nào");
+    assert_eq!(first["tool"], "mcp_handshake");
+    assert_eq!(first["decided_by"], "mcp-client:cline");
+    assert_eq!(first["ok"], true);
+    assert_eq!(first["args"]["via"], "mcp");
+    assert_eq!(first["args"]["role"], "finance-readonly");
+    // Thời điểm phải parse được là RFC3339 UTC.
+    let ts = first["ts"].as_str().expect("phải có ts");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(ts).is_ok(),
+        "ts phải là RFC3339: {ts}"
+    );
+
+    // D16.10: `audit.jsonl` giữ nguyên bản ghi chung — không mất lịch sử cho UI.
+    let shared_log = std::fs::read_to_string(audit_dir.path().join("audit.jsonl")).unwrap();
+    assert!(
+        shared_log.contains("mcp-client:cline"),
+        "audit.jsonl phải vẫn có bản ghi MCP: {shared_log}"
+    );
+    assert_eq!(
+        shared_log.lines().count(),
+        mcp_log.lines().count(),
+        "ghi song song ⇒ hai file có cùng số bản ghi"
+    );
+}
+
+/// `mcp.jsonl` không được ghi ra ngoài thư mục audit: tên file phải là tên đơn giản.
+#[test]
+fn audit_open_named_rejects_paths_outside_the_audit_dir() {
+    let dir = TempDir::new().unwrap();
+    for bad in ["", "../khoac.txt", "sub/dir.jsonl", "..\\khoac.txt", ".."] {
+        assert!(
+            beanagent_security::AuditLog::open_named(dir.path(), bad).is_err(),
+            "phải từ chối tên file {bad:?}"
+        );
+    }
+    assert!(beanagent_security::AuditLog::open_named(dir.path(), "mcp.jsonl").is_ok());
+}
+
+/// Lớp chống dò token phải để lại dấu vết trong `mcp.jsonl`.
+///
+/// Sự kiện này xảy ra **trước** khi có handler (chưa biết client nào) nên được ghi ở
+/// tầng HTTP. Nếu chỉ ghi `tracing` thì nhật ký riêng mất đúng dấu vết mà K24 cần —
+/// "phát hiện lạm dụng" chính là lúc này, không phải lúc tool chạy thành công.
+#[tokio::test]
+async fn denied_requests_are_recorded_for_abuse_detection() {
+    let audit_dir = TempDir::new().unwrap();
+    let dedicated =
+        Arc::new(beanagent_security::AuditLog::open_named(audit_dir.path(), "mcp.jsonl").unwrap());
+    let (_dir, ctx, _store) = serve_context(http_settings(), None, Some(dedicated.clone()));
+    let bad = mcp_server::new_token().unwrap();
+
+    // 5 lần sai xác thực + 1 lần bị khoá. Lặp lại đúng những gì tầng HTTP làm khi bị
+    // từ chối (xem `crates/BeanAgent/src/mcp.rs::handle`).
+    for _ in 0..6 {
+        match ctx.authenticate_http(Some(&bad), loopback()).await {
+            Err(McpServerError::RateLimited(retry_after)) => {
+                ctx.record_denied(loopback(), "mcp_rate_limited", retry_after.as_secs());
+            }
+            Err(_) => ctx.record_denied(loopback(), "mcp_auth_failed", 0),
+            Ok(_) => {}
+        }
+    }
+
+    let mcp_log = std::fs::read_to_string(audit_dir.path().join("mcp.jsonl")).unwrap();
+    assert!(!mcp_log.is_empty(), "phải có dấu vết trong mcp.jsonl");
+    let entries: Vec<serde_json::Value> = mcp_log
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("mỗi dòng phải là JSON"))
+        .collect();
+    let rate_limited: Vec<&serde_json::Value> = entries
+        .iter()
+        .filter(|entry| entry["tool"] == "mcp_rate_limited")
+        .collect();
+    assert!(
+        !rate_limited.is_empty(),
+        "phải ghi sự kiện bị giới hạn tần suất: {mcp_log}"
+    );
+    let last = rate_limited.last().expect("vừa khẳng định không rỗng");
+    assert_eq!(last["ok"], false);
+    assert_eq!(last["decision"], "deny");
+    // IP phải có trong bản ghi để điều tra được.
+    assert_eq!(last["args"]["ip"], "127.0.0.1");
+    assert!(
+        last["args"]["retry_after_seconds"].as_u64().unwrap_or(0) >= 1,
+        "phải cho client biết chờ bao lâu: {last}"
+    );
+    // Không token thô nào được ghi (kể cả token sai vừa dùng).
+    assert!(!mcp_log.contains(&bad), "không được ghi token thô vào log");
 }

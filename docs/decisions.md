@@ -301,9 +301,67 @@ Bối cảnh: `docs/security-review.md` mục 2 (S1) chứng minh `read_file`/`g
   chính agent tạo, không mang nội dung ngoài; bọc thừa làm loãng ngữ cảnh và làm mất ý
   nghĩa của thẻ. Test `write_file_output_is_not_wrapped` chốt hành vi này.
 
-* **D9.6 — K1 (`sessions.summary`) chưa sửa trong lượt này.** Cùng lớp lỗi nhưng đi đường
-  khác (`context.rs` chèn summary vào system prompt). Chủ dự án yêu cầu tách riêng; xem
-  `docs/known-issues.md` mục K1.
+* **D9.6 — K1 (`sessions.summary`) tách riêng khỏi lượt vá S1.** Cùng lớp lỗi nhưng đi
+  đường khác (`context.rs` chèn summary vào system prompt, không liên quan registry/tool).
+
+---
+
+## 9b. Quyết định riêng của lượt vá K1 + S2 (2026-09-27)
+
+Bối cảnh: `docs/security-review.md` mục 3.1 (K1) và mục 3.2 (S2). K1 là **cùng lớp lỗi với
+S1** nhưng đi đường khác: S1 là output tool trong *một lượt*, K1 là dữ liệu nằm trong *mọi
+lượt* của một phiên đã compact.
+
+* **D9.7 — K1: bọc summary trong `<untrusted_content>` **và** bật `untrusted_seen` khi
+  context có summary.** `context.rs` dùng lại `untrusted::wrap_bounded` (D9.2/D9.3) —
+  không viết thuật toán bọc mới — và trả về thêm cờ `TurnContext::summary_present`;
+  `agent.rs` bật `untrusted_seen` ngay từ đầu lượt khi cờ này bật.
+
+  **Vì sao bắt buộc phải bật cờ, không chỉ bọc thẻ.** Mục 15.4 quy định **hai điều kiện
+  kèm nhau**: bọc thẻ *và* bật cờ. Bọc thẻ một mình là *soft control* (model có thể vẫn
+  chọn tin theo chỉ dẫn nằm trong khối), còn cờ mới là *hard control* ở tầng `Policy` —
+  nó chặn hành vi độc lập với việc model có ngoan hay không. Bỏ chỉ bọc thẻ còn làm hỏng
+  chính lớp phòng thủ của hệ thống: nó dạy lại đội ngũ rằng "đã bọc là an toàn", đúng cái
+  bẫy đã gây ra S1. Về mặt kiểm chứng: khi bỏ đúng ba dòng bật cờ, test
+  `summary_injection_forces_reconfirmation_of_confirm_tool` **fail** với `confirms: []` —
+  tức `write_file` chạy thẳng không hỏi, đúng kịch bản khai thác.
+
+  **Phương án bị loại: đưa summary ra khỏi system prompt** (thành message `User` ở đầu
+  lịch sử). Có hai vấn đề: (1) nó **không giúp test đạt** — vẫn phải bật cờ, nên mất đánh
+  đổi UX mà không đổi hành vi policy; (2) nó tự tạo rủi ro mới: message `User` tổng hợp
+  dễ bị model hiểu là *người dùng vừa nói câu đó* — tức lại là một đường leo đặc quyền,
+  chỉ khác hình thức. Nó còn phải đi quanh `safe_cut`/`trim_history` (chỗ dễ hỏng nhất của
+  codebase, mục 22.1) và đụng ngữ nghĩa ngân sách token (D8.6/D8.9). Không vi phạm Q1
+  (D8.10) vì đây là dữ liệu tóm tắt, không phải bản sao system prompt.
+
+  **Đánh đổi đã được chủ dự án xác nhận chấp nhận (2026-09-27):** phiên đã compact mất
+  tuỳ chọn "cho phép trong phiên" cho tool `Confirm`/`Dangerous` cho tới hết phiên đó.
+  Vì `untrusted_seen` được tạo mới ở **mọi** `run_turn`, đây là mọi lượt sau lần compact
+  đầu — không chỉ một lượt. Lý do chấp nhận: phiên càng dài thì càng nhiều nội dung đã
+  chảy qua nó (web, MCP, file đọc được), nên xác suất chứa chỉ dẫn dẫn dắt **cao hơn**;
+  thận trọng hơn ở đúng chỗ đó là hợp lý. Hệ quả bị ghi nhận: `no_summary_means_flag_stays_off`
+  bảo đảm phiên chưa compact **không** bị bật cờ oan — nếu không, vá K1 sẽ phá UX của
+  toàn hệ thống chứ không chỉ của phiên đã compact.
+  Hướng tinh giản nếu sau này thấy mỏi tay: xem backlog `K1-followup` trong
+  `docs/known-issues.md`.
+
+* **D9.8 — S2: lọc escape ở `beanagent_tools::text::strip_terminal_escapes`, áp dụng theo
+  khai báo `marks_untrusted()`.** Một điểm dùng chung duy nhất (không lọc rải rác), và CLI
+  lấy danh sách tool untrusted từ **chính khai báo D9.1** lúc khởi động ⇒ không có danh sách
+  tool thứ hai phải đồng bộ, thêm tool mới tự động được lọc.
+  `render_event` đổi từ `println!` sang nhận `&mut dyn Write` **để test được trên buffer
+  thật** — không thể assert "đã in ra terminal" mà không cần terminal thật.
+
+  **Vì sao nuốt trọn chuỗi escape chứ không chỉ bỏ ký tự `ESC`:** bỏ mỗi `ESC` đi sẽ để
+  lại phần thân (`]52;c;Y3VjdG9y`, `[2J`) lọt ra dưới dạng chữ thường vô nghĩa. Terminal
+  chỉ diễn giải chuỗi bắt đầu bằng `ESC`/C1 nên bỏ `ESC` đã đủ an toàn về mặt kỹ thuật, nhưng
+  nuốt trọn vừa sạch hơn vừa tránh hiển thị rác. Bộ lọc **giữ `\n`/`\t`** để output nhiều
+  dòng vẫn đọc được, và **giữ nguyên mọi chữ thường** — bao gồm cả `[`/`]` không đi kèm
+  `ESC` (output `cargo` có nhiều).
+
+  **Không lọc thừa:** tool không untrusted (`write_file` chỉ trả thông báo do agent tự tạo —
+  D9.5) giữ nguyên hành vi cũ; test `trusted_tool_output_is_not_filtered` cố tình đưa chuỗi
+  escape vào output của tool đó để chứng minh bộ lọc **không** chạy.
 
 ## 10. Kênh chat (D10.x)
 
@@ -512,9 +570,43 @@ Confirm kể cả sau allow-in-session, `marketing_draft` không có network cal
 | D16.8 | Mỗi client có **service HTTP riêng** được cache lại, không dựng mới mỗi request | `StreamableHttpService` giữ `LocalSessionManager` bên trong. Dựng mỗi request ⇒ session tạo ở `initialize` biến mất ngay và client không gọi được `tools/call`. Đồng thời cô lập session của client này khỏi client khác. | Bộ nhớ đệm theo `mcp-client:<name>`; mỗi client giữ đúng một tập session riêng. |
 | D16.9 | Log của toàn hệ thống ghi ra **stderr** | Ở `mcp serve` (stdio) thì stdout **chính là** kênh JSON-RPC; một dòng log trộn vào đó khiến client không đọc được phản hồi nào. | Đây là lỗi thật do smoke test mới bắt được, không phải lý thuyết. |
 
-**Bằng chứng:** `crates/beanagent-core/tests/mcp_server.rs` (6 test) — đủ bốn yêu cầu kiểm thử
+**Bằng chứng:** `crates/beanagent-core/tests/mcp_server.rs` (12 test) — đủ bốn yêu cầu kiểm thử
 bắt buộc của M25: token không hợp lệ bị từ chối trước handshake, `finance-readonly` chỉ
 thấy tool `billing-read`, gọi thẳng `dev_write` bị **từ chối** ở tầng thực thi, tham số
 chứa chuỗi giống SQL/FTS injection bị làm sạch; cộng `admin_wildcard_cannot_reach_write_tools_through_mcp`
 cho thấy tag `*` không vượt được cổng. Smoke test thật (stdio + streamable-HTTP) đã xác minh
 `initialize` → `tools/list` → `tools/call` với session thật.
+
+## 16b. Vá K24 — giới hạn tần suất + nhật ký riêng cho MCP server (D16.10–D16.13, 2026-09-27)
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D16.10 | `mcp.jsonl` ghi **song song** với `audit.jsonl`, **không thay thế** | Đây là lựa chọn được hỏi rõ ràng và chủ dự án chốt **song song**. Lý do kỹ thuật khiến nó ít rủi ro hơn: `GET /api/audit` và trang Audit trong UI đọc `audit.jsonl` qua `AuditLog::read_recent`, và các bản ghi `channel = mcp-client:*` **đang** hiển thị ở đó. Thay thế hoàn toàn ⇒ xoá lịch sử khỏi nơi người dùng thật sự đọc, không ai hỏi, và phải sửa cả REST lẫn UI. | Mỗi sự kiện MCP nằm ở hai file. Đổi lại: `tail -f data.dir/audit/mcp.jsonl` là nguồn **duy nhất** về MCP để phát hiện lạm dụng, không phải lọc giữa kênh. Nếu sau này muốn bỏ bản ghi chung thì đổi ở `BeanMcpHandler::audit_event` — một chỗ. |
+| D16.11 | Rút thuật toán của `POST /api/auth/login` ra `beanagent_security::ratelimit::RateLimiter` cho **cả hai** dùng chung | K24 yêu cầu "không viết thuật toán giới hạn tần suất mới". Toàn bộ toán học (cửa sổ 60s, khoá tăng dần `1<<min(n-5,8)`, trần 300s) nằm ở đúng một chỗ; `AuthService` chỉ đổi chỗ gọi. | Login **không** đổi hành vi — test `logout_and_rate_limit_are_server_side` (5 lần sai ⇒ 401, lần 6 ⇒ 429) vẫn xanh nguyên trạng. Đổi ngưỡng login về sau tự động áp cho MCP. |
+| D16.12 | `ServeContext` có hai cửa **bất đối xứng**: `authenticate_stdio` vs `authenticate_http` | Yêu cầu "áp rate-limit CHỈ cho HTTP" dễ bị vi phạm vô tình về sau. Làm nó **không thể** vi phạm bằng chữ ký hàm: `authenticate_stdio` không có tham số limiter nào để truyền, nên không ai gọi nhầm được. | Một cặp hàm phải giữ đồng bộ khi sửa. Đổi lại: stdio **không thể** bị khoá nhầm, kể cả do ai đó thêm limiter vào hàm cũ. |
+| D16.13 | Kiểm tra giới hạn **trước**, tra DB **sau**; khoá theo `hash_token`; trần cấu hình được, `http_enabled` + `0` thì validate chặn | `authenticate` băm token rồi tra `mcp_clients`; tra trước thì kẻ dò token bắn được hàng loạt truy vấn SQLite. Token thô là bí mật dài hạn — làm khoá `HashMap` sẽ giữ nó sống trong bộ nhớ tiến trình (và core dump). Còn việc cho phép `0` là để người dùng tự chịu trách nhiệm, nhưng **phải nói ra**: `http_enabled = true` mà `0` thì chết lúc nạp cấu hình. | IP lấy từ `ConnectInfo` (socket), **không** đọc `X-Forwarded-For` — header do client chọn, tin vào nó là để kẻ tấn công tự chọn khoá nào bị khoá. Phải gọi `into_make_service_with_connect_info` nếu không sẽ mọi request rơi về cùng một khoá loopback. |
+
+**Ngưỡng đã chốt (chủ dự án duyệt 2026-09-27):**
+
+| Lớp | Khoá | Ngưỡng | Chặn cái gì |
+|---|---|---|---|
+| chống dò token | token **và** IP | 5 lần/60s, khoá tăng dần tới 300s | brute-force token |
+| trần lưu lượng | token | 120 req/phút (`rate_limit_per_minute`) | token lô bị dùng để quét dữ liệu |
+| trần lưu lượng | IP | ×5 = 600 req/phút (`rate_limit_ip_multiplier`) | một IP điều khiển nhiều token |
+
+120 req/phút ≈ 2 request/giây — rộng hơn nhiều so với một agent gọi tool, nên **không**
+vỡ phiên coding dài; nhưng vẫn chặn được việc quét hàng loạt. IP nhân 5 vì nhiều client hợp
+lệ có thể đi chung một IP (reverse proxy, NAT, nhiều IDE trên một máy).
+
+**Bằng chứng:** `crates/beanagent-core/tests/mcp_server.rs` — 4 test bắt buộc của K24:
+`http_transport_locks_out_after_repeated_token_failures` (5 lần sai ⇒ 401, lần 6 ⇒
+`RateLimited`), `valid_token_below_the_limit_keeps_working` (100 request hợp lệ liên tiếp
+dưới ngưỡng đều qua — hồi quy chống rate-limit nhầm), `valid_token_above_the_volume_limit_is_limited`
+(lớp thứ hai: token **đã xác thực** cũng bị chặn khi vượt lưu lượng),
+`stdio_transport_is_never_rate_limited` (sau khi chứng minh limiter HTTP **đang** khoá,
+1000 lần `authenticate_stdio` vẫn qua — chứng minh hai transport không dùng chung bộ đếm).
+Cộng `mcp_request_is_written_to_the_dedicated_log` (client + tool + thời điểm RFC3339 trong
+`mcp.jsonl`, **và** `audit.jsonl` vẫn giữ bản ghi — bằng chứng cho D16.10),
+`audit_open_named_rejects_paths_outside_the_audit_dir`. Thêm
+`crates/beanagent-security/src/ratelimit.rs` (6 unit test, gồm trần bộ nhớ) và
+`crates/beanagent-types/tests/config.rs` (2 test cho ngưỡng + validate).

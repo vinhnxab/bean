@@ -279,6 +279,21 @@ allow_remote = false                     # bind ngoài loopback ⇒ phải true 
 token_ttl_hours = 8760                   # 8760 = 1 năm; 0 = không hết hạn
 # allowed_hosts = []                     # thêm `Host` được phép (chống DNS rebinding);
                                           # rỗng ⇒ chỉ nhận Host loopback
+#
+# K24 — giới hạn tần suất, CHỈ có tác dụng khi `http_enabled = true` (stdio thì token
+# nằm trong tiến trình của chính bạn nên không cần). Dùng **cùng** thuật toán khoá với
+# `POST /api/auth/login`:
+#   * chống dò token: 5 lần xác thực sai / 60 giây (theo cả token lẫn IP), khoá tăng dần
+#     tới 300 giây — không cấu hình được, cố ý để luôn giống đăng nhập web;
+#   * trần lưu lượng: chống trường hợp token bị lộ rồi bị dùng để quét dữ liệu.
+# rate_limit_per_minute = 120            # mỗi token; 0 = tắt (chỉ khi endpoint không
+                                          # công khai — http_enabled + 0 sẽ bị validate chặn)
+# rate_limit_ip_multiplier = 5           # trần theo IP = trần token × hệ số này;
+                                          # 0 = tắt giới hạn theo IP
+#
+# Nhật ký riêng của MCP nằm ở `data.dir/audit/mcp.jsonl` (ghi **song song** với
+# `audit.jsonl`, không thay thế). Dùng để phát hiện lạm dụng mà không phải lọc giữa
+# các kênh khác.
 
 # Mỗi client là một danh tính riêng (`mcp-client:<name>`), tách hoàn toàn khỏi
 # `telegram:<id>` / `web:admin`: token của client bị lộ KHÔNG biến thành quyền của bạn.

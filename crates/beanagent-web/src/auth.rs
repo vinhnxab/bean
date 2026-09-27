@@ -1,16 +1,16 @@
 //! Argon2id password file, 256-bit session tokens và rate-limit đăng nhập.
 
-use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use beanagent_memory::{Store, WebSessionInfo};
+use beanagent_security::ratelimit::RateLimiter;
 use beanagent_security::{AuditLog, entry_now};
 use beanagent_types::Config;
 use chrono::{DateTime, Utc};
@@ -57,20 +57,15 @@ pub struct LoginSession {
     pub expires_at: String,
 }
 
-#[derive(Debug, Default)]
-struct AttemptState {
-    failures: u32,
-    window_started: Option<Instant>,
-    locked_until: Option<Instant>,
-}
-
 struct AuthInner {
     password_hash: String,
     store: Arc<dyn Store>,
     user_id: String,
     session_ttl: Duration,
     secure_cookie: bool,
-    attempts: Mutex<HashMap<IpAddr, AttemptState>>,
+    /// Khoá theo IP dùng chung với MCP server (`beanagent_security::ratelimit`) —
+    /// thuật toán khoá nằm ở đúng một chỗ (K24).
+    attempts: RateLimiter,
 }
 
 /// Dịch vụ xác thực; DB chỉ lưu hash token.
@@ -126,7 +121,7 @@ impl AuthService {
                     u64::from(config.web.session_ttl_hours).saturating_mul(3600),
                 ),
                 secure_cookie: config.web.public_origin.starts_with("https://"),
-                attempts: Mutex::new(HashMap::new()),
+                attempts: RateLimiter::default(),
             }),
         })
     }
@@ -244,47 +239,27 @@ impl AuthService {
         format!("beanagent_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure}")
     }
 
+    /// Khoá theo IP. Tên khoá có tiền tố `ip:` để đọc log là biết đang khoá theo IP
+    /// (dùng chung `RateLimiter` với MCP nên khoá còn có thể là `token:`).
     fn check_limit(&self, ip: IpAddr) -> Result<(), AuthError> {
-        let now = Instant::now();
-        let mut attempts = self.inner.attempts.lock().map_err(|_| AuthError::Invalid)?;
-        let state = attempts.entry(ip).or_default();
-        if let Some(until) = state.locked_until
-            && until > now
-        {
-            let seconds = until
-                .checked_duration_since(now)
-                .map_or(1, |duration| duration.as_secs().saturating_add(1));
-            return Err(AuthError::RateLimited(seconds));
-        }
-        if state
-            .window_started
-            .is_none_or(|started| now.duration_since(started) >= Duration::from_secs(60))
-        {
-            state.failures = 0;
-            state.window_started = Some(now);
-            state.locked_until = None;
-        }
-        Ok(())
+        self.inner
+            .attempts
+            .check(&ip_key(ip))
+            .map_err(|wait| AuthError::RateLimited(wait.as_secs()))
     }
 
     fn record_failure(&self, ip: IpAddr) {
-        let now = Instant::now();
-        if let Ok(mut attempts) = self.inner.attempts.lock() {
-            let state = attempts.entry(ip).or_default();
-            state.failures = state.failures.saturating_add(1);
-            if state.failures >= 5 {
-                let exponent = state.failures.saturating_sub(5).min(8);
-                let seconds = 1_u64 << exponent;
-                state.locked_until = now.checked_add(Duration::from_secs(seconds.min(300)));
-            }
-        }
+        self.inner.attempts.record_failure(&ip_key(ip));
     }
 
     fn clear_attempts(&self, ip: IpAddr) {
-        if let Ok(mut attempts) = self.inner.attempts.lock() {
-            attempts.remove(&ip);
-        }
+        self.inner.attempts.clear(&ip_key(ip));
     }
+}
+
+/// Khoá IP của `AuthService` — cùng định dạng với khoá của MCP server.
+fn ip_key(ip: IpAddr) -> String {
+    format!("ip:{ip}")
 }
 
 /// Đường dẫn auth.toml từ data directory đã được Config chuẩn hoá.

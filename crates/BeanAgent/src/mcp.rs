@@ -29,13 +29,14 @@
 //!
 //! Rồi chạy `BeanAgent auth mcp-token add cline` để sinh token (in một lần duy nhất).
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use beanagent_core::mcp_server::{
-    McpAuth, McpHttpService, ServeContext, bearer_token, http_service, serve_stdio,
+    McpAuth, McpHttpService, McpRateLimiter, McpServerError, ServeContext, bearer_token,
+    http_service, serve_stdio,
 };
 use beanagent_core::{Router, RouterDeps, SqliteStore, Store};
 use beanagent_llm::{FakeProvider, LlmProvider};
@@ -97,6 +98,20 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
     );
     let built = chat::build_registry(config, store.clone(), skills, None).await?;
     let audit = chat::build_audit(config);
+    // K24: nhật ký riêng của MCP, tách khỏi `audit.jsonl` để phát hiện lạm dụng không
+    // phải lọc giữa các kênh. Vẫn ghi **song song** vào `audit.jsonl` (D16.10).
+    let mcp_audit = build_mcp_audit(config);
+    // K24: limiter dựng từ `[mcp_server]`. `0` ⇒ tắt trần lưu lượng nhưng vẫn giữ
+    // ngưỡng chống dò token (xem `McpRateLimiter`).
+    let limiter = if config.mcp_server.rate_limit_per_minute == 0 {
+        tracing::warn!(
+            "[mcp_server].rate_limit_per_minute = 0 — chỉ chống dò token, KHÔNG giới hạn \
+             lưu lượng; chỉ chấp nhận được khi endpoint không công khai"
+        );
+        McpRateLimiter::unlimited()
+    } else {
+        McpRateLimiter::new(&config.mcp_server)
+    };
     // MCP không cần LLM: client gọi tool trực tiếp, không có vòng lặp agent. Dùng
     // `FakeProvider` để Router dựng được mà không cần API key.
     let llm: Arc<dyn LlmProvider> = Arc::new(FakeProvider::echo());
@@ -114,10 +129,33 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
         auth: Arc::new(McpAuth::new(store)),
         router,
         audit,
+        mcp_audit,
         config: Arc::new(config.clone()),
         shutdown: CancellationToken::new(),
+        limiter: Arc::new(limiter),
     })
 }
+
+/// Mở `audit/mcp.jsonl`; lỗi chỉ cảnh báo trên stderr, không chặn server.
+///
+/// Ghi ra **stderr** chứ không `println!` vì ở `mcp serve` (stdio) stdout chính là kênh
+/// JSON-RPC (D16.9).
+fn build_mcp_audit(config: &Config) -> Option<Arc<beanagent_security::AuditLog>> {
+    let audit_dir = chat::expand_tilde(&config.data.dir).join("audit");
+    match beanagent_security::AuditLog::open_named(&audit_dir, MCP_AUDIT_FILE) {
+        Ok(log) => Some(Arc::new(log)),
+        Err(error) => {
+            eprintln!(
+                "cảnh báo: không mở được nhật ký MCP ở {}: {error}",
+                audit_dir.join(MCP_AUDIT_FILE).display()
+            );
+            None
+        }
+    }
+}
+
+/// Tên nhật ký riêng của MCP trong `data.dir/audit/` (K24).
+pub const MCP_AUDIT_FILE: &str = "mcp.jsonl";
 
 /// State của HTTP transport: context + **service đã dựng, theo từng client**.
 ///
@@ -175,33 +213,54 @@ async fn serve_http(context: ServeContext, bind: SocketAddr) -> anyhow::Result<(
             context,
             services: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         });
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.ok();
-        })
-        .await
-        .context("MCP HTTP server dừng lỗi")
+    // `into_make_service_with_connect_info` là điều kiện tiên quyết cho giới hạn theo IP
+    // (K24): không có nó thì `ConnectInfo` không bao giờ được chèn vào request và mọi
+    // request sẽ bị gán cùng một khoá loopback — tức là **không giới hạn được gì**.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        tokio::signal::ctrl_c().await.ok();
+    })
+    .await
+    .context("MCP HTTP server dừng lỗi")
 }
 
-/// Một request HTTP tới endpoint MCP: xác thực Bearer, rồi chuyển tiếp cho
-/// `StreamableHttpService` của **đúng client đó**.
+/// Một request HTTP tới endpoint MCP: giới hạn tần suất + xác thực Bearer, rồi
+/// chuyển tiếp cho `StreamableHttpService` của **đúng client đó**.
 async fn handle(
     axum::extract::State(state): axum::extract::State<HttpState>,
+    peer: Option<axum::extract::Extension<axum::extract::ConnectInfo<SocketAddr>>>,
     headers: axum::http::HeaderMap,
     request: axum::extract::Request,
 ) -> axum::response::Response {
     let context = &state.context;
+    // IP đã chuẩn hoá ở tầng socket. Không đọc `X-Forwarded-For`: header đó do client
+    // tự chọn, tin vào nó là để kẻ tấn công tự chọn khoá IP nào bị khoá (mục 15.7 giữ
+    // mô hình "không tin tiêu đề do người dùng kiểm soát").
+    let ip = peer.map_or(
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        |axum::extract::Extension(axum::extract::ConnectInfo(peer))| peer.ip(),
+    );
     let token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|raw| bearer_token(Some(raw)));
-    let Some(token) = token else {
-        return unauthorized("thiếu header Authorization: Bearer <token>");
-    };
-    let identity = match context.auth.authenticate(&context.config, token).await {
+    // `authenticate_http` tự kiểm tra giới hạn **trước** rồi mới tra DB (K24).
+    let identity = match context.authenticate_http(token, ip).await {
         Ok(identity) => identity,
+        Err(McpServerError::RateLimited(retry_after)) => {
+            tracing::warn!(%ip, retry_after = retry_after.as_secs(), "MCP bị giới hạn tần suất");
+            // Ghi vào `mcp.jsonl` chứ không chỉ `tracing`: mục tiêu của nhật ký riêng là
+            // để **phát hiện lạm dụng tần suất**, mà đây chính là dấu vết của hành vi đó
+            // (sự kiện này chưa tới handler nên không được `audit_event` ghi).
+            context.record_denied(ip, "mcp_rate_limited", retry_after.as_secs());
+            return too_many_requests(retry_after);
+        }
         Err(error) => {
-            tracing::warn!(error = %error, "từ chối request MCP không xác thực được");
+            tracing::warn!(%ip, error = %error, "từ chối request MCP không xác thực được");
+            context.record_denied(ip, "mcp_auth_failed", 0);
             return unauthorized("token không hợp lệ hoặc đã hết hạn");
         }
     };
@@ -232,6 +291,30 @@ async fn handle(
         // `Service::Error` của service là `Infallible` ⇒ nhánh này không bao giờ xảy ra.
         Err(never) => match never {},
     }
+}
+
+/// 429 chuẩn của streamable-HTTP: `Retry-After` để client tự thử lại đúng nhịp.
+///
+/// Trả `429` chứ không phải `401` là cố ý — `401` khiến Cline/Cursor báo "token sai"
+/// và người dùng đi sửa cấu hình vô ích, trong khi nguyên nhân thật là chạy quá nhanh.
+fn too_many_requests(retry_after: std::time::Duration) -> axum::response::Response {
+    use axum::http::header::{CACHE_CONTROL, RETRY_AFTER};
+    let seconds = retry_after.as_secs().max(1);
+    let mut response = status_response(
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+        &format!("quá nhiều request; thử lại sau {seconds} giây"),
+    );
+    let headers = response.headers_mut();
+    for (name, value) in [(RETRY_AFTER, seconds), (CACHE_CONTROL, 0)] {
+        // `value` là số nguyên ≤ 86400 nên luôn parse được; bỏ qua lỗi thay vì
+        // dùng `unwrap` (mục 0.8) — thiếu header chỉ làm client thử lại sớm hơn.
+        let _ = headers.insert(
+            name,
+            axum::http::HeaderValue::try_from(value.to_string())
+                .unwrap_or_else(|_| axum::http::HeaderValue::from_static("1")),
+        );
+    }
+    response
 }
 
 /// 401 chuẩn của streamable-HTTP: client hiểu đây là "token sai", không phải lỗi server.

@@ -34,7 +34,7 @@ pub use beanagent_types::{Risk, ToolSpec};
 pub use ctx::{AlertSink, ToolCtx};
 pub use error::ToolError;
 pub use registry::ToolRegistry;
-pub use text::{compile_regex, truncate_chars};
+pub use text::{compile_regex, strip_terminal_escapes, truncate_chars};
 pub use tool::Tool;
 pub use typed::{TypedTool, deserialize_params, typed_spec};
 pub use untrusted::{

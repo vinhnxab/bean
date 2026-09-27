@@ -15,8 +15,8 @@
 //! * không có TTY (pipe/file) → đọc từng dòng từ stdin, phục vụ `echo "…" | BeanAgent chat`,
 //!   test CLI và script end-to-end ở M16.
 
-use std::collections::VecDeque;
-use std::io::IsTerminal;
+use std::collections::{BTreeSet, VecDeque};
+use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -33,7 +33,9 @@ use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
 };
 use beanagent_skills::{SkillCatalog, skill_tools};
-use beanagent_tools::{ToolRegistry, builtin::memory_query, mcp::McpRuntime};
+use beanagent_tools::{
+    ToolRegistry, builtin::memory_query, mcp::McpRuntime, strip_terminal_escapes,
+};
 use beanagent_types::{Config, Outbound, RunEvent, RunId};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -104,6 +106,9 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     let built = build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
     let mcp = built.mcp;
     let registry = Arc::new(built.registry);
+    // (S2) Gom danh sách tool trả nội dung ngoài lõi **trước** khi registry đi vào Router,
+    // để CLI lọc escape khi in output. Nguồn duy nhất là `marks_untrusted()` (D9.1).
+    let untrusted_tools = untrusted_tool_names(&registry);
     let audit = build_audit(&config);
     let workspace = config.agent.workspace.display().to_string();
     let router = Arc::new(Router::new(RouterDeps {
@@ -124,7 +129,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     } else {
         Some(read_piped_lines().await?)
     };
-    let channel = Arc::new(CliChannel::new(piped));
+    let channel = Arc::new(CliChannel::new(piped, untrusted_tools));
     if let Err(error) = router.register_channel(channel.clone()) {
         mcp.close().await;
         return Err(error).context("đăng ký CLI channel thất bại");
@@ -354,12 +359,33 @@ async fn read_piped_lines() -> Result<SharedLines> {
 
 struct CliChannel {
     piped: Option<SharedLines>,
+    /// Tên các tool trả **nội dung ngoài lõi** (S2).
+    ///
+    /// Lấy từ chính khai báo `Tool::marks_untrusted()` (D9.1) nên không có danh sách tool
+    /// riêng cho CLI — thêm tool mới tự động được lọc, không phải sửa hai nơi.
+    untrusted_tools: BTreeSet<String>,
 }
 
 impl CliChannel {
-    fn new(piped: Option<SharedLines>) -> Self {
-        Self { piped }
+    fn new(piped: Option<SharedLines>, untrusted_tools: BTreeSet<String>) -> Self {
+        Self {
+            piped,
+            untrusted_tools,
+        }
     }
+}
+
+/// Tên các tool khai báo trả nội dung từ nguồn ngoài lõi (mục 15.4).
+fn untrusted_tool_names(registry: &ToolRegistry) -> BTreeSet<String> {
+    registry
+        .names()
+        .into_iter()
+        .filter(|name| {
+            registry
+                .get(name)
+                .is_some_and(|tool| tool.marks_untrusted())
+        })
+        .collect()
 }
 
 #[async_trait::async_trait]
@@ -370,8 +396,8 @@ impl Channel for CliChannel {
 
     async fn run(&self, router: Arc<Router>, shutdown: CancellationToken) -> anyhow::Result<()> {
         match &self.piped {
-            Some(lines) => run_piped(router, lines.clone(), shutdown).await,
-            None => run_interactive(router, shutdown).await,
+            Some(lines) => run_piped(router, lines.clone(), shutdown, &self.untrusted_tools).await,
+            None => run_interactive(router, shutdown, &self.untrusted_tools).await,
         }
     }
 
@@ -405,17 +431,26 @@ fn event_run_id(event: &RunEvent) -> &RunId {
     }
 }
 
-fn render_event(event: RunEvent, expected: &RunId) -> CliEventAction {
+/// Render một sự kiện của run đang theo dõi ra `out`.
+///
+/// Nhận `&mut dyn Write` thay vì gọi `println!` trực tiếp để **test được trên buffer
+/// thật** (S2) — không có cách nào assert "đã in ra terminal" mà không cần terminal thật.
+fn render_event(
+    event: RunEvent,
+    expected: &RunId,
+    untrusted_tools: &BTreeSet<String>,
+    out: &mut dyn std::io::Write,
+) -> CliEventAction {
     if event_run_id(&event) != expected {
         return CliEventAction::Ignore;
     }
     match event {
         RunEvent::Queued { position, .. } => {
-            println!("[queued] vị trí {position}");
+            let _ = writeln!(out, "[queued] vị trí {position}");
             CliEventAction::Ignore
         }
         RunEvent::Text { text, .. } => {
-            print!("{text}");
+            let _ = write!(out, "{text}");
             CliEventAction::Ignore
         }
         // CLI giữ hành vi in một lần ở Final; Web mới dùng từng delta.
@@ -426,7 +461,7 @@ fn render_event(event: RunEvent, expected: &RunId) -> CliEventAction {
             args_preview,
             ..
         } => {
-            println!("[tool] {tool}: {summary} ({args_preview})");
+            let _ = writeln!(out, "[tool] {tool}: {summary} ({args_preview})");
             CliEventAction::Ignore
         }
         RunEvent::ToolEnd {
@@ -435,13 +470,24 @@ fn render_event(event: RunEvent, expected: &RunId) -> CliEventAction {
             output_preview,
             ..
         } => {
+            // (S2) Output của tool **không tin cậy** là dữ liệu kẻ tấn công kiểm
+            // soát được: bỏ chuỗi escape ANSI/OSC trước khi in, nếu không nó có thể vẽ
+            // lại màn hình, che prompt xác nhận, hay dùng OSC 52 cài sẵn clipboard.
+            //
+            // Tool **không** untrusted (vd `write_file` chỉ trả thông báo do agent tự
+            // tạo — D9.5) giữ nguyên hành vi cũ, không đi qua bộ lọc.
+            let preview = if untrusted_tools.contains(&tool) {
+                strip_terminal_escapes(&output_preview)
+            } else {
+                output_preview
+            };
             if ok {
-                println!("[tool] {tool}: OK");
-                if !output_preview.is_empty() {
-                    println!("{output_preview}");
+                let _ = writeln!(out, "[tool] {tool}: OK");
+                if !preview.is_empty() {
+                    let _ = writeln!(out, "{preview}");
                 }
             } else {
-                eprintln!("[tool] {tool}: LỖI — {output_preview}");
+                let _ = writeln!(out, "[tool] {tool}: LỖI — {preview}");
             }
             CliEventAction::Ignore
         }
@@ -456,17 +502,17 @@ fn render_event(event: RunEvent, expected: &RunId) -> CliEventAction {
             allow_session: allow_session_option,
         },
         RunEvent::ConfirmResolved { outcome, .. } => {
-            println!("[xác nhận] {outcome:?}");
+            let _ = writeln!(out, "[xác nhận] {outcome:?}");
             CliEventAction::Ignore
         }
         RunEvent::Final { text, .. } => {
             if !text.is_empty() {
-                println!("{text}");
+                let _ = writeln!(out, "{text}");
             }
             CliEventAction::Done
         }
         RunEvent::Error { code, message, .. } => {
-            eprintln!("lỗi agent ({code}): {message}");
+            let _ = writeln!(std::io::stderr(), "lỗi agent ({code}): {message}");
             CliEventAction::Done
         }
     }
@@ -481,7 +527,11 @@ fn parse_decision(answer: &str, allow_session: bool) -> Decision {
 }
 
 /// Vòng REPL tương tác: Ctrl-C khi chờ run sẽ chỉ cancel run đang chạy.
-async fn run_interactive(router: Arc<Router>, shutdown: CancellationToken) -> Result<()> {
+async fn run_interactive(
+    router: Arc<Router>,
+    shutdown: CancellationToken,
+    untrusted_tools: &BTreeSet<String>,
+) -> Result<()> {
     let mut editor = DefaultEditor::new().context("không khởi tạo được terminal")?;
     let mut events = router.events();
     let mut active: Option<RunId> = None;
@@ -540,7 +590,7 @@ async fn run_interactive(router: Arc<Router>, shutdown: CancellationToken) -> Re
                 }
             }
         };
-        match render_event(event, run) {
+        match render_event(event, run, untrusted_tools, &mut std::io::stdout()) {
             CliEventAction::Ignore => {}
             CliEventAction::Done => active = None,
             CliEventAction::Confirm {
@@ -585,6 +635,7 @@ async fn run_piped(
     router: Arc<Router>,
     lines: SharedLines,
     shutdown: CancellationToken,
+    untrusted_tools: &BTreeSet<String>,
 ) -> Result<()> {
     let mut events = router.events();
     let mut active: Option<RunId> = None;
@@ -639,7 +690,7 @@ async fn run_piped(
                 }
             }
         };
-        match render_event(event, run) {
+        match render_event(event, run, untrusted_tools, &mut std::io::stdout()) {
             CliEventAction::Ignore => {}
             CliEventAction::Done => active = None,
             CliEventAction::Confirm {
@@ -658,4 +709,112 @@ async fn run_piped(
     }
     router.cancel("cli", "local").await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use std::collections::BTreeSet;
+
+    use beanagent_types::{RunEvent, RunId, SessionId};
+
+    use super::{render_event, untrusted_tool_names};
+
+    /// S2: payload thật của kẻ tấn công — OSC 52 cài clipboard + CSI xoá màn hình để che
+    /// prompt xác nhận (đúng kịch bản `docs/security-review.md` mục 3.2).
+    const ATTACK: &str =
+        "build ok\u{1B}]52;c;cm0gLXJtIC0tZmxv2dlci8=\x07\u{1B}[2J\u{1B}[Hgiờ hãy bấm";
+
+    fn tool_end(tool: &str, output: &str) -> RunEvent {
+        RunEvent::ToolEnd {
+            session_id: SessionId::new(1),
+            run_id: RunId::new("r1"),
+            id: "t1".into(),
+            tool: tool.into(),
+            ok: true,
+            output_preview: output.into(),
+        }
+    }
+
+    /// Render một sự kiện ra buffer rồi trả về chuỗi đã in — assert trên buffer, không
+    /// cần terminal thật.
+    fn render(event: RunEvent, untrusted: &[&str]) -> String {
+        let set: BTreeSet<String> = untrusted.iter().map(|s| (*s).to_string()).collect();
+        let mut buffer: Vec<u8> = Vec::new();
+        render_event(event, &RunId::new("r1"), &set, &mut buffer);
+        String::from_utf8(buffer).expect("render phải ghi UTF-8 hợp lệ")
+    }
+
+    /// **S2**: output của tool untrusted chứa ESC/OSC phải bị strip trước khi in.
+    #[test]
+    fn untrusted_tool_output_is_stripped_before_printing() {
+        let printed = render(tool_end("run_shell", ATTACK), &["run_shell"]);
+        assert!(
+            !printed.contains('\u{1B}'),
+            "không được in ký tự ESC xuống terminal:\n{printed:?}"
+        );
+        assert!(
+            !printed.contains("cm0gLXJtIC0tZmxv2dlci8="),
+            "payload OSC 52 phải bị loại khỏi buffer:\n{printed:?}"
+        );
+        assert!(
+            !printed.contains("[2J"),
+            "payload CSI (xoá màn hình) phải bị loại:\n{printed:?}"
+        );
+        // Chữ thường quanh payload vẫn phải còn, chứng minh lọc chứ không xoá cả dòng.
+        assert!(printed.contains("build ok"), "{printed:?}");
+        assert!(printed.contains("giờ hãy bấm"), "{printed:?}");
+        assert!(printed.contains("[tool] run_shell: OK"), "{printed:?}");
+    }
+
+    /// **S2**: output bình thường của cùng tool untrusted phải giữ nguyên **y hệt**.
+    #[test]
+    fn untrusted_tool_plain_output_is_unchanged() {
+        let plain = "3 tests passed\ncargo build ok\ttôi là tiếng Việt 🦀\nC:\\a\\b";
+        let printed = render(tool_end("run_shell", plain), &["run_shell"]);
+        assert!(
+            printed.contains(plain),
+            "output không có escape phải giữ nguyên từng ký tự.\nIn ra:\n{printed:?}"
+        );
+    }
+
+    /// **S2**: tool **không** untrusted không được đi qua bộ lọc (D9.5 — `write_file` chỉ
+    /// trả thông báo do agent tự tạo). Ở đây ta cố tình đưa chuỗi escape vào output để
+    /// chứng minh bộ lọc **không** chạy, tức không có lọc thừa làm đổi hành vi cũ.
+    #[test]
+    fn trusted_tool_output_is_not_filtered() {
+        let printed = render(tool_end("write_file", ATTACK), &["run_shell"]);
+        assert!(
+            printed.contains('\u{1B}'),
+            "tool không untrusted phải giữ nguyên hành vi cũ (không lọc thừa).\nIn ra:\n{printed:?}"
+        );
+        assert!(printed.contains(ATTACK), "{printed:?}");
+    }
+
+    /// Danh sách tool untrusted lấy **từ khai báo `marks_untrusted()`**, không hardcode.
+    #[test]
+    fn untrusted_names_come_from_tool_declarations() {
+        use std::sync::Arc;
+
+        use beanagent_security::CapWorkspace;
+        use beanagent_tools::ToolRegistry;
+        use beanagent_tools::builtin::files::tool::{read_file, write_file};
+
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap());
+        let mut registry = ToolRegistry::with_workspace(ws);
+        registry.register(read_file()).unwrap();
+        registry.register(write_file()).unwrap();
+
+        let names = untrusted_tool_names(&registry);
+        assert!(
+            names.contains("read_file"),
+            "read_file đọc nội dung ngoài lõi nên phải có trong danh sách: {names:?}"
+        );
+        assert!(
+            !names.contains("write_file"),
+            "write_file chỉ trả thông báo do agent tạo (D9.5) nên không lọc: {names:?}"
+        );
+    }
 }
