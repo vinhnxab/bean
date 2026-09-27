@@ -190,6 +190,38 @@ describe("HUB", () => {
     expect(block).toContain("scroll-behavior: auto !important");
   });
 
+  it("favicon không bị cắt tai: mọi nét nằm trong viewBox", async () => {
+    const { MARK_BOUNDS, MARK_NUDGE } = await import("@/components/brand/markPaths");
+    const { readFileSync } = await import("node:fs");
+    const favicon = readFileSync("public/favicon.svg", "utf8");
+
+    // SVG mặc định `overflow: hidden`: vượt `viewBox` là **bị cắt**, không báo
+    // lỗi. Bản favicon cũ đẩy tai phải ra ngoài x=24 và mất tai — mọi thứ vẫn
+    // "pass" vì test cũ chỉ kiểm tra có chứa đúng các `path`. Test này chặn đúng
+    // lớp lỗi đó.
+    const [, vbW, vbH] = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(favicon) ?? [];
+    expect(vbW).toBe("24");
+
+    // Nền phải phủ đúng `viewBox`; nền rộng hơn thì bị cắt, hẹp hơn thì lộ viền.
+    const rect = /<rect width="([\d.]+)" height="([\d.]+)"/.exec(favicon);
+    expect([rect?.[1], rect?.[2]]).toEqual([vbW, vbH]);
+
+    // Mascot sau khi dịch phải vẫn nằm trong ô.
+    const moved = {
+      minX: MARK_BOUNDS.minX + MARK_NUDGE.x,
+      maxX: MARK_BOUNDS.maxX + MARK_NUDGE.x,
+      minY: MARK_BOUNDS.minY + MARK_NUDGE.y,
+      maxY: MARK_BOUNDS.maxY + MARK_NUDGE.y,
+    };
+    expect(moved.minX).toBeGreaterThanOrEqual(0);
+    expect(moved.minY).toBeGreaterThanOrEqual(0);
+    expect(moved.maxX).toBeLessThanOrEqual(Number(vbW));
+    expect(moved.maxY).toBeLessThanOrEqual(Number(vbH));
+
+    // Và `translate` trong file phải đúng bằng hằng số đã khai báo.
+    expect(favicon).toContain(`translate(${MARK_NUDGE.x} ${MARK_NUDGE.y})`);
+  });
+
   it("favicon được sinh từ cùng hằng số hình với component", async () => {
     const { markPaths } = await import("@/components/brand/markPaths");
     const { readFileSync } = await import("node:fs");

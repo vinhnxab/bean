@@ -25,6 +25,26 @@ export const MARK_STROKE = 1.75;
 /** `viewBox` cố định 24×24 để tỉ lệ nét không đổi giữa favicon và logo. */
 export const MARK_VIEWBOX = "0 0 24 24";
 
+/**
+ * Hộp bao của mascot trong hệ toạ độ 24×24, **lớn hơn** mọi phiên bản.
+ *
+ * Dùng để canh giữa và — quan trọng hơn — để chặn lỗi cắt hình: SVG mặc định
+ * `overflow: hidden`, nên bất kỳ thứ gì vượt `viewBox` sẽ **bị cắt âm thầm**.
+ * Bản favicon cũ đẩy tai phải ra ngoài x=24 và mất tai mà không ai báo lỗi.
+ *
+ * Tai phải chạm x=21.8; y đáy là điểm cuối nét tai (17.0).
+ */
+export const MARK_BOUNDS = { minX: 2.2, minY: 4.8, maxX: 21.8, maxY: 17.0 };
+
+/**
+ * Dịch chút để mascot **cân bằng quang học** trong ô vuông: hình ngồi cao hơn
+ * tâm một chút (tâm thật ≈ 10.9 so với 12), nên hạ nhẹ xuống thay vì để lệch.
+ *
+ * Giữ nhỏ và đủ để `MARK_BOUNDS + MARK_NUDGE` vẫn nằm trong `viewBox`; test
+ * trong `HubPage.test.tsx` kiểm tra đúng bất biến này.
+ */
+export const MARK_NUDGE = { x: 0, y: 1 };
+
 /** Phiên bản mascot, chọn theo kích thước và ngữ cảnh hiển thị. */
 export type MarkVariant =
   /** Favicon 16–32px: chỉ đầu + tai + mũi. */

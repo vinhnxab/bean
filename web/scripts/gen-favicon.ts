@@ -16,7 +16,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MARK_STROKE, MARK_VIEWBOX, markPaths } from "../src/components/brand/markPaths.ts";
+import {
+  MARK_BOUNDS,
+  MARK_NUDGE,
+  MARK_STROKE,
+  MARK_VIEWBOX,
+  markPaths,
+} from "../src/components/brand/markPaths.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const target = resolve(here, "../public/favicon.svg");
@@ -29,8 +35,8 @@ const paths = markPaths("silhouette")
   .join("\n");
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${MARK_VIEWBOX}" width="32" height="32">
-  <rect width="32" height="32" rx="6" fill="#edf1f3"/>
-  <g transform="translate(4 4)" fill="none" stroke="#111a1f" stroke-width="${MARK_STROKE}" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="24" height="24" rx="4.5" fill="#edf1f3"/>
+  <g transform="translate(${MARK_NUDGE.x} ${MARK_NUDGE.y})" fill="none" stroke="#111a1f" stroke-width="${MARK_STROKE}" stroke-linecap="round" stroke-linejoin="round">
 ${paths}
   </g>
 </svg>
