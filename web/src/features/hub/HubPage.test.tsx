@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BeanAvatar } from "@/components/brand/BeanAvatar";
 import { BeanMark } from "@/components/brand/BeanMark";
 import { RealtimeProvider } from "@/features/chat/RealtimeProvider";
 import { HubPage } from "@/features/hub/HubPage";
@@ -83,11 +84,11 @@ describe("HUB", () => {
     await screen.findByTestId("agent-node-developer");
     // Logo HUB 44px nằm trong `<header>` — vị trí số 1 trong danh sách mascot.
     const header = container.querySelector("header");
-    const logo = header?.querySelector("svg");
+    const logo = header?.querySelector("img");
     expect(logo).not.toBeNull();
     expect(logo?.getAttribute("width")).toBe("44");
     // Mascot phải có nhãn trợ năng, không phải trang trí vô nghĩa.
-    expect(logo?.getAttribute("aria-label")).toBe("Bean");
+    expect(logo?.getAttribute("alt")).toBe("Bean");
   });
 
   it("trạng thái rỗng là lời mời hành động kèm mascot, không phải dòng xám", async () => {
@@ -148,14 +149,16 @@ describe("HUB", () => {
     testServer.use(agentsHandler([...FULL_AGENTS]));
     const { container } = renderHub();
     await screen.findByTestId("hub-topology");
-    // agents.md mục 12.3: không ảnh/iframe/script từ ngoài. Mascot là SVG inline.
-    expect(container.querySelector("img")).toBeNull();
+    // agents.md mục 12.3: không tài nguyên từ ngoài. Mascot **là** `<img>` ảnh
+    // thật, nên điều kiện bắt buộc không phải "không có img" mà là **mọi** `src`
+    // phải là đường dẫn cục bộ — đây mới là thứ khớp với CSP `img-src 'self'`.
+    for (const img of Array.from(container.querySelectorAll("img"))) {
+      const src = img.getAttribute("src") ?? "";
+      expect(src.startsWith("/") || src.startsWith("data:image/")).toBe(true);
+      expect(src.startsWith("http")).toBe(false);
+    }
     expect(container.querySelector("iframe")).toBeNull();
     expect(document.querySelector("script[src^='http']")).toBeNull();
-    const mark = container.querySelector("svg");
-    expect(mark).not.toBeNull();
-    // Mascot dùng currentColor ⇒ không nhúng màu cứng và không tải gì.
-    expect(mark?.getAttribute("fill")).toBe("none");
   });
 
   it("BeanMark dùng currentColor, không gradient và không bóng", () => {
@@ -165,6 +168,34 @@ describe("HUB", () => {
     expect(svg?.getAttribute("fill")).toBe("none");
     expect(container.querySelector("linearGradient")).toBeNull();
     expect(container.querySelector("filter")).toBeNull();
+  });
+
+  it("BeanAvatar trỏ tới ảnh thật, khai báo kích thước để chống layout shift", () => {
+    const { container } = render(<BeanAvatar size={44} />);
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("/bean-avatar.png");
+    // Không khai báo width/height thì ảnh đẩy layout khi tải xong.
+    expect(img?.getAttribute("width")).toBe("44");
+    expect(img?.getAttribute("height")).toBe("44");
+    // Ảnh trang trí thì `alt` rỗng + aria-hidden, không đọc vấp trình đọc màn hình.
+    expect(img?.getAttribute("alt")).toBe("");
+    expect(img?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("BeanAvatar có nhãn trợ năng khi được định danh", () => {
+    const { container } = render(<BeanAvatar size={28} title="Bean" />);
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("alt")).toBe("Bean");
+    expect(img?.hasAttribute("aria-hidden")).toBe(false);
+  });
+
+  it("ảnh avatar tồn tại trong public/ và nhỏ hơn nhiều so với ảnh gốc", async () => {
+    const { statSync } = await import("node:fs");
+    // Ảnh gốc 500×500 ~264 KB; bản dùng trong UI phải nhẹ hơn hẳn.
+    const generated = statSync("public/bean-avatar.png").size;
+    const source = statSync("brand/bean.png").size;
+    expect(generated).toBeLessThan(source);
+    expect(generated).toBeLessThan(64 * 1024);
   });
 
   it("không mang nghĩa nào bằng chuyển động, và reduced-motion có lưới an toàn", async () => {

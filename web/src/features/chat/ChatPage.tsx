@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 
 import type { DecisionDto, MessageDto } from "@/api/bindings";
+import { BeanAvatar } from "@/components/brand/BeanAvatar";
 import { ConfirmCard } from "@/components/chat/ConfirmCard";
 import { ToolCard } from "@/components/chat/ToolCard";
 import { SafeMarkdown } from "@/components/markdown/SafeMarkdown";
@@ -348,8 +349,14 @@ function HistoryMessage({
 }
 
 function MessageBubble({ messageRole, children }: { messageRole: StoredMessage["role"]; children: string }) {
+  const { t } = useI18n();
+  // Avatar chỉ ở bên Manager: tin của bạn đã căn phải, thêm ảnh sẽ thành hai
+  // hàng lệch nhau và làm rối mốc đọc "ai đang nói".
   return (
-    <div className={`flex ${messageRole === "user" ? "justify-end" : "justify-start"}`}>
+    <div className={`flex gap-2.5 ${messageRole === "user" ? "justify-end" : "justify-start"}`}>
+      {messageRole === "user" ? null : (
+        <BeanAvatar size={28} className="mt-0.5" title={t("hub.manager.name")} />
+      )}
       <div
         className={`max-w-[85%] rounded-2xl px-4 py-3 ${messageRole === "user" ? "bg-emerald-600 text-white" : "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-100"}`}
       >

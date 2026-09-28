@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Không nạp font/script từ CDN: font tự host qua @fontsource (agents.md mục 0.9, 3.2) -->
     <meta name="color-scheme" content="light dark" />
-    <!-- Favicon sinh từ `src/components/brand/markPaths.ts` (script gen-favicon) -->
+    <!-- Favicon vector sinh từ `src/components/brand/markPaths.ts` (pnpm gen:favicon).
+         Ở 16px ảnh bitmap thành vệt tối nên favicon vẫn dùng vector; phần còn lại
+         của thương hiệu dùng ảnh thật trong `bean.png` (pnpm brand). -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/png" sizes="64x64" href="/bean-icon.png" />
+    <!-- Icon màn hình chính: iOS bỏ qua SVG và chỉ nhận đúng 180×180. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>BeanAgent</title>
   </head>
   <body>

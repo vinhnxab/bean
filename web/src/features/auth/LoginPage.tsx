@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { ApiRequestError } from "@/api/client";
+import { BeanAvatar } from "@/components/brand/BeanAvatar";
 import { useLogin } from "@/features/auth/queries";
 import { useI18n } from "@/i18n";
 
@@ -33,9 +34,7 @@ export function LoginPage() {
         aria-labelledby="login-title"
       >
         <div className="mb-7">
-          <div className="mb-3 inline-flex rounded-xl bg-emerald-100 px-3 py-1 text-sm font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-            B
-          </div>
+          <BeanAvatar size={56} className="mb-3" title={t("login.title")} />
           <h1 id="login-title" className="text-2xl font-semibold tracking-tight">
             {t("login.title")}
           </h1>

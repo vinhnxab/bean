@@ -1,5 +1,5 @@
 import type { AgentReportDto } from "@/api/bindings";
-import { BeanMark } from "@/components/brand/BeanMark";
+import { BeanAvatar } from "@/components/brand/BeanAvatar";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { statusTone } from "@/features/hub/queries";
 import { useI18n } from "@/i18n";
@@ -69,7 +69,7 @@ export function Topology({ agents }: { agents: AgentReportDto[] }) {
           )}
         >
           <div className="flex items-center gap-2">
-            <BeanMark size={28} title={t("hub.manager.name")} />
+            <BeanAvatar size={28} title={t("hub.manager.name")} />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{t("hub.manager.name")}</p>
               <p className="truncate text-xs text-ink-muted">{t("hub.manager.role")}</p>
@@ -333,7 +333,7 @@ function TopologyEmpty() {
   const { t } = useI18n();
   return (
     <div className="mt-4 flex flex-col items-center gap-2 py-6 text-center">
-      <BeanMark size={56} className="text-ink-muted" />
+      <BeanAvatar size={56} />
       <p className="text-sm font-medium">{t("hub.empty.title")}</p>
       <p className="max-w-sm text-xs text-ink-muted">{t("hub.empty.description")}</p>
     </div>

@@ -2,13 +2,21 @@ import { MARK_STROKE, MARK_VIEWBOX, type MarkVariant, markPaths } from "@/compon
 import { cn } from "@/lib/utils";
 
 /**
- * Mascot Bean (poodle) — component dùng chung cho **mọi** vị trí hiển thị.
+ * Mascot Bean dạng **vector** — dùng cho favicon và các vị trí quá nhỏ để ảnh
+ * bitmap còn đọc được.
  *
- * 5 vị trí: favicon (`public/favicon.svg`, sinh từ `markPaths`), logo HUB (44px),
- * avatar Manager trong chat (28px), skeleton loading (24px), trạng thái rỗng (56px).
+ * # Ranh giới với `BeanAvatar` (ảnh thật)
  *
- * Dùng `currentColor` nên mascot tự nhận màu của vùng chứa — đó là lý do "chó poodle"
- * là **thứ ấm duy nhất** trên màn hình mà vẫn không phải một khối màu trang trí.
+ * Hai component này **cố tình khác nhau**, không phải hai bản của cùng một thứ:
+ *
+ * - `BeanAvatar` (`/bean-avatar.png`) cho avatar 28–56px: ở đó bộ lông xoăn và
+ *   bong bóng "?" đọc được, và đó mới là hình đại diện bạn muốn thấy.
+ * - `BeanMark` (vector) cho favicon 16px: ở đó chi tiết bitmap vỡ thành vệt mực,
+ *   còn đường nét vẽ thì sắc ở mọi tỉ lệ và chỉ 590 byte.
+ *
+ * `public/favicon.svg` được **sinh** từ `markPaths.ts` bằng `scripts/gen-favicon.ts`
+ * nên favicon không bao giờ lệch với component này. `BeanAvatar` không sinh gì từ
+ * vector — nó dùng ảnh gốc `web/brand/bean.png` của bạn.
  */
 export function BeanMark({
   size,

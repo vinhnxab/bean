@@ -9,7 +9,7 @@ BIN := BeanAgent
 
 .DEFAULT_GOAL := help
 
-.PHONY: help types check-rust check-web check audit build build-headless e2e smoke-scheduler \
+.PHONY: help types check-rust check-web check-brand check audit build build-headless e2e smoke-scheduler \
         fmt lint test dev-web run-chat clean
 
 help: ## In danh sách target
@@ -30,7 +30,17 @@ check-web: ## Biome + tsc + vitest + build production
 	cd $(WEB_DIR) && $(PNPM) exec biome check .
 	cd $(WEB_DIR) && $(PNPM) exec tsc --noEmit
 	cd $(WEB_DIR) && $(PNPM) exec vitest run
+	$(MAKE) check-brand
 	cd $(WEB_DIR) && $(PNPM) build
+
+# Tài nguyên thương hiệu là **sinh ra**, nên phải chống trường hợp commit ảnh cũ
+# còn nằm trong repo: đổi `bean.png` mà quên chạy `pnpm brand` thì mọi thứ vẫn
+# xanh, chỉ có mắt người thấy — cùng lớp lỗi với favicon bị cắt tai trước đây.
+# Sinh lại rồi `git diff --exit-code` y hệt cách `make types` chặn kiểu TS lệch.
+check-brand:
+	cd $(WEB_DIR) && $(PNPM) brand
+	cd $(WEB_DIR) && $(PNPM) gen:favicon
+	git diff --exit-code -- web/public
 
 check: check-rust check-web ## Cổng chất lượng của mỗi milestone
 

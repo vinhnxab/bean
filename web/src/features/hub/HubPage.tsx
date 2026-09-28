@@ -1,4 +1,4 @@
-import { BeanMark } from "@/components/brand/BeanMark";
+import { BeanAvatar } from "@/components/brand/BeanAvatar";
 import { ErrorState } from "@/components/ui/Page";
 import { ActivityFeed } from "@/features/hub/ActivityFeed";
 import { ConfirmQueue } from "@/features/hub/ConfirmQueue";
@@ -29,7 +29,7 @@ export function HubPage() {
     <div className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 pt-20 sm:px-6 md:pb-10 md:pt-8">
       <header className="mb-5 flex flex-wrap items-center gap-3">
         {/* Mascot ở góc trên-trái: thứ ấm duy nhất trên màn hình. */}
-        <BeanMark size={44} title={t("hub.manager.name")} />
+        <BeanAvatar size={44} title={t("hub.manager.name")} />
         <div>
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{t("hub.title")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted">{t("hub.description")}</p>
