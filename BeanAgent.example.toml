@@ -92,6 +92,39 @@ proposal_interval_minutes = 60
 
 # Tag `*` = mọi quyền. `forbid_tags` là chốt an toàn ở tầng code: cấp vừa cấm sẽ
 # khiến `BeanAgent` không khởi động, nên không thể lỡ tay phá nguyên tắc four-eyes.
+# ---------------------------------------------------------------------------
+# M27 — QA test-runner. Vai trò "qa" chạy test suite CÓ SẴN của dự án trong container
+# với workspace mount READ-ONLY: nó không ghi được bất kỳ file nào vào dự án, kể cả
+# khi test/build tự cố ghi (chốt chặn four-eyes ở tầng mount, không phải lời hứa).
+#
+# `[[qa.suites]]` RỖNG ⇒ mọi lần chạy đều bị từ chối (fail-closed, y hệt
+# `[[infra_scope]]` rỗng của M23). Muốn bật thì bỏ comment khối dưới đây.
+#
+# Cờ mạng KHÔNG cấu hình được: `cargo_test` luôn có mạng (CARGO_HOME=/tmp trong container
+# `--rm` nên không có cache crates.io để tải lần nữa), `vitest`/`pytest` luôn không mạng.
+# Nếu khai khác, `validate()` sẽ ghi đè và in cảnh báo — xem `docs/decisions.md` D17.2.
+#
+# [qa]
+# enabled = true
+# [qa.sandbox]
+# image = "BeanAgent-sandbox:latest"    # image PHẢI chứa toolchain của runner bên dưới
+# memory = "2g"
+# cpus = 2.0
+# pids_limit = 256
+# timeout_seconds = 900                  # test lâu hơn shell nhiều
+#
+# [[qa.suites]]
+# name = "core-unit"                     # model chỉ được chọn đúng tên này
+# runner = "cargo_test"                  # cargo_test | vitest | pytest
+# workdir = ""                           # tương đối workspace; rỗng = gốc
+# args = ["--workspace"]                 # tham số CỐ ĐỊNH, code tự dựng argv
+#
+# [[qa.suites]]
+# name = "web"
+# runner = "vitest"
+# workdir = "web"
+# args = []
+
 [[roles]]
 name = "admin"
 tool_tags = ["*"]

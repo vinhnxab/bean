@@ -31,6 +31,9 @@ pub const DEFAULT_WEB_USER: &str = "web:admin";
 /// Tên nhóm tool browser trong `[tools] enabled` (M26).
 pub const BROWSER_TOOL_GROUP: &str = "browser";
 
+/// Tên nhóm tool QA trong `[tools] enabled` (M27).
+pub const QA_TOOL_GROUP: &str = "qa";
+
 /// Nhóm tool hợp lệ cho `[tools] enabled` (agents.md mục 7.3).
 pub const KNOWN_TOOL_GROUPS: &[&str] = &[
     "files",
@@ -43,6 +46,7 @@ pub const KNOWN_TOOL_GROUPS: &[&str] = &[
     // `[browser].enabled = true` mới thực sự đăng ký (xem `validate_browser`).
     BROWSER_TOOL_GROUP,
     BILLING_TOOL_GROUP,
+    QA_TOOL_GROUP,
 ];
 
 /// Lỗi khi nạp/kiểm tra cấu hình.
@@ -335,6 +339,139 @@ impl Default for MarketingConfig {
             text_field: "text".to_string(),
         }
     }
+}
+
+/// Loại runner test mà M27 chấp nhận (đúng ba loại, không mở rộng).
+///
+/// Chọn enum **kín** thay vì chuỗi tự do là để `[[qa.suites]]` không thể biến thành đường
+/// chạy lệnh tuỳ ý: `argv` luôn do code sinh ra, người khai báo chỉ chọn *runner nào* chứ
+/// không chọn *chạy gì* (tinh thần D14.5 của M23).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QaRunner {
+    /// `cargo test` — dự án Rust.
+    CargoTest,
+    /// `vitest run` — dự án web (chạy qua `pnpm exec`, không cần `npm`).
+    Vitest,
+    /// `pytest` — dự án Python.
+    Pytest,
+}
+
+impl QaRunner {
+    /// Runner này có **bắt buộc** cần mạng không? (M27 mục 3 — khoá cứng ở tầng code)
+    ///
+    /// * `cargo_test` → **có**. `CARGO_HOME=/tmp/cargo` nằm trong container `--rm` nên cache
+    ///   crates.io không tồn tại giữa hai lần chạy ⇒ không có mạng thì suite Rust không
+    ///   build được. Đây là **ngoại lệ có chủ đích** so với mặc định `--network none` của
+    ///   toàn hệ thống, không phải sơ suất (xem `docs/decisions.md` D17.2).
+    /// * `vitest`/`pytest` → **không**; dependency nằm sẵn trong image nên chạy offline
+    ///   được, và giữ `--network none` là lớp phòng thủ chống test tự gọi mạng.
+    ///
+    /// Hàm này **cố ý không đọc cấu hình**: `[[qa.suites]]` không có trường nào lật ngược
+    /// được cờ mạng. Khi đổi sang image có sẵn toolchain/cache thì đảo quyết định ở
+    /// **đúng một chỗ này**.
+    #[must_use]
+    pub const fn needs_network(self) -> bool {
+        matches!(self, Self::CargoTest)
+    }
+}
+
+/// Một test suite khai trong `[[qa.suites]]` (M27).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct QaSuiteConfig {
+    /// Tên suite — model chỉ được chọn đúng giá trị này.
+    pub name: String,
+    /// Loại runner (xem [`QaRunner`]).
+    pub runner: QaRunner,
+    /// Thư mục chạy, **tương đối** so với workspace (ví dụ `web`). Rỗng = gốc workspace.
+    ///
+    /// Không nhận đường dẫn tuyệt đối hay `..` — `validate_qa()` chặn, và
+    /// `Sandbox::run_argv_readonly` chặn lặp ở tầng cuối.
+    #[serde(default)]
+    pub workdir: String,
+    /// Tham số **cố định** thêm vào trước (ví dụ `["--workspace"]` cho cargo).
+    ///
+    /// Đây là cấu hình của *người quản trị*, không phải của model: model chỉ chọn `suite`
+    /// và `filter`. `validate_qa()` chặn tham số rỗng.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+/// Sandbox riêng cho `qa_test` (M27).
+///
+/// **Tách khỏi** `[security.sandbox]` của `run_shell` (đúng tinh thần D14.3 của M23): runner
+/// test cần toolchain, thư mục làm việc và quyền ghi *bên trong container* (target/, cache)
+/// trong khi workspace của bạn phải mount **read-only**. Dùng chung cấu hình sẽ phá cả
+/// hai hướng bảo vệ.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct QaSandboxConfig {
+    /// Image chứa toolchain của runner (Rust/Node/Python tương ứng từng suite).
+    pub image: String,
+    /// Cho container ra mạng hay không.
+    ///
+    /// `validate_qa()` **ghi đè giá trị này** theo từng suite từ [`QaRunner::needs_network`]
+    /// và cảnh báo nếu người khai báo khác — cờ mạng không phải thứ cấu hình tự do.
+    pub network: bool,
+    /// Trần bộ nhớ.
+    pub memory: String,
+    /// Số CPU.
+    pub cpus: f32,
+    /// Trần số tiến trình trong container (chống fork bomb).
+    pub pids_limit: u32,
+    /// Thời gian tối đa cho một lần chạy suite (giây). Test thường lâu hơn shell nhiều.
+    pub timeout_seconds: u64,
+}
+
+impl Default for QaSandboxConfig {
+    fn default() -> Self {
+        Self {
+            image: "BeanAgent-sandbox:latest".to_string(),
+            // Mặc định an toàn; `validate_qa()` bật lại cho `cargo_test` (D17.2).
+            network: false,
+            memory: "2g".to_string(),
+            cpus: 2.0,
+            pids_limit: 256,
+            timeout_seconds: 900,
+        }
+    }
+}
+
+impl QaSandboxConfig {
+    /// Thành [`SandboxConfig`] để dựng `Sandbox`, giữ nguyên mọi giới hạn an toàn sẵn có
+    /// (non-root, `--cap-drop ALL`, no-new-privileges, trần bộ nhớ/CPU/pids).
+    ///
+    /// `mode` **cố ý không lấy từ cấu hình** và luôn là `Docker`: `qa_test` dựa vào mount
+    /// `:ro` để giữ four-eyes, mà ở chế độ host không thể bảo đảm được điều đó
+    /// (`run_argv_readonly` từ chối chế độ host). Nhờ vậy cấu hình không có trường `mode`
+    /// ⇒ không tồn tại cách nào lỡ tay hạ cấp cách ly, khác D14.4 của M23 vốn cho phép
+    /// host kèm cờ `allow_host` tường minh.
+    #[must_use]
+    pub fn to_sandbox_config(&self) -> SandboxConfig {
+        SandboxConfig {
+            mode: SandboxMode::Docker,
+            image: self.image.clone(),
+            network: self.network,
+            memory: self.memory.clone(),
+            cpus: self.cpus,
+            pids_limit: self.pids_limit,
+            timeout_seconds: self.timeout_seconds,
+        }
+    }
+}
+
+/// `[qa]` — domain chạy test suite cho vai trò `qa` (M27).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct QaConfig {
+    /// Bật nhóm tool QA (còn phải có `[[qa.suites]]` không rỗng mới chạy được).
+    pub enabled: bool,
+    /// Sandbox riêng cho runner test.
+    pub sandbox: QaSandboxConfig,
+    /// Danh sách suite được phép chạy. **Rỗng ⇒ mọi lần gọi đều bị từ chối** (fail-closed,
+    /// đúng như `[[infra_scope]]` rỗng của M23).
+    pub suites: Vec<QaSuiteConfig>,
 }
 
 /// Cấu hình domain `security-scan` (M23).
@@ -970,6 +1107,8 @@ pub struct Config {
     pub browser: BrowserConfig,
     /// `[marketing]` — domain marketing (M24).
     pub marketing: MarketingConfig,
+    /// `[qa]` — domain chạy test suite cho vai trò `qa` (M27).
+    pub qa: QaConfig,
     /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
     /// ánh xạ tới `agent.workspace`.
     pub projects: Vec<ProjectConfig>,
@@ -1079,6 +1218,7 @@ impl Config {
         self.validate_billing()?;
         self.validate_marketing()?;
         self.validate_infra_scope()?;
+        self.validate_qa()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
         self.validate_browser()?;
@@ -1550,6 +1690,85 @@ impl Config {
                     "[security_scan].alert_channel và alert_chat_id phải khai báo cùng nhau (hoặc cả hai để trống = không gửi cảnh báo)",
                 ));
             }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[qa]` + `[[qa.suites]]` (M27).
+    ///
+    /// `suites` rỗng **hợp lệ** và nghĩa là "từ chối mọi thứ" (fail-closed, y hệt
+    /// `[[infra_scope]]` rỗng của M23) — bật `[qa]` mà chưa khai suite thì chỉ đăng ký
+    /// được tool mà không chạy được suite nào.
+    fn validate_qa(&mut self) -> Result<(), ConfigError> {
+        if self.qa.sandbox.timeout_seconds == 0 {
+            return Err(invalid("[qa].sandbox.timeout_seconds phải > 0"));
+        }
+        if self.qa.sandbox.image.trim().is_empty() {
+            return Err(invalid("[qa].sandbox.image không được để trống"));
+        }
+
+        let mut seen = BTreeSet::new();
+        for suite in &self.qa.suites {
+            let name = suite.name.trim();
+            if name.is_empty() {
+                return Err(invalid("[[qa.suites]] có suite thiếu tên"));
+            }
+            if !seen.insert(name.to_string()) {
+                return Err(invalid(format!(
+                    "[[qa.suites]] có suite trùng tên `{name}`"
+                )));
+            }
+            // Tên suite đi vào argv và vào mô tả cho model ⇒ giới hạn bộ ký an toàn để
+            // không thể tạo ra giá trị mơ hồ khi báo cáo.
+            if name.len() > 64
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            {
+                return Err(invalid(format!(
+                    "[[qa.suites]] tên `{name}` không hợp lệ — chỉ chấp nhận chữ/số và `-`, `_`, `.` (tối đa 64 ký tự)"
+                )));
+            }
+            // `workdir` phải là đường dẫn **tương đối** trong workspace. Rỗng = gốc
+            // workspace, hợp lệ. Không nhận `..`/đường dẫn tuyệt đối: `run_argv_readonly`
+            // cũng chặn lặp ở tầng cuối, nhưng chặn sớm ở đây để lỗi lộ ra lúc nạp config
+            // chứ không phải giữa lúc agent đang review.
+            let workdir = suite.workdir.trim();
+            // Rỗng = gốc workspace, hợp lệ — phải kiểm TRƯỚC khi tách, vì `"".split('/')`
+            // trả về `[""]` và nhánh `part.is_empty()` bên dưới sẽ chặn nhầm.
+            if !workdir.is_empty()
+                && (workdir.starts_with('/')
+                    || workdir
+                        .split('/')
+                        .any(|part| part == ".." || part.is_empty()))
+            {
+                return Err(invalid(format!(
+                    "[[qa.suites]] `{name}` có workdir `{workdir}` không hợp lệ — phải là đường dẫn tương đối, không `..`, không bắt đầu bằng `/`"
+                )));
+            }
+            if suite.args.iter().any(|arg| arg.trim().is_empty()) {
+                return Err(invalid(format!(
+                    "[[qa.suites]] `{name}` có tham số rỗng trong `args`"
+                )));
+            }
+        }
+
+        // (D17.2) Cờ mạng **không phải thứ cấu hình tự do**: `QaRunner::needs_network`
+        // quyết định và `validate()` ghi đè giá trị khai báo. Ghi đè âm thầm sẽ khiến
+        // người đọc file tưởng mình đang ở chế độ offline, nên phải cảnh báo.
+        let wants_network = self
+            .qa
+            .suites
+            .iter()
+            .any(|suite| suite.runner.needs_network());
+        if self.qa.sandbox.network != wants_network {
+            tracing::warn!(
+                configured = self.qa.sandbox.network,
+                effective = wants_network,
+                "[qa].sandbox.network bị ghi đè theo runner (D17.2): cargo_test cần mạng để \
+                 tải crate, vitest/pytest chạy offline. Giá trị trong file không có tác dụng"
+            );
+            self.qa.sandbox.network = wants_network;
         }
         Ok(())
     }

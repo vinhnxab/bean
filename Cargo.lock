@@ -16,6 +16,7 @@ dependencies = [
  "beanagent-llm",
  "beanagent-marketing",
  "beanagent-memory",
+ "beanagent-qa",
  "beanagent-scan",
  "beanagent-security",
  "beanagent-skills",
@@ -491,6 +492,24 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "beanagent-qa"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "beanagent-security",
+ "beanagent-tools",
+ "beanagent-types",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]

@@ -150,6 +150,19 @@ where
         self
     }
 
+    /// Ghi đè `description` gửi cho model (M27).
+    ///
+    /// `TypedTool::build` lấy description từ doc comment của struct tham số. Có tool cần
+    /// mô tả **động** theo cấu hình lúc chạy — ví dụ `qa_test` liệt kê đúng danh sách
+    /// `[[qa.suites]]` đang khai báo, để model không phải đoán mò tên suite (D14.1).
+    ///
+    /// Chỉ ghi đè phần mô tả; schema tham số giữ nguyên do `schemars` sinh ra.
+    #[must_use]
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.spec.description = description.into();
+        self
+    }
+
     /// Mở thêm tag **bổ sung** để tool untagged vẫn hiện với một role cụ thể (M24).
     #[must_use]
     pub fn also_visible_to<I, S>(mut self, tags: I) -> Self

@@ -267,6 +267,54 @@ sẽ thành ~67.500 token và tự loại sạch lịch sử của lượt đó.
 giờ ghi base64, chỉ ghi tham chiếu `image:<media_type>:<sha256>:<độ dài>`.
 
 
+## QA test-runner (vai trò `qa` chạy test có sẵn)
+
+Tag `test-run` đã có từ M21 nhưng trước M27 **chưa tool nào dùng**, nên vai trò `qa` không
+chạy được lệnh test nào. `qa_test` đóng đúng khoảng trống đó: chạy **test suite có sẵn**
+của dự án trong container với workspace mount **read-only**.
+
+```toml
+[qa]
+enabled = true
+
+[qa.sandbox]
+image = "BeanAgent-sandbox:latest"   # image PHẢI chứa toolchain của runner
+timeout_seconds = 900                 # test lâu hơn shell nhiều
+
+[[qa.suites]]
+name = "core-unit"                    # model chỉ được chọn đúng tên này
+runner = "cargo_test"                 # cargo_test | vitest | pytest
+workdir = ""                          # tương đối workspace; rỗng = gốc
+args = ["--workspace"]                # tham số CỐ ĐỊNH, code tự dựng argv
+```
+
+**Ba ranh giới được ràng buộc ở tầng code, không phải lời hứa cho model:**
+
+1. **Chỉ chạy suite đã khai báo.** Tool không có tham số `command`/`argv`/`workdir`;
+   model chỉ chọn `suite_name` + `filter`, mọi argv do code dựng. `[[qa.suites]]` rỗng
+   ⇒ **mọi** lần gọi bị từ chối (fail-closed, y hệt `[[infra_scope]]` rỗng của M23).
+2. **Không gì được ghi vào dự án.** Workspace mount `:ro` + mọi thư mục cache
+   (`CARGO_TARGET_DIR`, `CARGO_HOME`, `HOME`…) trỏ ra `/tmp` của container. Kể cả
+   `build.rs` hay test tự cố ghi cũng **không** chạm được vào cây thư mục dự án.
+   `QaSandboxConfig` cố ý **không có** trường `mode` — chỉ chạy được trong container.
+3. **Báo cáo chuẩn hoá, không phải raw log.** Manager đọc `{status, summary, risks,
+   failed_tests}` giống hệt `ScanReport` của M23. Cả report lẫn raw log đều bọc
+   `<untrusted_content>` vì tên test/fixture/assertion do code dự án kiểm soát.
+
+**Về four-eyes.** Vai trò `qa` chạy được `qa_test` nhưng **không** thấy/gọi được
+`write_file`, `edit_file`, `run_shell` — `forbid_tags = ["dev-write"]` giữ nguyên, và
+M27 không mở bất kỳ đường ghi nào (kể cả thư mục riêng của QA).
+
+**Mức rủi ro `Confirm`, và CÓ tuỳ chọn "cho phép trong phiên"** — khác `security_scan` của
+M23 (`Dangerous`, không có tuỳ chọn). Lý do: `qa_test` chỉ đọc workspace read-only nên
+không đụng hệ thống ngoài, còn một phiên review thực tế lặp "test hỏng → sửa → chạy lại"
+nhiều lần. **Điều kiện ràng buộc**: mount `:ro` phải giữ nguyên; nới thành ghi được thì
+phải xét lại quyết định này. Xem `docs/decisions.md` D17.1–D17.8.
+
+**Cờ mạng không cấu hình được.** `cargo_test` luôn có mạng (`CARGO_HOME=/tmp` trong
+container `--rm` nên không có cache crates.io để tải lại), `vitest`/`pytest` luôn không
+mạng. Khai khác thì `validate()` ghi đè và in cảnh báo — xem D17.2.
+
 ## Docker
 
 Build image nhiều tầng (Node chỉ ở stage build; runtime là Debian slim, không có Node):

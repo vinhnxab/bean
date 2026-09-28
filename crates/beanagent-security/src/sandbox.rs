@@ -25,6 +25,27 @@ use tokio_util::sync::CancellationToken;
 /// Trần ký tự mỗi stream (stdout/stderr) trước khi ghép thành output tool.
 const MAX_STREAM_CHARS: usize = 10_000;
 
+/// Biến môi trường cố định cho container **read-only** của M27 (`run_argv_readonly`).
+///
+/// Mục đích duy nhất: **đẩy mọi thứ runner thường ghi ra ngoài cây thư mục dự án** —
+/// thư mục build của cargo, cache registry, cache bytecode của vitest, `.pytest_cache` —
+/// vào `/tmp` của container (được `--rm` xoá ngay sau khi chạy). Nhờ vậy `cargo test` /
+/// `vitest` / `pytest` build được và chạy được trong khi workspace mount `:ro`.
+///
+/// `HOME=/tmp` chặn nhiều runner ghi cache theo `$HOME`; `TMPDIR` phục vụ công cụ tạm
+/// file tạm của Node/Python. `CARGO_NET_OFFLINE` **không** đặt ở đây: `cargo_test` mặc
+/// định cần mạng (xem `docs/decisions.md` D17.2).
+const READONLY_ENV: &[(&str, &str)] = &[
+    ("CARGO_TARGET_DIR", "/tmp/target"),
+    ("CARGO_HOME", "/tmp/cargo"),
+    ("HOME", "/tmp"),
+    ("TMPDIR", "/tmp"),
+    // vitest: cache theo project root mặc định (node_modules/.vite) — ép ra /tmp.
+    ("XDG_CACHE_HOME", "/tmp/cache"),
+    // pytest: tắt ghi `.pytest_cache` trong workdir (đọc-only ⇒ sẽ crash nếu còn bật).
+    ("PYTHONDONTWRITEBYTECODE", "1"),
+];
+
 /// Kết quả một lệnh shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellOutcome {
@@ -102,36 +123,75 @@ impl Sandbox {
     /// Tách khỏi [`Self::docker_run_args`] để [`Self::run_argv`] dùng lại đúng bộ cờ này mà
     /// không phải sao chép (tránh tình trạng `run_shell` có cờ an toàn mà scanner thì không).
     fn docker_run_prefix(&self, container_name: &str) -> Vec<String> {
+        let mut args = self.docker_shared_flags(container_name);
+        // Chỉ mount workspace — file ngoài workspace không nhìn thấy từ container.
+        // KHÔNG có `:ro`: `run_shell` cần build/ghi (target/, node_modules...).
+        args.push("--volume".into());
+        args.push(format!("{}:/workspace", self.workspace.display()));
+        args.push("--workdir".into());
+        args.push("/workspace".into());
+        args
+    }
+
+    /// Cờ `docker run` **không phụ thuộc cách mount** — dùng chung cho cả đường ghi được
+    /// ([`Self::docker_run_prefix`]) và đường read-only ([`Self::docker_run_prefix_readonly`]).
+    ///
+    /// Tách riêng để "read-only" của M27 là **một** khác biệt duy nhất (`:ro` + cờ môi
+    /// trường) thay vì nhân bản cả danh sách cờ bảo mật — nhân bản là cách chắc chắn nhất
+    /// để từ nay `run_shell` có cờ mà `qa_test` mất (xem `run_argv_readonly`).
+    fn docker_shared_flags(&self, container_name: &str) -> Vec<String> {
         let cfg = &self.cfg;
         let mut args: Vec<String> = vec![
             "run".into(),
             "--rm".into(),
             "--name".into(),
             container_name.into(),
-            // Chỉ mount workspace — file ngoài workspace không nhìn thấy từ container.
-            "--volume".into(),
-            format!("{}:/workspace", self.workspace.display()),
-            "--workdir".into(),
-            "/workspace".into(),
-            // non-root: uid/gid của người chạy BeanAgent (volume ghi được, không root).
-            "--user".into(),
-            current_uid_gid(),
-            "--memory".into(),
-            cfg.memory.clone(),
-            "--cpus".into(),
-            format!("{}", cfg.cpus),
-            "--pids-limit".into(),
-            cfg.pids_limit.to_string(),
-            "--cap-drop".into(),
-            "ALL".into(),
-            "--security-opt".into(),
-            "no-new-privileges".into(),
         ];
+        // non-root: uid/gid của người chạy BeanAgent (volume ghi được, không root).
+        args.push("--user".into());
+        args.push(current_uid_gid());
+        args.push("--memory".into());
+        args.push(cfg.memory.clone());
+        args.push("--cpus".into());
+        args.push(format!("{}", cfg.cpus));
+        args.push("--pids-limit".into());
+        args.push(cfg.pids_limit.to_string());
+        args.push("--cap-drop".into());
+        args.push("ALL".into());
+        args.push("--security-opt".into());
+        args.push("no-new-privileges".into());
         if !cfg.network {
             args.push("--network".into());
             args.push("none".into());
         }
         // KHÔNG có `-e`/`--env-file`: container không nhận biến môi trường của host.
+        args
+    }
+
+    /// `docker run` cho đường **read-only** (M27 — `qa_test`).
+    ///
+    /// Khác [`Self::docker_run_prefix` ở **đúng ba chỗ**, còn lại dùng chung
+    /// [`Self::docker_shared_flags`]:
+    ///
+    /// 1. `--volume ws:/workspace:ro` — mount **read-only**. Đây là chốt chặn four-eyes
+    ///    ở tầng code cho vai trò `qa`: kể cả `build.rs` hay test tự ghi cũng **không**
+    ///    được chạm vào cây thư mục dự án, không chỉ "tay model không ghi".
+    /// 2. `--workdir` trỏ vào `workdir` tương đối của suite (đã kiểm qua path jail ở
+    ///    tầng `beanagent-qa` trước khi tới đây).
+    /// 3. Cờ `-e` **tường minh, do code dựng** (không phải env host): `CARGO_TARGET_DIR`,
+    ///    `CARGO_HOME`, `HOME` trỏ ra `/tmp` để build/test chạy được mà không ghi được
+    ///    vào workspace. Container `--rm` nên `/tmp` bị huỷ ngay sau khi chạy.
+    fn docker_run_prefix_readonly(&self, container_name: &str, workdir: &str) -> Vec<String> {
+        let mut args = self.docker_shared_flags(container_name);
+        args.push("--volume".into());
+        args.push(format!("{}:/workspace:ro", self.workspace.display()));
+        args.push("--workdir".into());
+        args.push(format!("/workspace/{workdir}"));
+        // Chỉ những biến dưới đây; KHÔNG có `--env-file` và không truyền env host.
+        for (key, value) in READONLY_ENV {
+            args.push("-e".into());
+            args.push(format!("{key}={value}"));
+        }
         args
     }
 
@@ -206,6 +266,72 @@ impl Sandbox {
                 command.current_dir(&self.workspace);
                 run_host_argv(command, timeout, cancel).await
             }
+        }
+    }
+
+    /// Chạy **argv cố định** trong container có workspace mount **read-only** (M27 — `qa_test`).
+    ///
+    /// # Vì sao là hàm MỚI thay vì sửa [`Self::run_argv`]
+    ///
+    /// [`Self::run_argv`] mount workspace **ghi được** vì `run_shell` cần build (`target/`,
+    /// `node_modules/`). Đổi chung thì `run_shell` mất khả năng build, còn hạ xuống
+    /// read-only thì nó mất quyền ghi mà vai trò `developer` cần. Vì vậy đây là **đường mới**,
+    /// khác đúng ba thứ: mount `:ro`, `--workdir` theo suite, và các cờ `-e` tường minh
+    /// ([`READONLY_ENV`]). Toàn bộ cờ bảo mật còn lại dùng chung [`Self::docker_shared_flags`].
+    ///
+    /// # Điều kiện ràng buộc quyết định "cho phép trong phiên" của `qa_test`
+    ///
+    /// `qa_test` là tool `Confirm` **có** tuỳ chọn "cho phép trong phiên" (khác `security_scan`
+    /// của M23). Đổi lại, `:ro` ở đây **phải giữ nguyên** — nó là thứ duy nhất bảo đảm vai
+    /// trò `qa` không ghi được vào workspace (kể cả qua `build.rs` hay test tự ghi). Nới
+    /// `:ro` thành ghi được là mất four-eyes, phải quay lại xét lại chính quyết định đó.
+    ///
+    /// # Panics
+    ///
+    /// Không panic: `workdir` rỗng trả [`SandboxError::Launch`]. Chế độ host trả lỗi tương
+    /// tự vì không thể bảo đảm read-only trên host — cấu hình `validate()` đã chặn trước.
+    ///
+    /// # Errors
+    ///
+    /// Như [`Self::run_argv`]; thêm lỗi khi `argv`/`workdir` không dùng được.
+    pub async fn run_argv_readonly(
+        &self,
+        argv: &[String],
+        workdir: &str,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<ShellOutcome, SandboxError> {
+        if argv.is_empty() {
+            return Err(SandboxError::Launch("argv rỗng".into()));
+        }
+        // `workdir` đã được `beanagent-qa` kiểm qua path jail, nhưng sandbox là tầng cuối
+        // nên vẫn chặn lặp: chỉ nhận đường dẫn tương đối không có `..`/đường dẫn tuyệt đối.
+        // `.` = gốc workspace (sandbox mount ở `/workspace`); chuỗi rỗng bị từ chối vì
+        // `--workdir ""` sẽ làm docker báo lỗi khó hiểu thay vì nói đúng nguyên nhân.
+        if workdir.is_empty()
+            || workdir.starts_with('/')
+            || workdir
+                .split('/')
+                .any(|part| part == ".." || part.is_empty())
+        {
+            return Err(SandboxError::Launch(format!(
+                "workdir `{workdir}` không hợp lệ — phải là đường dẫn tương đối trong workspace"
+            )));
+        }
+        match self.cfg.mode {
+            SandboxMode::Docker => {
+                let name = Self::next_container_name();
+                let mut args = self.docker_run_prefix_readonly(&name, workdir);
+                args.push(self.cfg.image.clone());
+                args.extend_from_slice(argv);
+                let timeout_secs = self.cfg.timeout_seconds;
+                run_docker(args, name, timeout_secs, timeout, cancel).await
+            }
+            SandboxMode::Host => Err(SandboxError::Launch(
+                "qa_test chỉ chạy được ở chế độ docker — chế độ host không bảo đảm được \
+                 workspace read-only, tức là mất nguyên tắc four-eyes của vai trò qa"
+                    .into(),
+            )),
         }
     }
 }
@@ -498,6 +624,109 @@ mod tests {
         );
         let args = sandbox.docker_run_args("n1", "true");
         assert!(!args.contains(&"--network".to_string()));
+    }
+
+    /// M27: đường read-only mount workspace bằng `:ro` và ép mọi thư mục cache ra `/tmp`.
+    ///
+    /// Không cần docker daemon — chỉ kiểm argv dựng ra, đúng cách test `docker_run_args`.
+    #[test]
+    fn readonly_args_mount_workspace_read_only_and_point_caches_outside() {
+        let ws = tempfile::tempdir().unwrap();
+        let sandbox = Sandbox::new(
+            SandboxConfig {
+                mode: SandboxMode::Docker,
+                network: false,
+                ..SandboxConfig::default()
+            },
+            ws.path().to_path_buf(),
+        );
+        let args = sandbox.docker_run_prefix_readonly("n-ro", "web");
+        // Lưu path trước rồi `forget` (giữ thư mục tạm sống suốt hàm như các test khác).
+        let workspace_path = ws.path().to_path_buf();
+        std::mem::forget(ws);
+        let joined = args.join(" ");
+
+        // (1) Read-only là bảo đảm four-eyes ở tầng code cho vai trò qa (M27).
+        assert!(
+            joined.contains(&format!("{}:/workspace:ro", workspace_path.display())),
+            "phải mount :ro — {joined}"
+        );
+        // (2) workdir tương đối, không thoát khỏi /workspace.
+        assert!(joined.contains("--workdir /workspace/web"), "{joined}");
+        // (3) Cache/build dir ra ngoài workspace.
+        for (key, value) in READONLY_ENV {
+            assert!(
+                joined.contains(&format!("{key}={value}")),
+                "{key} — {joined}"
+            );
+        }
+        // Không mất bất kỳ cờ bảo mật nào của đường ghi được.
+        for flag in [
+            "--rm",
+            "--cap-drop",
+            "no-new-privileges",
+            "--memory",
+            "--cpus",
+            "--pids-limit",
+            "--user",
+            "--network none",
+        ] {
+            assert!(joined.contains(flag), "thiếu cờ {flag} — {joined}");
+        }
+        // Vẫn KHÔNG truyền env host: chỉ đúng các cặp `-e` tường minh ở trên.
+        assert!(!joined.contains("--env-file"), "{joined}");
+        let env_flags = args.windows(2).filter(|pair| pair[0] == "-e").count();
+        assert_eq!(
+            env_flags,
+            READONLY_ENV.len(),
+            "chỉ được truyền {} biến tường minh, không lọt biến host: {joined}",
+            READONLY_ENV.len()
+        );
+    }
+
+    /// M27: đường read-only phải giữ nguyên mọi cờ an toàn mà `run_shell` đang có.
+    ///
+    /// Chống hồi quy âm thầm: nếu sau này ai đó sửa `docker_shared_flags` và làm rơi một
+    /// cờ, container của `qa_test` sẽ kế thừa cả lỗ hổng đó.
+    #[test]
+    fn readonly_args_keep_exactly_the_same_security_flags_as_writable_path() {
+        let ws = tempfile::tempdir().unwrap();
+        let sandbox = Sandbox::new(SandboxConfig::default(), ws.path().to_path_buf());
+        let writable = sandbox.docker_run_prefix("n-w");
+        let readonly = sandbox.docker_run_prefix_readonly("n-r", ".");
+        std::mem::forget(ws);
+
+        // Lọc bỏ những cờ **cố ý khác** (tên container, mount, workdir, env) rồi so phần
+        // còn lại phải giống hệt nhau — cùng một nguồn sự thật `docker_shared_flags`.
+        let strip = |args: &[String]| -> Vec<String> {
+            let mut out: Vec<String> = Vec::new();
+            let mut skip = 0usize;
+            let mut after_name = false;
+            for arg in args {
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
+                match arg.as_str() {
+                    "--name" => {
+                        after_name = true;
+                        skip = 1;
+                    }
+                    "--volume" | "--workdir" | "-e" => skip = 1,
+                    // Giá trị đứng ngay sau `--name` là tên container, không phải cờ.
+                    _ if after_name => {
+                        after_name = false;
+                    }
+                    _ => out.push(arg.clone()),
+                }
+            }
+            out
+        };
+        assert_eq!(
+            strip(&writable),
+            strip(&readonly),
+            "phần cờ bảo mật phải giống hệt — chỉ khác tên container/mount/workdir/env"
+        );
     }
 
     #[test]

@@ -11,7 +11,10 @@
 
 use std::path::{Path, PathBuf};
 
-use beanagent_types::config::{Config, ConfigError, SandboxMode, WebSearchProvider};
+use beanagent_types::config::{
+    Config, ConfigError, QaConfig, QaRunner, QaSandboxConfig, QaSuiteConfig, SandboxMode,
+    WebSearchProvider,
+};
 
 /// Ghi nội dung TOML ra file tạm và trả về (thư mục tạm, đường dẫn file).
 fn write_config(body: &str) -> (tempfile::TempDir, PathBuf) {
@@ -347,6 +350,186 @@ fn host_mode_requires_explicit_allow_host() {
     config
         .validate()
         .expect("bật allow_host tường minh thì hợp lệ");
+}
+
+/// M27: `[[qa.suites]]` rỗng là **hợp lệ** (fail-closed ở tầng tool, y hệt D14.1 của M23).
+#[test]
+fn empty_qa_suites_is_valid() {
+    let mut config = Config {
+        qa: QaConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    config
+        .validate()
+        .expect("[[qa.suites]] rỗng phải hợp lệ — tool mới tự từ chối mọi lần gọi");
+}
+
+/// M27: suite trùng tên, workdir tuyệt đối/`..`, tên sai ký tự, args rỗng ⇒ đều bị chặn.
+#[test]
+fn invalid_qa_suite_entries_are_rejected() {
+    let cases: Vec<(&str, QaSuiteConfig)> = vec![
+        (
+            "trùng tên",
+            QaSuiteConfig {
+                name: "core".to_string(),
+                runner: QaRunner::CargoTest,
+                workdir: String::new(),
+                args: vec![],
+            },
+        ),
+        (
+            "workdir tuyệt đối",
+            QaSuiteConfig {
+                name: "core".to_string(),
+                runner: QaRunner::CargoTest,
+                workdir: "/etc".to_string(),
+                args: vec![],
+            },
+        ),
+        (
+            "workdir có ..",
+            QaSuiteConfig {
+                name: "core".to_string(),
+                runner: QaRunner::CargoTest,
+                workdir: "../ngoai".to_string(),
+                args: vec![],
+            },
+        ),
+        (
+            "tên sai ký tự",
+            QaSuiteConfig {
+                name: "core unit; rm -rf".to_string(),
+                runner: QaRunner::CargoTest,
+                workdir: String::new(),
+                args: vec![],
+            },
+        ),
+        (
+            "args rỗng",
+            QaSuiteConfig {
+                name: "core".to_string(),
+                runner: QaRunner::CargoTest,
+                workdir: String::new(),
+                args: vec!["  ".to_string()],
+            },
+        ),
+    ];
+    for (label, suite) in cases {
+        let mut config = Config {
+            qa: QaConfig {
+                enabled: true,
+                suites: vec![suite],
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        if label == "trùng tên" {
+            // Cần hai suite cùng tên để kích hoạt nhánh trùng lặp.
+            config.qa.suites.push(config.qa.suites[0].clone());
+        }
+        let err = config.validate().expect_err(&format!("phải chặn: {label}"));
+        assert!(
+            matches!(err, ConfigError::Invalid(ref m) if m.contains("qa.suites")),
+            "{label}: {err:?}"
+        );
+    }
+}
+
+/// M27 (D17.2): cờ mạng **không phải thứ cấu hình tự do** — `validate()` ghi đè theo runner,
+/// nên không cấu hình nào trong `[[qa.suites]]` lật ngược được nó.
+#[test]
+fn qa_network_flag_is_locked_per_runner() {
+    // `cargo_test` cần mạng (CARGO_HOME=/tmp trong container `--rm` ⇒ không có cache).
+    let mut cargo = Config {
+        qa: QaConfig {
+            enabled: true,
+            suites: vec![QaSuiteConfig {
+                name: "core".to_string(),
+                runner: QaRunner::CargoTest,
+                workdir: String::new(),
+                args: vec![],
+            }],
+            sandbox: QaSandboxConfig {
+                // Cố tình khai `network = false` — phải bị ghi đè thành true.
+                network: false,
+                ..Default::default()
+            },
+        },
+        ..Config::default()
+    };
+    cargo.validate().expect("cargo_test phải hợp lệ");
+    assert!(
+        cargo.qa.sandbox.network,
+        "cargo_test bị ép mất mạng ⇒ không tải được crate, D17.2 bị vi phạm"
+    );
+
+    // `vitest`/`pytest` chạy offline được ⇒ mặc định KHÔNG mạng.
+    let mut offline = Config {
+        qa: QaConfig {
+            enabled: true,
+            suites: vec![QaSuiteConfig {
+                name: "web".to_string(),
+                runner: QaRunner::Vitest,
+                workdir: "web".to_string(),
+                args: vec![],
+            }],
+            sandbox: QaSandboxConfig {
+                network: true,
+                ..Default::default()
+            },
+        },
+        ..Config::default()
+    };
+    offline.validate().expect("vitest phải hợp lệ");
+    assert!(
+        !offline.qa.sandbox.network,
+        "vitest phải chạy `--network none` — lỡ tay bật mạng là lỗ hổng"
+    );
+}
+
+/// M27: timeout 0 hoặc image rỗng là cấu hình vô nghĩa ⇒ chặn lúc nạp.
+#[test]
+fn qa_sandbox_must_be_usable() {
+    let base = QaSuiteConfig {
+        name: "core".to_string(),
+        runner: QaRunner::Pytest,
+        workdir: String::new(),
+        args: vec![],
+    };
+    let mut zero_timeout = Config {
+        qa: QaConfig {
+            enabled: true,
+            suites: vec![base.clone()],
+            sandbox: QaSandboxConfig {
+                timeout_seconds: 0,
+                ..Default::default()
+            },
+        },
+        ..Config::default()
+    };
+    assert!(matches!(
+        zero_timeout.validate().unwrap_err(),
+        ConfigError::Invalid(ref m) if m.contains("timeout_seconds")
+    ));
+
+    let mut empty_image = Config {
+        qa: QaConfig {
+            enabled: true,
+            suites: vec![base],
+            sandbox: QaSandboxConfig {
+                image: "  ".to_string(),
+                ..Default::default()
+            },
+        },
+        ..Config::default()
+    };
+    assert!(matches!(
+        empty_image.validate().unwrap_err(),
+        ConfigError::Invalid(ref m) if m.contains("image")
+    ));
 }
 
 /// Cảnh báo bật nửa chừng (có channel nhưng thiếu chat_id) là cấu hình im lặng — phải chặn.

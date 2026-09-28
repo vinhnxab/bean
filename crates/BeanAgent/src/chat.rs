@@ -28,6 +28,7 @@ use beanagent_core::{
 };
 use beanagent_llm::{FakeProvider, LlmProvider};
 use beanagent_marketing::{PublishClient, marketing_draft, marketing_publish};
+use beanagent_qa::{SuiteCatalog, qa_test};
 use beanagent_scan::{ScanScope, ScannerCmd, security_scan};
 use beanagent_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
@@ -328,6 +329,34 @@ pub(crate) async fn build_registry(
         registry
             .register(security_scan(scope, scan_sandbox, ScannerCmd::default()))
             .context("đăng ký tool security_scan thất bại")?;
+    }
+    // (M27) Domain QA: chạy test suite đã khai báo, workspace mount READ-ONLY. Chỉ đăng ký
+    // khi `qa.enabled` **và** nhóm tool `qa` bật; `[[qa.suites]]` rỗng ⇒ tool tồn tại nhưng
+    // từ chối mọi lần gọi (fail-closed, y hệt D14.1 của M23).
+    if config.qa.enabled
+        && config
+            .tools
+            .enabled
+            .iter()
+            .any(|group| group == beanagent_types::config::QA_TOOL_GROUP)
+    {
+        let catalog = SuiteCatalog::from_config(&config.qa.suites);
+        if catalog.is_empty() {
+            tracing::warn!(
+                "[qa].enabled = true nhưng [[qa.suites]] rỗng — MỌI lần chạy test sẽ bị từ \
+                 chối. Khai báo suite trong BeanAgent.toml trước khi giao việc cho vai trò qa."
+            );
+        }
+        // Sandbox RIÊNG cho runner test: mount `:ro` + cache ra /tmp (khác hẳn
+        // `[security.sandbox]` của run_shell — xem `run_argv_readonly`). `to_sandbox_config()`
+        // cứng chế độ docker: xem D17.7.
+        let qa_sandbox = Arc::new(Sandbox::new(
+            config.qa.sandbox.to_sandbox_config(),
+            config.agent.workspace.clone(),
+        ));
+        registry
+            .register(qa_test(catalog, qa_sandbox))
+            .context("đăng ký tool qa_test thất bại")?;
     }
     // (M24) Domain marketing. Chỉ đăng ký khi `marketing.enabled`; credential đọc từ
     // biến môi trường RIÊNG (validate chặn dùng chung với LLM/search/Telegram).

@@ -25,6 +25,7 @@ beanagent-billing.workspace = true
 beanagent-browser.workspace = true
 beanagent-marketing.workspace = true
 beanagent-scan.workspace = true
+beanagent-qa.workspace = true
 beanagent-llm.workspace = true
 beanagent-types.workspace = true
 anyhow.workspace = true
