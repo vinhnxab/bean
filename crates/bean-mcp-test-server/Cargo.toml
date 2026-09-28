@@ -1,0 +1,30 @@
+[package]
+name = "bean-mcp-test-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+description = "MCP stdio server tối thiểu chỉ dùng cho test M14"
+
+[[bin]]
+name = "bean-mcp-test-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+bean-core.workspace = true
+bean-llm.workspace = true
+bean-security.workspace = true
+bean-tools.workspace = true
+bean-types.workspace = true
+tempfile.workspace = true
+tokio-util.workspace = true

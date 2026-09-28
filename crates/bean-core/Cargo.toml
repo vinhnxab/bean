@@ -1,0 +1,40 @@
+[package]
+name = "bean-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Agent loop, context, Router, trait Channel, scheduler, learning loop"
+
+[lints]
+workspace = true
+
+[dependencies]
+bean-scan.workspace = true
+bean-security.workspace = true
+bean-types.workspace = true
+bean-llm.workspace = true
+bean-tools.workspace = true
+bean-memory.workspace = true
+bean-skills.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+croner.workspace = true
+chrono-tz.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+# M25: Bean làm MCP server (ServerHandler + transport stdio/HTTP).
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

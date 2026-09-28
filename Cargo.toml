@@ -1,26 +1,26 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/BeanAgent",
-  "crates/beanagent-billing",
-  "crates/beanagent-browser",
-  "crates/beanagent-channels",
-  "crates/beanagent-core",
-  "crates/beanagent-llm",
-  "crates/beanagent-memory",
-  "crates/beanagent-marketing",
-  "crates/beanagent-qa",
-  "crates/beanagent-scan",
-  "crates/beanagent-security",
-  "crates/beanagent-skills",
-  "crates/beanagent-tools",
-  "crates/beanagent-types",
-  "crates/beanagent-mcp-test-server",
-  "crates/beanagent-web",
+  "crates/bean",
+  "crates/bean-billing",
+  "crates/bean-browser",
+  "crates/bean-channels",
+  "crates/bean-core",
+  "crates/bean-llm",
+  "crates/bean-memory",
+  "crates/bean-marketing",
+  "crates/bean-qa",
+  "crates/bean-scan",
+  "crates/bean-security",
+  "crates/bean-skills",
+  "crates/bean-tools",
+  "crates/bean-types",
+  "crates/bean-mcp-test-server",
+  "crates/bean-web",
 ]
 # `default-members` để `cargo build --no-default-features` (bản headless, không UI)
-# chỉ áp dụng cho binary `BeanAgent` — xem agents.md mục 2 và 3.3.
-default-members = ["crates/BeanAgent"]
+# chỉ áp dụng cho binary `Bean` — xem agents.md mục 2 và 3.3.
+default-members = ["crates/bean"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,7 +28,7 @@ edition = "2024"
 # MSRV: ts-rs 12 / rmcp 3.4 / libsqlite3-sys 0.38 đều yêu cầu 1.88.
 rust-version = "1.88"
 license = "MIT"
-authors = ["BeanAgent contributors"]
+authors = ["Bean contributors"]
 description = "Personal AI agent tự host: một binary Rust (CLI + web + Telegram)"
 publish = false
 
@@ -45,20 +45,20 @@ todo = "deny"
 
 [workspace.dependencies]
 # --- crate nội bộ ---
-beanagent-types = { path = "crates/beanagent-types" }
-beanagent-billing = { path = "crates/beanagent-billing" }
-beanagent-browser = { path = "crates/beanagent-browser" }
-beanagent-llm = { path = "crates/beanagent-llm" }
-beanagent-marketing = { path = "crates/beanagent-marketing" }
-beanagent-qa = { path = "crates/beanagent-qa" }
-beanagent-scan = { path = "crates/beanagent-scan" }
-beanagent-security = { path = "crates/beanagent-security" }
-beanagent-tools = { path = "crates/beanagent-tools" }
-beanagent-memory = { path = "crates/beanagent-memory" }
-beanagent-skills = { path = "crates/beanagent-skills" }
-beanagent-core = { path = "crates/beanagent-core" }
-beanagent-channels = { path = "crates/beanagent-channels" }
-beanagent-web = { path = "crates/beanagent-web" }
+bean-types = { path = "crates/bean-types" }
+bean-billing = { path = "crates/bean-billing" }
+bean-browser = { path = "crates/bean-browser" }
+bean-llm = { path = "crates/bean-llm" }
+bean-marketing = { path = "crates/bean-marketing" }
+bean-qa = { path = "crates/bean-qa" }
+bean-scan = { path = "crates/bean-scan" }
+bean-security = { path = "crates/bean-security" }
+bean-tools = { path = "crates/bean-tools" }
+bean-memory = { path = "crates/bean-memory" }
+bean-skills = { path = "crates/bean-skills" }
+bean-core = { path = "crates/bean-core" }
+bean-channels = { path = "crates/bean-channels" }
+bean-web = { path = "crates/bean-web" }
 
 # --- ngoài (phiên bản đã xác nhận 2026-09-21 qua crates.io/docs.rs) ---
 axum = { version = "0.8.9", features = ["ws"] }

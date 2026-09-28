@@ -1,0 +1,50 @@
+[Unit]
+Description=Bean personal AI agent
+Documentation=https://github.com/bean/bean
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bean
+Group=bean
+# Docker socket access is equivalent to root on the host. Remove this line and
+# use a rootless Docker/Podman sandbox if that trust boundary is unacceptable.
+SupplementaryGroups=docker
+WorkingDirectory=/srv/bean
+ExecStart=/usr/local/bin/bean --config /etc/bean/bean.toml serve
+EnvironmentFile=-/etc/bean/bean.env
+Environment=RUST_LOG=info,bean_security=warn
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+# State/config directories are created by systemd; the workspace is provisioned
+# by the administrator because it is the only directory intentionally writable
+# by the agent.
+StateDirectory=bean
+StateDirectoryMode=0700
+ConfigurationDirectory=bean
+UMask=0077
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/bean /srv/bean/workspace
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

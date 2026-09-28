@@ -1,4 +1,4 @@
-# BeanAgent — Kế hoạch tổng hợp (thay thế mọi bản nháp trước trong phiên hôm nay)
+# Bean — Kế hoạch tổng hợp (thay thế mọi bản nháp trước trong phiên hôm nay)
 
 Tài liệu này **hợp nhất và thay thế** nội dung milestone trong 4 file trước:
 `va-S1-va-cap-nhat-tai-lieu.md` (giữ nguyên, không đổi — xem mục 1),
@@ -134,7 +134,7 @@ trước, đừng tự phá ràng buộc để xong việc nhanh hơn.
 
 Việc cần làm:
 1. Project profile: mỗi project có workspace/MEMORY.md/USER.md riêng, chọn qua config hoặc lệnh
-   khi khởi tạo phiên. BeanAgent tự phát triển chính nó là một project profile mặc định, không
+   khi khởi tạo phiên. Bean tự phát triển chính nó là một project profile mặc định, không
    đặc quyền hơn project khác.
 2. Bảng roles trong cấu hình: mỗi role có tool_tags. Role "admin" có tag đặc biệt "*".
    Roles cần có ngay: admin, it-security (tag infra-read, infra-scan), finance-readonly (tag
@@ -232,7 +232,7 @@ xanh.
 > thử với Cline/Cursor **thật**.
 
 ```
-Thêm chế độ MCP server cho BeanAgent, để các coding agent khác (Cline, Cursor, OpenCode, Claude
+Thêm chế độ MCP server cho Bean, để các coding agent khác (Cline, Cursor, OpenCode, Claude
 Code...) có thể gọi vào Bean như một MCP tool ngay trong phiên làm việc của họ. Chỉ làm SAU khi
 M21 (RBAC theo tag) đã xong — milestone này tái dùng nguyên cơ chế role/tag, không viết lại.
 

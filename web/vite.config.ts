@@ -4,8 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// BeanAgent web (agents.md mục 3.2, 12.2).
-// - Dev: proxy `/api` (bao gồm WebSocket `/api/ws`) sang `BeanAgent serve` ở 127.0.0.1:7878.
+// Bean web (agents.md mục 3.2, 12.2).
+// - Dev: proxy `/api` (bao gồm WebSocket `/api/ws`) sang `bean serve` ở 127.0.0.1:7878.
 // - Không tải bất kỳ tài nguyên nào từ CDN/domain ngoài (mục 0.9).
 export default defineConfig({
   plugins: [react(), tailwindcss()],

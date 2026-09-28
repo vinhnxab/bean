@@ -30,5 +30,5 @@ if (container) {
   );
 } else {
   // Không ném lỗi (mục 0.8: không panic trong code sản phẩm) — chỉ báo rõ để dễ sửa index.html.
-  console.error("BeanAgent: không tìm thấy phần tử #root trong index.html");
+  console.error("Bean: không tìm thấy phần tử #root trong index.html");
 }

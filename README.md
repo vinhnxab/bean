@@ -1,6 +1,6 @@
-# BeanAgent
+# Bean
 
-BeanAgent là personal AI agent self-hosted, viết bằng Rust. Runtime là **một binary Rust**;
+Bean là personal AI agent self-hosted, viết bằng Rust. Runtime là **một binary Rust**;
 React chỉ được build thành file tĩnh và nhúng trong binary khi phát hành. Node.js không cần
 có trên máy chạy.
 
@@ -14,23 +14,30 @@ trên máy dev (8 nhân): crate `chromiumoxide_cdp` sinh **111.222 dòng** kiể
 động và một mình nó chiếm **165,5 s** biên dịch (`chromiumoxide_pdl` 9,6 s,
 `chromiumoxide` 41,6 s); peak RSS của `cargo build` đo được **2,64 GB** — không tính
 phần build song song các crate khác. Nếu không dùng tool browser thì có thể xoá dòng
-`chromiumoxide` khỏi `[workspace.dependencies]` và `beanagent-browser` khỏi
+`chromiumoxide` khỏi `[workspace.dependencies]` và `bean-browser` khỏi
 `[workspace].members` trước khi build.
 
 ```bash
-cp BeanAgent.example.toml BeanAgent.toml
-cp BeanAgent.example.toml /tmp/BeanAgent.toml.example
+cp bean.example.toml bean.toml
+cp bean.example.toml /tmp/bean.toml.example
 # sửa [llm], [web], [telegram], [security] và đặt secret trong biến môi trường
 export ANTHROPIC_API_KEY='...'
 make check
 make build
-./target/release/BeanAgent auth set-password
-./target/release/BeanAgent serve
+./target/release/bean auth set-password
+./target/release/bean serve
 ```
 
 Mở `http://127.0.0.1:7878`. `auth set-password` cần TTY và chỉ lưu hash Argon2id trong
 `data.dir/auth.toml` với quyền `0600`; web không bật được nếu chưa có file này. Không ghi API key,
-bot token hoặc password vào `BeanAgent.toml`.
+bot token hoặc password vào `bean.toml`.
+
+> **Nâng cấp từ bản cũ (đổi tên 2026-09-28).** Tên sản phẩm đổi `BeanAgent` → `bean`, nên
+> các đường dẫn mặc định cũng đổi theo và **không có migration tự động**: chạy
+> `mv ~/.BeanAgent ~/.bean` một lần (giữ nguyên `auth.toml`, `beanagent.db`→`bean.db` nằm
+> trong đó), và đổi tên biến môi trường `BEANAGENT_*` → `BEAN_*` trong shell/service.
+> Unit systemd đổi tên nên phải `systemctl disable beanagent` trước khi cài
+> `deploy/systemd/bean.service`. Chi tiết: `docs/decisions.md` mục 19 (D18.3, D18.5).
 
 ## Build và kiểm tra
 
@@ -50,7 +57,7 @@ make smoke-scheduler   # smoke 1 giờ ảo, scheduler tick nhanh
 
 ## Cấu hình
 
-File mẫu đầy đủ là `BeanAgent.example.toml`. Các trường quan trọng:
+File mẫu đầy đủ là `bean.example.toml`. Các trường quan trọng:
 
 - `[agent]`: `workspace`, `max_steps`, `context_budget_tokens`, `timezone`, `allowed_users`.
 - `[llm]`: `provider` (`anthropic` | `openai_compat`), `model`, `allowed_models`, `api_key_env`,
@@ -82,7 +89,7 @@ tool_tags = ["infra-read", "memory-read"]
 
 [agent]
 # Bắt buộc: nếu thiếu dòng này thì client là `no-access` và không thấy tool nào
-# (BeanAgent sẽ báo lỗi ngay lúc nạp cấu hình).
+# (Bean sẽ báo lỗi ngay lúc nạp cấu hình).
 user_roles = { "mcp-client:cline" = "monitor" }
 
 [[mcp_clients]]
@@ -91,25 +98,25 @@ role = "monitor"
 ```
 
 ```sh
-BeanAgent auth mcp-token add cline      # in token MỘT LẦN duy nhất
-BeanAgent auth mcp-token list          # xem client đã cấp
-BeanAgent auth mcp-token revoke cline  # thu hồi
+bean auth mcp-token add cline      # in token MỘT LẦN duy nhất
+bean auth mcp-token list          # xem client đã cấp
+bean auth mcp-token revoke cline  # thu hồi
 ```
 
 **stdio (khuyến nghị, cùng máy với IDE)** — trong Cline/Cursor trỏ:
 
 ```json
-{ "command": "BeanAgent", "args": ["mcp", "serve"],
-  "env": { "BEANAGENT_MCP_TOKEN": "<token vừa sinh>" } }
+{ "command": "bean", "args": ["mcp", "serve"],
+  "env": { "BEAN_MCP_TOKEN": "<token vừa sinh>" } }
 ```
 
-**HTTP (Bean chạy từ xa)** — `BeanAgent mcp serve --http`, client POST tới
+**HTTP (Bean chạy từ xa)** — `bean mcp serve --http`, client POST tới
 `{public_origin}/mcp` với header `Authorization: Bearer <token>`. Mặc định chỉ bind
 loopback; muốn lộ ra ngoài phải đặt `allow_remote = true` **và** đặt sau reverse proxy
 TLS/Tailscale (giống `[web]`).
 
 Token là bí mật dài hạn nằm trong thư mục dự án — **đừng commit** nó. Bean chỉ lưu
-SHA-256 trong `data.dir/beanagent.db`; thu hồi bằng `auth mcp-token revoke`.
+SHA-256 trong `data.dir/bean.db`; thu hồi bằng `auth mcp-token revoke`.
 
 ### OpenRouter (và mọi endpoint tương thích OpenAI)
 
@@ -131,7 +138,7 @@ max_tokens = 2048
 ```
 
 ```sh
-./target/debug/BeanAgent chat
+./target/debug/bean chat
 ```
 
 Xem model và giá hiện tại: `curl -s https://openrouter.ai/api/v1/models | jq -r '.data[].id'`.
@@ -150,13 +157,13 @@ Hai lỗi thường gặp:
 
 Mặc định chỉ nghe `127.0.0.1`. Không bind trực tiếp ra Internet. Một trong hai cách an toàn:
 
-1. Đặt sau reverse proxy Caddy/nginx có TLS, giữ BeanAgent bind loopback và đặt
+1. Đặt sau reverse proxy Caddy/nginx có TLS, giữ Bean bind loopback và đặt
    `public_origin = "https://agent.example.com"`; `trust_proxy = true` chỉ khi proxy đã được
    kiểm soát và luôn chỉ truyền `X-Forwarded-For` từ proxy đó.
 2. Dùng Tailscale/WireGuard/VPN riêng, truy cập bằng địa chỉ private và đặt
    `public_origin` khớp chính xác với URL đó.
 
-`allow_remote = true` chỉ là cờ ý thức rủi ro; BeanAgent không tự làm TLS. Cookie có
+`allow_remote = true` chỉ là cờ ý thức rủi ro; Bean không tự làm TLS. Cookie có
 `HttpOnly`, `SameSite=Strict`, `Secure` khi origin HTTPS; mọi request thay đổi dữ liệu kiểm tra
 Origin/Host và `Content-Type: application/json`.
 
@@ -167,7 +174,7 @@ Origin/Host và `Content-Type: application/json`.
    `TELEGRAM_BOT_TOKEN`), không ghi vào file cấu hình.
 3. Lấy user ID của bot/user và thêm vào `telegram.allowed_user_ids` và
    `agent.allowed_users`.
-4. Bật `[telegram] enabled = true`, chạy `BeanAgent serve`.
+4. Bật `[telegram] enabled = true`, chạy `bean serve`.
 
 Telegram long polling có reconnect/backoff, xử lý lỗi 409 rõ ràng, giới hạn tần suất và chỉ
 nhận callback của đúng user trong allowlist. Tin cần xác nhận dùng inline keyboard; Dangerous
@@ -192,7 +199,7 @@ trust = false
 
 Tool được đặt tên `mcp__docs__<tool>`. `trust = false` mặc định cần Confirm; chỉ đặt `true`
 sau khi đã kiểm tra server. `env` chỉ truyền biến liên kết, không kế thừa secret của host.
-Nếu server transport rớt, BeanAgent thử reconnect một lần với backoff; lỗi vẫn được trả về
+Nếu server transport rớt, Bean thử reconnect một lần với backoff; lỗi vẫn được trả về
 model dưới dạng tool error. Có thể bọc server không tin cậy bằng Docker, nhưng không mount
 Docker socket chỉ để chạy MCP.
 
@@ -278,7 +285,7 @@ của dự án trong container với workspace mount **read-only**.
 enabled = true
 
 [qa.sandbox]
-image = "BeanAgent-sandbox:latest"   # image PHẢI chứa toolchain của runner
+image = "bean-sandbox:latest"   # image PHẢI chứa toolchain của runner
 timeout_seconds = 900                 # test lâu hơn shell nhiều
 
 [[qa.suites]]
@@ -320,20 +327,20 @@ mạng. Khai khác thì `validate()` ghi đè và in cảnh báo — xem D17.2.
 Build image nhiều tầng (Node chỉ ở stage build; runtime là Debian slim, không có Node):
 
 ```bash
-docker build -f Dockerfile -t beanagent:local .
-docker build -f Dockerfile.sandbox -t beanagent-sandbox:local .
+docker build -f Dockerfile -t bean:local .
+docker build -f Dockerfile.sandbox -t bean-sandbox:local .
 ```
 
 Chạy agent, mount cấu hình/data/workspace và chỉ bind loopback:
 
 ```bash
-docker run --rm --name beanagent \
+docker run --rm --name bean \
   -p 127.0.0.1:7878:7878 \
-  -v "$PWD/BeanAgent.toml:/etc/beanagent/BeanAgent.toml:ro" \
-  -v "$HOME/.BeanAgent:/var/lib/beanagent" \
-  -v "$PWD/workspace:/srv/beanagent/workspace" \
-  --env-file /secure/path/beanagent.env \
-  beanagent:local
+  -v "$PWD/bean.toml:/etc/bean/bean.toml:ro" \
+  -v "$HOME/.bean:/var/lib/bean" \
+  -v "$PWD/workspace:/srv/bean/workspace" \
+  --env-file /secure/path/bean.env \
+  bean:local
 ```
 
 Nếu chạy agent trong container và cần sandbox Docker, phải mount socket hoặc cấu hình
@@ -348,21 +355,21 @@ vào image sandbox tool.
 Binary release không cần Node. Cài user thật, file cấu hình và workspace:
 
 ```bash
-sudo useradd --system --home /var/lib/beanagent --create-home --shell /usr/sbin/nologin beanagent
-sudo install -d -o beanagent -g beanagent -m 0700 /srv/beanagent/workspace
-sudo install -o root -g beanagent -m 0640 target/release/BeanAgent /usr/local/bin/BeanAgent
-sudo install -d -o root -g beanagent -m 0750 /etc/beanagent
-sudo install -o root -g beanagent -m 0640 BeanAgent.toml /etc/beanagent/BeanAgent.toml
-sudo install -o root -g beanagent -m 0640 deploy/systemd/BeanAgent.service /etc/systemd/system/BeanAgent.service
-sudo install -o root -g root -m 0600 /secure/path/beanagent.env /etc/beanagent/beanagent.env
-sudo -u beanagent BeanAgent --config /etc/beanagent/BeanAgent.toml auth set-password
+sudo useradd --system --home /var/lib/bean --create-home --shell /usr/sbin/nologin bean
+sudo install -d -o bean -g bean -m 0700 /srv/bean/workspace
+sudo install -o root -g bean -m 0640 target/release/bean /usr/local/bin/bean
+sudo install -d -o root -g bean -m 0750 /etc/bean
+sudo install -o root -g bean -m 0640 bean.toml /etc/bean/bean.toml
+sudo install -o root -g bean -m 0640 deploy/systemd/bean.service /etc/systemd/system/bean.service
+sudo install -o root -g root -m 0600 /secure/path/bean.env /etc/bean/bean.env
+sudo -u bean bean --config /etc/bean/bean.toml auth set-password
 sudo systemctl daemon-reload
-sudo systemctl enable --now BeanAgent
+sudo systemctl enable --now bean
 ```
 
 File unit dùng `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `PrivateDevices`,
 giới hạn namespace/control groups và chỉ cho phép ghi vào data/workspace. Nó cần thêm user
-`beanagent` vào nhóm `docker` nếu dùng Docker sandbox. **Thành viên nhóm `docker` gần như
+`bean` vào nhóm `docker` nếu dùng Docker sandbox. **Thành viên nhóm `docker` gần như
 tương đương root**, vì Docker daemon chạy với quyền root. Đây là quyết định trust boundary
 cần hiểu rõ; phương án an toàn hơn là rootless Docker/Podman hoặc bỏ supplementary group
 và dùng sandbox rootless. `EnvironmentFile` không được đưa vào Git.
@@ -388,14 +395,14 @@ backup để giảm bề mặt lộ dữ liệu.
   đều bọc `<untrusted_content>`; sau khi đọc trong một lượt, mọi tool Confirm/Dangerous bắt
   buộc hỏi lại và mất tuỳ chọn "cho phép trong phiên".
 - `web_fetch` chặn SSRF cơ bản, nhưng proxy/DNS riêng và endpoint nội bộ cần review thêm.
-- Web đã có auth, CSRF/Origin, CSP, rate limit; BeanAgent không cung cấp TLS, quota
+- Web đã có auth, CSRF/Origin, CSP, rate limit; Bean không cung cấp TLS, quota
   nhiều người dùng, sandbox kernel-level hoặc bảo mật tương đương VM.
 - Một token bot Telegram chỉ nên chạy một instance. `allowed_users` là lớp phòng thủ thứ hai
   sau allowlist của channel; không thêm user chỉ để “thử”.
 - MCP executable là code không tin cậy. `trust = true` chỉ dành cho server đã audit; luôn
   kiểm tra command, args, env và quyền mount.
 - `max_steps` và `daily_token_budget` chỉ là giới hạn runtime, không phải quota tài chính
-  tuyệt đối nếu provider đã trả response vượt ngưỡng; BeanAgent ghi nhận usage thực trả về
+  tuyệt đối nếu provider đã trả response vượt ngưỡng; Bean ghi nhận usage thực trả về
   và dừng run ngay sau đó.
 - Telegram thật, provider thật và browser Playwright cần credential/môi trường riêng; M16
   E2E dùng fake provider và adapter test, không ghi secret vào CI. `make smoke-scheduler`
@@ -411,6 +418,6 @@ make build
 make build-headless
 ```
 
-Sau `make build`, chạy `target/release/BeanAgent --help` hoặc E2E với `PATH` đã loại Node để
+Sau `make build`, chạy `target/release/bean --help` hoặc E2E với `PATH` đã loại Node để
 xác nhận binary tự chứa giao diện và không phụ thuộc runtime Node. `make check` là cổng
 chất lượng bắt buộc trước khi commit M16.

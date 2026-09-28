@@ -1,0 +1,30 @@
+[package]
+name = "bean-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "SQLite + FTS5 store, safe history cut, compaction, memory tools"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+bean-llm.workspace = true
+bean-tools.workspace = true
+bean-types.workspace = true
+chrono.workspace = true
+# `bundled` ⇒ tự build SQLite (không phụ thuộc libsqlite3 hệ thống) và bật FTS5 sẵn.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

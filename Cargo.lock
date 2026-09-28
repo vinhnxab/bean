@@ -3,46 +3,6 @@
 version = 4
 
 [[package]]
-name = "BeanAgent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "beanagent-billing",
- "beanagent-browser",
- "beanagent-channels",
- "beanagent-core",
- "beanagent-llm",
- "beanagent-marketing",
- "beanagent-memory",
- "beanagent-qa",
- "beanagent-scan",
- "beanagent-security",
- "beanagent-skills",
- "beanagent-tools",
- "beanagent-types",
- "beanagent-web",
- "chrono",
- "clap",
- "futures-util",
- "reqwest 0.13.5",
- "rpassword",
- "rustyline",
- "secrecy",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "tokio-util",
- "toml",
- "tower",
- "tracing",
- "tracing-subscriber",
- "wiremock",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -326,13 +286,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "beanagent-billing"
+name = "bean"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bean-billing",
+ "bean-browser",
+ "bean-channels",
+ "bean-core",
+ "bean-llm",
+ "bean-marketing",
+ "bean-memory",
+ "bean-qa",
+ "bean-scan",
+ "bean-security",
+ "bean-skills",
+ "bean-tools",
+ "bean-types",
+ "bean-web",
+ "chrono",
+ "clap",
+ "futures-util",
+ "reqwest 0.13.5",
+ "rpassword",
+ "rustyline",
+ "secrecy",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
+ "toml",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "wiremock",
+]
+
+[[package]]
+name = "bean-billing"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "schemars 1.2.2",
  "secrecy",
  "serde",
@@ -345,14 +345,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-browser"
+name = "bean-browser"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "chromiumoxide",
  "futures-util",
  "schemars 1.2.2",
@@ -368,17 +368,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-channels"
+name = "bean-channels"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "beanagent-core",
- "beanagent-llm",
- "beanagent-security",
- "beanagent-skills",
- "beanagent-tools",
- "beanagent-types",
+ "bean-core",
+ "bean-llm",
+ "bean-security",
+ "bean-skills",
+ "bean-tools",
+ "bean-types",
  "secrecy",
  "serde_json",
  "teloxide",
@@ -390,18 +390,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-core"
+name = "bean-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "beanagent-llm",
- "beanagent-memory",
- "beanagent-scan",
- "beanagent-security",
- "beanagent-skills",
- "beanagent-tools",
- "beanagent-types",
+ "bean-llm",
+ "bean-memory",
+ "bean-scan",
+ "bean-security",
+ "bean-skills",
+ "bean-tools",
+ "bean-types",
  "chrono",
  "chrono-tz",
  "croner",
@@ -420,11 +420,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-llm"
+name = "bean-llm"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-types",
+ "bean-types",
  "futures-core",
  "futures-util",
  "regex",
@@ -440,13 +440,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-marketing"
+name = "bean-marketing"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "schemars 1.2.2",
  "secrecy",
  "serde",
@@ -459,15 +459,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-mcp-test-server"
+name = "bean-mcp-test-server"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-core",
- "beanagent-llm",
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-core",
+ "bean-llm",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "serde_json",
  "tempfile",
  "tokio",
@@ -475,13 +475,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-memory"
+name = "bean-memory"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-llm",
- "beanagent-tools",
- "beanagent-types",
+ "bean-llm",
+ "bean-tools",
+ "bean-types",
  "chrono",
  "proptest",
  "rusqlite",
@@ -495,13 +495,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-qa"
+name = "bean-qa"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -513,13 +513,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-scan"
+name = "bean-scan"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -531,12 +531,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-security"
+name = "bean-security"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-tools",
- "beanagent-types",
+ "bean-tools",
+ "bean-types",
  "cap-std",
  "chrono",
  "globset",
@@ -558,12 +558,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-skills"
+name = "bean-skills"
 version = "0.1.0"
 dependencies = [
- "beanagent-security",
- "beanagent-tools",
- "beanagent-types",
+ "bean-security",
+ "bean-tools",
+ "bean-types",
  "chrono",
  "getrandom 0.3.4",
  "schemars 1.2.2",
@@ -577,11 +577,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-tools"
+name = "bean-tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "beanagent-types",
+ "bean-types",
  "regex",
  "rmcp",
  "schemars 1.2.2",
@@ -595,7 +595,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-types"
+name = "bean-types"
 version = "0.1.0"
 dependencies = [
  "secrecy",
@@ -608,7 +608,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "beanagent-web"
+name = "bean-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -616,13 +616,13 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-extra",
- "beanagent-core",
- "beanagent-llm",
- "beanagent-memory",
- "beanagent-security",
- "beanagent-skills",
- "beanagent-tools",
- "beanagent-types",
+ "bean-core",
+ "bean-llm",
+ "bean-memory",
+ "bean-security",
+ "bean-skills",
+ "bean-tools",
+ "bean-types",
  "chrono",
  "croner",
  "futures-util",

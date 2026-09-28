@@ -1,0 +1,27 @@
+[package]
+name = "bean-scan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Domain quet bao mat: kiem tra infra_scope roi moi chay scanner (M23)"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+bean-security.workspace = true
+bean-tools.workspace = true
+bean-types.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true

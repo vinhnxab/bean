@@ -45,7 +45,7 @@ export const testServer = setupServer(
 );
 
 /**
- * Dữ liệu agent cho test — phản ánh đúng hệ trong `BeanAgent.example.toml`:
+ * Dữ liệu agent cho test — phản ánh đúng hệ trong `bean.example.toml`:
  * Manager điều phối, QA review (four-eyes), Security-scan có đường cảnh báo riêng.
  */
 export const FULL_AGENTS = [

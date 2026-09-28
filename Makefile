@@ -1,11 +1,11 @@
-# BeanAgent — Makefile (agents.md mục 3.3)
+# Bean — Makefile (agents.md mục 3.3)
 #
 # Mục tiêu: `make check` là cổng chất lượng duy nhất của mỗi milestone.
 SHELL := /bin/bash
 CARGO ?= cargo
 PNPM ?= pnpm
 WEB_DIR := web
-BIN := BeanAgent
+BIN := bean
 
 .DEFAULT_GOAL := help
 
@@ -69,10 +69,10 @@ build-headless: ## Build Rust release without UI, no Node required
 
 e2e: ## Binary E2E: login -> chat -> confirm -> Stop -> reconnect Sync
 	$(CARGO) test --locked -p $(BIN) --test m16_e2e -- --nocapture
-	$(CARGO) test --locked -p beanagent-channels allowlist_blocks_unknown_user_without_reply -- --nocapture
+	$(CARGO) test --locked -p bean-channels allowlist_blocks_unknown_user_without_reply -- --nocapture
 
 smoke-scheduler: ## M16 scheduler smoke: 1 virtual hour with 1ms tick
-	$(CARGO) test --locked -p beanagent-core --test scheduler one_hour_scheduler_smoke_with_fast_tick -- --nocapture
+	$(CARGO) test --locked -p bean-core --test scheduler one_hour_scheduler_smoke_with_fast_tick -- --nocapture
 
 
 fmt: ## Định dạng code

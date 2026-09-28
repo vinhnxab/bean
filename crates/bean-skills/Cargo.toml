@@ -1,0 +1,28 @@
+[package]
+name = "bean-skills"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = true
+description = "Loader và tool cho skill"
+
+[lints]
+workspace = true
+
+[dependencies]
+bean-tools.workspace = true
+bean-types.workspace = true
+chrono.workspace = true
+getrandom.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+bean-security.workspace = true
+tempfile.workspace = true
+tokio-util.workspace = true

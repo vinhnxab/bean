@@ -5,7 +5,7 @@
         {
           "id": "c1",
           "name": "write_file",
-          "args": { "path": "hello.txt", "content": "Xin chào từ BeanAgent (M3) 🦀" }
+          "args": { "path": "hello.txt", "content": "Xin chào từ Bean (M3) 🦀" }
         }
       ],
       "stop": "tool_use"
@@ -17,7 +17,7 @@
       "stop": "tool_use"
     },
     {
-      "text": "Đã tạo hello.txt trong workspace với nội dung \"Xin chào từ BeanAgent (M3) 🦀\" và đọc lại: file tồn tại, nội dung khớp.",
+      "text": "Đã tạo hello.txt trong workspace với nội dung \"Xin chào từ Bean (M3) 🦀\" và đọc lại: file tồn tại, nội dung khớp.",
       "stop": "end_turn"
     }
   ]

@@ -25,6 +25,6 @@ describe("i18n", () => {
   });
 
   it("mặc định là tiếng Việt", () => {
-    expect(DICTIONARIES.vi["app.title"]).toBe("BeanAgent");
+    expect(DICTIONARIES.vi["app.title"]).toBe("Bean");
   });
 });

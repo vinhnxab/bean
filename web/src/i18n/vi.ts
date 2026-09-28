@@ -1,6 +1,6 @@
 /** Từ điển tiếng Việt (mặc định); mọi khoá phải có trong cả vi/en. */
 export const vi = {
-  "app.title": "BeanAgent",
+  "app.title": "Bean",
   "app.tagline": "Trợ lý AI cá nhân, self-hosted",
   // --- HUB (trung tâm điều hành) -------------------------------------------
   // Copy viết từ góc nhìn người dùng, động từ chủ động, không nhãn IN HOA,
@@ -38,7 +38,7 @@ export const vi = {
   "common.save": "Lưu",
   "common.delete": "Xoá",
   "auth.checking": "Đang kiểm tra phiên…",
-  "login.title": "Đăng nhập BeanAgent",
+  "login.title": "Đăng nhập Bean",
   "login.subtitle": "AI cá nhân của bạn, trên máy của bạn.",
   "login.password": "Mật khẩu",
   "login.submit": "Đăng nhập",
@@ -162,7 +162,7 @@ export const vi = {
   "audit.viewArgs": "Xem tham số",
   "audit.loadMore": "Tải thêm",
   "status.title": "Trạng thái hệ thống",
-  "status.description": "Thông tin runtime của BeanAgent được cập nhật định kỳ.",
+  "status.description": "Thông tin runtime của Bean được cập nhật định kỳ.",
   "status.version": "Phiên bản",
   "status.model": "Model",
   "status.maxSteps": "Giới hạn bước / lượt",

@@ -1,4 +1,4 @@
-# Bộ prompt cho coding agent — xây BeanAgent (Rust + React UI)
+# Bộ prompt cho coding agent — xây Bean (Rust + React UI)
 
 Dùng được với Claude Code, Codex CLI, Cursor, Aider... Các prompt viết sẵn để **dán nguyên văn**, từng cái một. Đi kèm `agents.md` (v3).
 
@@ -9,7 +9,7 @@ Dùng được với Claude Code, Codex CLI, Cursor, Aider... Các prompt viết
 Cần cài sẵn: Rust (rustup, stable), Docker (cho sandbox), `cargo-audit` (hoặc `cargo-deny`). Chỉ để làm giao diện: Node LTS + `pnpm`. (Không có Node vẫn build được bản headless.)
 
 ```bash
-mkdir BeanAgent && cd BeanAgent
+mkdir Bean && cd Bean
 git init
 cp /đường/dẫn/agents.md ./agents.md        # Claude Code: đặt tên CLAUDE.md
 claude                                          # hoặc codex / cursor / aider
@@ -19,10 +19,10 @@ claude                                          # hoặc codex / cursor / aider
 - Mỗi milestone nên mở **một phiên mới** (hoặc `/clear`) để context gọn; agent sẽ đọc lại `agents.md`.
 - Với Claude Code, bật plan mode (Shift+Tab) cho Prompt 0 và các milestone lớn (M4, M5, M8, M9, M10) để duyệt kế hoạch trước khi cho sửa file.
 - Sau mỗi milestone tự chạy `make check` rồi mới sang milestone tiếp theo.
-- **Kiểu API giữa Rust và React chỉ sửa ở Rust** (`BeanAgent-web`), rồi `make types`. Không sửa tay `web/src/api/generated/`.
+- **Kiểu API giữa Rust và React chỉ sửa ở Rust** (`bean-web`), rồi `make types`. Không sửa tay `web/src/api/generated/`.
 - Nếu agent làm lan man: "Chỉ làm đúng milestone hiện tại theo agents.md mục 21."
 - Nếu agent định thêm SSR/Next.js, server Node, Python, hoặc tải tài nguyên từ CDN: dừng lại, nhắc quy tắc ở mục 2 của agents.md.
-- Với milestone UI (M10, M11) nên yêu cầu agent chạy `pnpm dev` cùng `BeanAgent serve --fake-llm` và tự kiểm tra bằng trình duyệt/test trước khi báo xong.
+- Với milestone UI (M10, M11) nên yêu cầu agent chạy `pnpm dev` cùng `bean serve --fake-llm` và tự kiểm tra bằng trình duyệt/test trước khi báo xong.
 
 ---
 
@@ -49,15 +49,15 @@ Thực hiện milestone M1 theo agents.md (mục 3, 4, 5, 18, 21). Chỉ làm M1
 
 Việc cần làm:
 - Cargo workspace với các crate ở mục 4 (tạo đủ crate, phần lớn để rỗng nhưng biên dịch được). `#![forbid(unsafe_code)]` cho mọi crate.
-- BeanAgent-types theo mục 5; config.rs đọc BeanAgent.toml bằng toml + serde, validate, API key/token đọc từ biến môi trường theo trường *_env. Tạo BeanAgent.example.toml theo mục 18.
-- BeanAgent-llm: trait LlmProvider + FakeProvider (trả lần lượt danh sách LlmResponse, nạp được từ file JSON).
-- Binary `BeanAgent` (crate BeanAgent) với clap: `chat` là REPL đơn giản (rustyline) dùng FakeProvider, tạm chỉ echo; `serve` và `auth` để khung "chưa cài đặt".
+- bean-types theo mục 5; config.rs đọc bean.toml bằng toml + serde, validate, API key/token đọc từ biến môi trường theo trường *_env. Tạo bean.example.toml theo mục 18.
+- bean-llm: trait LlmProvider + FakeProvider (trả lần lượt danh sách LlmResponse, nạp được từ file JSON).
+- Binary `bean` (crate `bean`) với clap: `chat` là REPL đơn giản (rustyline) dùng FakeProvider, tạm chỉ echo; `serve` và `auth` để khung "chưa cài đặt".
 - web/: khởi tạo bằng Vite + React + TypeScript strict, pnpm, Biome, Tailwind, Vitest + Testing Library. Một trang trống. vite.config.ts proxy /api (kể cả WebSocket) tới 127.0.0.1:7878. Font tự host, không CDN.
 - Makefile với các target ở mục 3.3 (make types, check-rust, check-web, check, audit, build, build-headless; e2e là placeholder in "chưa có").
 - Feature Cargo `ui` (mặc định bật) cho việc nhúng UI; build được với --no-default-features mà không cần thư mục web/dist.
 - Test: config (thiếu env, sai kiểu), FakeProvider; một test Vitest tối thiểu cho web.
 
-Định nghĩa xong: `make check` xanh; `cargo run -p BeanAgent -- chat` chạy; `pnpm dev` hiện trang; `cargo build --no-default-features` chạy khi không có Node. Commit "feat(m1): skeleton". Báo cáo theo mục 0.7.
+Định nghĩa xong: `make check` xanh; `cargo run -p bean -- chat` chạy; `pnpm dev` hiện trang; `cargo build --no-default-features` chạy khi không có Node. Commit "feat(m1): skeleton". Báo cáo theo mục 0.7.
 ```
 
 ---
@@ -68,13 +68,13 @@ Việc cần làm:
 Thực hiện milestone M2 theo agents.md (mục 3.1, 5). Chỉ làm M2.
 
 Việc cần làm:
-- BeanAgent-llm: AnthropicProvider (Messages API) và OpenAiCompatProvider (Chat Completions, hỗ trợ base_url để dùng Ollama/OpenRouter), cùng implement LlmProvider. Tự viết trên reqwest + serde (rustls). Đọc tài liệu API chính thức để dùng đúng cấu trúc tool_use/tool_result và tool_calls; không đoán.
+- bean-llm: AnthropicProvider (Messages API) và OpenAiCompatProvider (Chat Completions, hỗ trợ base_url để dùng Ollama/OpenRouter), cùng implement LlmProvider. Tự viết trên reqwest + serde (rustls). Đọc tài liệu API chính thức để dùng đúng cấu trúc tool_use/tool_result và tool_calls; không đoán.
 - Chuyển đổi hai chiều Message <-> định dạng của từng API, gồm cặp tool_use/tool_result và is_error.
 - Retry với backoff + jitter, tối đa 3 lần cho 429/5xx/lỗi mạng, tôn trọng retry-after, không retry 4xx khác.
 - API key dùng secrecy::SecretString; test rằng Debug/log không lộ key.
 - Factory tạo provider từ config.
 - Test bằng wiremock: chuyển đổi request/response đúng, retry đúng, lỗi 4xx không retry, phân tích stop_reason. Test gọi API thật đánh dấu #[ignore].
-- Nối vào `BeanAgent chat`: chat một lượt bình thường với model thật (chưa có tool).
+- Nối vào `bean chat`: chat một lượt bình thường với model thật (chưa có tool).
 
 Định nghĩa xong: make check xanh; nếu có API key, `cargo test -- --ignored` chạy được. Commit "feat(m2): llm providers".
 ```
@@ -87,12 +87,12 @@ Việc cần làm:
 Thực hiện milestone M3 theo agents.md (mục 6 và 7). Chỉ làm M3.
 
 Việc cần làm:
-- BeanAgent-tools: trait Tool, enum Risk, ToolCtx, TypedTool<P> với schemars (doc comment thành description, deny_unknown_fields), ToolRegistry.
+- bean-tools: trait Tool, enum Risk, ToolCtx, TypedTool<P> với schemars (doc comment thành description, deny_unknown_fields), ToolRegistry.
 - Tool file: read_file, list_dir, glob, grep (Safe); write_file, edit_file (Confirm). Có offset/limit. Tạm dùng đường dẫn tương đối với workspace và kiểm tra đơn giản; path jail bằng cap-std làm ở M4, nhưng đặt sau một trait/hàm để thay dễ.
-- BeanAgent-core: agent loop đúng mục 6 (max_steps, lỗi tool thành tool result is_error, timeout, cắt output ở ranh giới UTF-8, chống lặp, CancellationToken kèm tool result giả khi huỷ). Trait RunIo (on_text, on_tool_start, on_tool_end, confirm).
+- bean-core: agent loop đúng mục 6 (max_steps, lỗi tool thành tool result is_error, timeout, cắt output ở ranh giới UTF-8, chống lặp, CancellationToken kèm tool result giả khi huỷ). Trait RunIo (on_text, on_tool_start, on_tool_end, confirm).
 - Trait Store cho lịch sử, tạm cài bản in-memory (SQLite làm ở M5).
 - agent::prompt theo mẫu mục 19 (skills và memory để trống).
-- Nối vào `BeanAgent chat`: hiển thị tiến trình tool; tool Confirm thì hỏi y/n trên terminal.
+- Nối vào `bean chat`: hiển thị tiến trình tool; tool Confirm thì hỏi y/n trên terminal.
 - Test bằng FakeProvider: kết thúc đúng; dừng ở max_steps; tool lỗi/không tồn tại/tham số sai/tham số thừa không làm crash và trả lỗi rõ ràng; cắt output không panic với tiếng Việt và emoji; chống lặp; huỷ giữa chừng vẫn hợp lệ.
 
 Định nghĩa xong: make check xanh; demo "tạo hello.txt trong workspace rồi đọc lại" với model thật. Commit "feat(m3): tools and agent loop".
@@ -106,9 +106,9 @@ Việc cần làm:
 Thực hiện milestone M4 theo agents.md (mục 7.2 và 15.1-15.4, 15.6, 15.8). Chỉ làm M4. Lập kế hoạch trước, chờ tôi duyệt, rồi mới code.
 
 Việc cần làm:
-- BeanAgent-security::paths: mọi thao tác file đi qua cap_std::fs::Dir gốc là workspace (nếu cap-std không phù hợp, nêu lý do và dùng canonicalize + kiểm tra prefix kèm xử lý symlink). Áp dụng cho MỌI tool file, thay phần tạm ở M3.
-- BeanAgent-security::sandbox + tool run_shell (Confirm): docker run --rm với mount workspace, user non-root, --network none mặc định, --memory/--cpus/--pids-limit, --cap-drop ALL, no-new-privileges, container có tên để docker kill khi timeout, không truyền env host. Chế độ host phải bật tường minh và khi đó mọi lệnh là Dangerous. Trả stdout/stderr/exit code, cắt output dài.
-- BeanAgent-security::policy: xử lý Safe/Confirm/Dangerous, "cho phép tool này trong phiên", deny-list mẫu (lớp phụ), audit log JSONL với redact secret.
+- bean-security::paths: mọi thao tác file đi qua cap_std::fs::Dir gốc là workspace (nếu cap-std không phù hợp, nêu lý do và dùng canonicalize + kiểm tra prefix kèm xử lý symlink). Áp dụng cho MỌI tool file, thay phần tạm ở M3.
+- bean-security::sandbox + tool run_shell (Confirm): docker run --rm với mount workspace, user non-root, --network none mặc định, --memory/--cpus/--pids-limit, --cap-drop ALL, no-new-privileges, container có tên để docker kill khi timeout, không truyền env host. Chế độ host phải bật tường minh và khi đó mọi lệnh là Dangerous. Trả stdout/stderr/exit code, cắt output dài.
+- bean-security::policy: xử lý Safe/Confirm/Dangerous, "cho phép tool này trong phiên", deny-list mẫu (lớp phụ), audit log JSONL với redact secret.
 - Cơ chế untrusted: hàm bọc <untrusted_content> (escape thẻ đóng trong nội dung) và cờ untrusted_seen trong lượt; sau khi cờ bật, tool Confirm trở lên luôn hỏi lại.
 
 Test bắt buộc: path traversal và symlink escape (proptest), đường dẫn tuyệt đối, deny-list, sandbox không thấy file ngoài workspace, không có mạng khi network=false, timeout giết được container, audit log không lộ secret, "cho phép trong phiên" bị vô hiệu sau khi đọc untrusted.
@@ -124,7 +124,7 @@ Test bắt buộc: path traversal và symlink escape (proptest), đường dẫn
 Thực hiện milestone M5 theo agents.md (mục 8). Chỉ làm M5. Lập kế hoạch trước, chờ tôi duyệt.
 
 Việc cần làm:
-- BeanAgent-memory: SQLite bằng rusqlite (bundled), WAL, FTS5 + trigger đồng bộ, schema và migration theo user_version (mục 8.1, gồm cả các bảng outbox và web_sessions để sau dùng). Một thread/handle ghi duy nhất, không chặn runtime async. Cài trait Store đã tạo ở M3.
+- bean-memory: SQLite bằng rusqlite (bundled), WAL, FTS5 + trigger đồng bộ, schema và migration theo user_version (mục 8.1, gồm cả các bảng outbox và web_sessions để sau dùng). Một thread/handle ghi duy nhất, không chặn runtime async. Cài trait Store đã tạo ở M3.
 - Session theo (channel, chat_id) với archived/title như schema; ghi mỗi message ngay khi phát sinh.
 - Context builder theo mục 8.2 (system + MEMORY.md/USER.md + summary + message gần nhất trong ngân sách token).
 - Compaction theo mục 8.3: tóm tắt bằng LLM khi vượt 70% ngân sách; TUYỆT ĐỐI không cắt giữa cặp assistant(tool_calls) và tool results. Viết hàm tìm "ranh giới an toàn" và kiểm thử kỹ, gồm proptest sinh lịch sử ngẫu nhiên.
@@ -144,7 +144,7 @@ Test bắt buộc: FTS5 tìm đúng và xếp hạng hợp lý (kèm tiếng Vi�
 Thực hiện milestone M6 theo agents.md (mục 9). Chỉ làm M6.
 
 Việc cần làm:
-- BeanAgent-skills: loader quét ./skills và ~/.BeanAgent/skills, parse frontmatter (chọn crate YAML còn được bảo trì, KHÔNG dùng serde_yaml vì đã ngừng phát triển; hoặc tự parse tối giản hai trường name/description và nêu quyết định), validate (kebab-case, khớp tên thư mục, description ≤ 300 ký tự), bỏ qua và log skill lỗi.
+- bean-skills: loader quét ./skills và ~/.bean/skills, parse frontmatter (chọn crate YAML còn được bảo trì, KHÔNG dùng serde_yaml vì đã ngừng phát triển; hoặc tự parse tối giản hai trường name/description và nêu quyết định), validate (kebab-case, khớp tên thư mục, description ≤ 300 ký tự), bỏ qua và log skill lỗi.
 - Đưa danh sách "name: description" vào system prompt, KHÔNG đưa nội dung đầy đủ.
 - Tool load_skill (Safe) trả về nội dung SKILL.md kèm đường dẫn thư mục; create_skill (Confirm) chặn ghi đè và tên chứa ký tự đường dẫn.
 - Viết 2 skill mẫu trong skills/: `web-research` và `daily-briefing`.
@@ -161,7 +161,7 @@ Việc cần làm:
 Thực hiện milestone M7 theo agents.md (mục 7.3 và 15.5). Chỉ làm M7.
 
 Việc cần làm:
-- BeanAgent-security::ssrf: chỉ http(s); resolver DNS tuỳ biến cho reqwest lọc IP ngay lúc kết nối (chống DNS rebinding); chặn private/loopback/link-local/metadata và IPv6 tương ứng; redirect policy tuỳ biến kiểm tra lại từng bước; giới hạn kích thước body và thời gian.
+- bean-security::ssrf: chỉ http(s); resolver DNS tuỳ biến cho reqwest lọc IP ngay lúc kết nối (chống DNS rebinding); chặn private/loopback/link-local/metadata và IPv6 tương ứng; redirect policy tuỳ biến kiểm tra lại từng bước; giới hạn kích thước body và thời gian.
 - Tool web_fetch (HTML -> text sạch, giới hạn độ dài, offset để đọc tiếp) và web_search (provider cắm được: tavily/brave/searxng theo config). Kết quả cả hai bọc <untrusted_content> và bật untrusted_seen.
 - Test SSRF: 127.0.0.1, localhost, 169.254.169.254, 10.x/192.168.x, IPv6 loopback, domain trỏ về IP nội bộ, redirect vào IP nội bộ, scheme file://. Dùng wiremock/server cục bộ cho test, không gọi mạng thật.
 
@@ -176,11 +176,11 @@ Việc cần làm:
 Thực hiện milestone M8 theo agents.md (mục 10). Chỉ làm M8. Lập kế hoạch trước, chờ tôi duyệt.
 
 Việc cần làm:
-- BeanAgent-core::router: struct Router, Incoming, RunEvent, Decision, trait Channel đúng như mục 10. Ánh xạ (channel, chat_id) -> session (chọn session chưa archived mới nhất); hàng đợi/khoá mỗi session, run đến sau phát Queued.
+- bean-core::router: struct Router, Incoming, RunEvent, Decision, trait Channel đúng như mục 10. Ánh xạ (channel, chat_id) -> session (chọn session chưa archived mới nhất); hàng đợi/khoá mỗi session, run đến sau phát Queued.
 - Run thuộc về Router: hàm submit trả RunId ngay, chạy nền; sự kiện phát qua tokio::sync::broadcast (xử lý RecvError::Lagged); confirm_id ngẫu nhiên gắn với run, phản hồi đầu tiên thắng, timeout mặc định 300 giây = DENY; cancel tường minh mới huỷ run.
 - Slash command xử lý trong lõi không gọi LLM: /new /stop /model /skills /memory /tasks (/approve, /reject để khung, làm ở M15). Kiểm tra allowed_users.
 - notify + bảng outbox: gửi lỗi thì lưu và thử lại có backoff.
-- Refactor `BeanAgent chat` thành một Channel (channel "cli", chat_id "local") dùng Router, Ctrl-C = cancel.
+- Refactor `bean chat` thành một Channel (channel "cli", chat_id "local") dùng Router, Ctrl-C = cancel.
 - Test: hàng đợi theo phiên, run không bị huỷ khi subscriber rớt, confirm hết hạn thành DENY, phản hồi confirm đầu tiên thắng, cancel giữ cặp tool hợp lệ, /new archive session cũ, người dùng ngoài allowed_users bị từ chối, outbox thử lại.
 
 Định nghĩa xong: make check xanh; CLI hoạt động như trước nhưng đi qua Router. Commit "feat(m8): router and channels".
@@ -194,13 +194,13 @@ Việc cần làm:
 Thực hiện milestone M9 theo agents.md (mục 11 và 15.7). Chỉ làm M9. Lập kế hoạch trước, chờ tôi duyệt. Đây là bề mặt tấn công nghiêm trọng vì agent có quyền chạy lệnh: ưu tiên đúng và an toàn hơn tính năng.
 
 Việc cần làm:
-- BeanAgent-web (axum): định nghĩa TẤT CẢ kiểu request/response/ClientMsg/ServerMsg trong Rust, derive ts-rs, xuất vào web/src/api/generated/ qua `make types`. Kiểm tra CI: git diff --exit-code trên thư mục đó.
-- Xác thực: `BeanAgent auth set-password` (argon2id, lưu data.dir/auth.toml quyền 0600); `serve` từ chối bật web nếu chưa có mật khẩu. Login: so sánh thời gian không đổi, giới hạn tần suất theo IP + lockout tăng dần; token phiên 256-bit, CHỈ lưu hash trong web_sessions; cookie HttpOnly, SameSite=Strict, Secure khi public_origin là https; TTL; logout xoá phía server. Ghi audit sự kiện đăng nhập.
+- bean-web (axum): định nghĩa TẤT CẢ kiểu request/response/ClientMsg/ServerMsg trong Rust, derive ts-rs, xuất vào web/src/api/generated/ qua `make types`. Kiểm tra CI: git diff --exit-code trên thư mục đó.
+- Xác thực: `bean auth set-password` (argon2id, lưu data.dir/auth.toml quyền 0600); `serve` từ chối bật web nếu chưa có mật khẩu. Login: so sánh thời gian không đổi, giới hạn tần suất theo IP + lockout tăng dần; token phiên 256-bit, CHỈ lưu hash trong web_sessions; cookie HttpOnly, SameSite=Strict, Secure khi public_origin là https; TTL; logout xoá phía server. Ghi audit sự kiện đăng nhập.
 - Middleware: kiểm tra Origin/Host khớp public_origin cho request thay đổi dữ liệu, yêu cầu Content-Type application/json, không bật CORS, giới hạn kích thước body, header bảo mật ở mục 15.7 (CSP, nosniff, Referrer-Policy, no-store cho /api).
 - REST theo bảng 11.1 (phần nào phụ thuộc milestone sau như skills/drafts thì để 501 có kiểu rõ ràng). /api/* không tồn tại trả 404 JSON.
 - WebSocket /api/ws theo 11.2: kiểm tra Origin + cookie TRƯỚC khi nâng cấp, giới hạn kích thước message, ping/pong, Sync ngay sau khi kết nối, broadcast sự kiện Router tới mọi kết nối (xử lý Lagged bằng cách gửi lại Sync), ConfirmResolved, preview cắt đúng ranh giới UTF-8.
 - Phục vụ UI: rust-embed sau feature `ui`, SPA fallback KHÔNG che /api, cache header (assets dài hạn, index.html no-cache). Nếu web/dist chưa có thì dùng trang placeholder để build không lỗi.
-- `BeanAgent serve` khởi động web (Telegram/scheduler chưa cần), hỗ trợ --fake-llm.
+- `bean serve` khởi động web (Telegram/scheduler chưa cần), hỗ trợ --fake-llm.
 - Test theo mục 20 (phần Web server): 401, sai Origin -> 403 (REST và WS), WS thiếu cookie bị từ chối, giới hạn đăng nhập, cờ cookie, header, /api 404 JSON, hash token phiên, Sync sau khi nối lại, sự kiện tới mọi kết nối, run không bị huỷ khi WS rớt.
 
 Định nghĩa xong: toàn bộ test web-server pass; dùng client WS thử chạy trọn một lượt có tool cần xác nhận; make check xanh. Commit "feat(m9): web server".
@@ -221,7 +221,7 @@ Việc cần làm:
 - Markdown renderer an toàn theo mục 12.3: react-markdown không HTML thô, ảnh từ xa hiển thị thành liên kết văn bản kèm cảnh báo, chỉ cho phép http/https/mailto, rel noopener noreferrer, output tool hiển thị dạng text trong <pre>. Không dùng dangerouslySetInnerHTML.
 - Giao diện tối/sáng theo hệ thống, responsive (kiểm tra ở chiều rộng điện thoại), aria/bàn phím cơ bản, i18n vi (mặc định) và en.
 - Test Vitest theo mục 20 (phần Web): markdown độc hại (script, img onerror, javascript:, ảnh từ xa), thẻ xác nhận, WS nối lại + Sync + không nhân đôi tin, chuỗi sự kiện Queued -> ToolStart -> ToolEnd -> Final, 401 -> đăng nhập, đủ khoá i18n.
-- Tự kiểm tra thực tế: chạy `BeanAgent serve --fake-llm <kịch bản có tool cần xác nhận>` cùng `pnpm dev`, thao tác trọn luồng và mô tả kết quả.
+- Tự kiểm tra thực tế: chạy `bean serve --fake-llm <kịch bản có tool cần xác nhận>` cùng `pnpm dev`, thao tác trọn luồng và mô tả kết quả.
 
 Định nghĩa xong: chat và duyệt/từ chối hành động được trên trình duyệt (cả desktop lẫn màn hình hẹp); make check xanh. Commit "feat(m10): web ui chat".
 ```
@@ -253,9 +253,9 @@ Việc cần làm (dùng TanStack Query cho REST; kiểu lấy từ web/src/api/
 Thực hiện milestone M12 theo agents.md (mục 13). Chỉ làm M12. Lập kế hoạch trước, chờ tôi duyệt. Giữ adapter MỎNG: không logic agent, mọi thứ đi qua Router.
 
 Việc cần làm:
-- BeanAgent-channels::telegram bằng teloxide (long polling), implement Channel. Allowlist BẮT BUỘC (người lạ bị bỏ qua + log), chống trùng update, giới hạn tần suất mỗi chat, tách tin > 4096 ký tự ở ranh giới an toàn (không cắt giữa ký tự UTF-8), typing định kỳ, xác nhận bằng inline keyboard (Cho phép / Trong phiên / Từ chối) với callback_data chỉ chứa confirm_id ngắn, chỉ chấp nhận callback từ user_id đã cấp phép, hết hạn thì sửa tin thành "Hết hạn". Mặc định gửi văn bản thuần (nếu dùng MarkdownV2 phải escape đúng).
+- bean-channels::telegram bằng teloxide (long polling), implement Channel. Allowlist BẮT BUỘC (người lạ bị bỏ qua + log), chống trùng update, giới hạn tần suất mỗi chat, tách tin > 4096 ký tự ở ranh giới an toàn (không cắt giữa ký tự UTF-8), typing định kỳ, xác nhận bằng inline keyboard (Cho phép / Trong phiên / Từ chối) với callback_data chỉ chứa confirm_id ngắn, chỉ chấp nhận callback từ user_id đã cấp phép, hết hạn thì sửa tin thành "Hết hạn". Mặc định gửi văn bản thuần (nếu dùng MarkdownV2 phải escape đúng).
 - /stop huỷ run đang chạy; tự nối lại khi rớt; phát hiện lỗi 409 (hai instance) và log rõ; tắt êm theo CancellationToken.
-- `BeanAgent serve` chạy web và Telegram cùng lúc (theo config).
+- `bean serve` chạy web và Telegram cùng lúc (theo config).
 - Test bằng mock (trait trừu tượng lớp Bot hoặc server giả): allowlist, rate limit, tách tin, confirm hết hạn, callback từ người lạ bị từ chối. Không cần token thật để chạy test.
 
 Định nghĩa xong: chat và duyệt hành động qua Telegram thật được; cùng một agent dùng được đồng thời trên web và Telegram. Commit "feat(m12): telegram".
@@ -269,7 +269,7 @@ Việc cần làm:
 Thực hiện milestone M13 theo agents.md (mục 14 và 10). Chỉ làm M13.
 
 Việc cần làm:
-- BeanAgent-core::scheduler: task tokio tick 30 giây, trait Clock để test, croner/cron + chrono-tz, lưu UTC, parse cron theo agent.timezone. Task lỡ hạn thì bỏ qua và tính lần kế tiếp.
+- bean-core::scheduler: task tokio tick 30 giây, trait Clock để test, croner/cron + chrono-tz, lưu UTC, parse cron theo agent.timezone. Task lỡ hạn thì bỏ qua và tính lần kế tiếp.
 - Tool schedule_task(cron, prompt, allowed_tools), list_tasks, cancel_task (tạo/huỷ là Confirm). Hoàn thiện REST /api/tasks.
 - Khi đến hạn: chạy agent trong session của task; run không có người xác nhận nên tool Confirm/Dangerous bị từ chối tự động trừ khi nằm trong allowed_tools đã duyệt. Kết quả gửi qua Router::notify: Telegram nhận tin; web nhận ServerMsg::Notification và hiển thị tin trong phiên tương ứng.
 - Test với đồng hồ giả: đến hạn chạy đúng một lần, đúng múi giờ Asia/Ho_Chi_Minh, task bị huỷ không chạy, tool Confirm bị từ chối khi chạy nền, outbox giữ tin khi kênh lỗi rồi gửi bù.
@@ -285,7 +285,7 @@ Việc cần làm:
 Thực hiện milestone M14 theo agents.md (mục 16). Chỉ làm M14.
 
 Việc cần làm:
-- BeanAgent-tools::mcp dùng rmcp (SDK Rust chính thức; xác nhận API hiện tại từ source đã tải). Kết nối server stdio từ config, lấy danh sách tool, đăng ký với tên mcp__<server>__<tool>, chuyển JSON Schema thành ToolSpec.
+- bean-tools::mcp dùng rmcp (SDK Rust chính thức; xác nhận API hiện tại từ source đã tải). Kết nối server stdio từ config, lấy danh sách tool, đăng ký với tên mcp__<server>__<tool>, chuyển JSON Schema thành ToolSpec.
 - Rủi ro mặc định Confirm; chỉ Safe nếu trust = true. Kết quả bọc <untrusted_content> và bật untrusted_seen.
 - Server lỗi/treo: timeout khi kết nối và khi gọi tool, log cảnh báo, bỏ qua, agent vẫn khởi động. Đóng tiến trình con sạch khi thoát.
 - Hỗ trợ `command` là lệnh bọc container (docker run ...), ghi ví dụ vào README.
@@ -322,7 +322,7 @@ Việc cần làm:
 - Ngân sách token/ngày và giới hạn bước: dừng và báo người dùng khi vượt (hiển thị trong UI và Telegram).
 - Logging có cấu trúc (tracing), redact secret; tắt êm khi SIGTERM (Router, scheduler, kênh, web); tự nối lại Telegram/MCP khi rớt.
 - Release: `make build` (build web -> cargo build --release với feature ui, lto = "thin", strip = true), binary tự chứa giao diện, kiểm tra chạy được trên máy KHÔNG có Node. `make build-headless` chạy được không cần Node.
-- deploy/systemd/BeanAgent.service (user riêng, NoNewPrivileges, ProtectSystem, PrivateTmp...). Tài liệu hoá rằng thành viên nhóm docker gần như tương đương root và nêu phương án rootless Docker/Podman.
+- deploy/systemd/bean.service (user riêng, NoNewPrivileges, ProtectSystem, PrivateTmp...). Tài liệu hoá rằng thành viên nhóm docker gần như tương đương root và nêu phương án rootless Docker/Podman.
 - Dockerfile nhiều tầng (tầng Node/pnpm build web, tầng Rust build nhúng UI, tầng cuối debian slim chỉ chứa binary, KHÔNG có Node) và Dockerfile cho image sandbox (Debian slim + công cụ cơ bản, KHÔNG Node). Nêu rõ rủi ro mount docker socket nếu chạy agent trong container.
 - `make audit` (cargo audit/deny + pnpm audit --prod) chạy sạch; commit Cargo.lock và pnpm-lock.yaml.
 - README: cài đặt, cấu hình, đặt mật khẩu web, truy cập từ xa an toàn (reverse proxy TLS hoặc Tailscale, public_origin), tạo bot Telegram (BotFather), thêm skill, thêm MCP server, mô hình đe doạ và giới hạn bảo mật.
@@ -346,7 +346,7 @@ Thực hiện milestone M17 theo agents.md. Chọn MỘT phần mỗi lần.
 - Test bằng wiremock trả SSE; test UI cho ghép delta và ngắt kết nối giữa stream.
 
 (B) Kênh Discord hoặc Slack:
-- Implement trait Channel trong BeanAgent-channels bằng thư viện đã chốt (serenity/twilight hoặc slack-morphism); cùng chuẩn với Telegram: allowlist bắt buộc, rate limit, tách tin theo giới hạn nền tảng, xác nhận bằng cơ chế tương ứng, reconnect, tắt êm.
+- Implement trait Channel trong bean-channels bằng thư viện đã chốt (serenity/twilight hoặc slack-morphism); cùng chuẩn với Telegram: allowlist bắt buộc, rate limit, tách tin theo giới hạn nền tảng, xác nhận bằng cơ chế tương ứng, reconnect, tắt êm.
 - Không sửa Router và không sửa API web trừ khi tôi đồng ý.
 ```
 
@@ -363,7 +363,7 @@ Thực hiện milestone M17 theo agents.md. Chọn MỘT phần mỗi lần.
 ### Review bảo mật (nên chạy sau M4, M7, M9, M10, M16)
 
 ```
-Đóng vai người review bảo mật khó tính. Đọc code trong crates/BeanAgent-security, BeanAgent-tools, BeanAgent-core, BeanAgent-web, BeanAgent-channels và web/src. Tìm cách một attacker có thể:
+Đóng vai người review bảo mật khó tính. Đọc code trong crates/bean-security, bean-tools, bean-core, bean-web, bean-channels và web/src. Tìm cách một attacker có thể:
 (1) thoát khỏi workspace; (2) chạy lệnh mà không được xác nhận; (3) truy cập mạng nội bộ; (4) lộ secret;
 (5) khiến agent làm theo chỉ dẫn trong nội dung untrusted (web, file, MCP);
 (6) từ một trang web khác điều khiển agent qua trình duyệt của người dùng (CSRF, cross-site WebSocket hijacking, thiếu kiểm tra Origin);

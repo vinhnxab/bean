@@ -1,4 +1,4 @@
-# Sandbox image for BeanAgent `run_shell`; deliberately contains no Node.js.
+# Sandbox image for Bean `run_shell`; deliberately contains no Node.js.
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \

@@ -1,4 +1,10 @@
-# Gói vá S1 + cập nhật tài liệu — BeanAgent
+# Gói vá S1 + cập nhật tài liệu — Bean
+
+> **Ghi chú đổi tên (2026-09-28).** Đổi tên `BeanAgent`/`beanagent-*` → `bean`/`bean-*` trên
+> toàn repo (xem `docs/decisions.md`, mục 19 — D18.x). Tài liệu này ghi lại lượt vá S1 tại
+> commit `399992d`/`62e8350`; tên crate, tên lệnh và tên đường dẫn đã cập nhật sang tên mới
+> để còn chạy được, nhưng **mã commit giữ nguyên**. Tag `pre-rename-beanagent` giữ trạng
+> thái commit gốc mà tài liệu này mô tả.
 
 Tài liệu này gồm 5 phần, dùng độc lập được:
 
@@ -73,7 +79,7 @@ xác nhận phần "file" chưa đúng với code thật. README là tài liệu
 ### 3a. Thêm dòng vào bảng mục 2 (Điểm yếu đã biết), đặt trên K1 vì mức độ khai thác đã chứng minh
 
 ```
-| S1 | **Prompt injection qua tool đọc file/lệnh (`read_file`, `grep`, `glob`, `list_dir`, `run_shell`) — không bọc `<untrusted_content>`, không bật `untrusted_seen`.** | Vi phạm trực tiếp mục 15.4: cờ `untrusted_seen` chỉ được bật bởi `web_fetch`/`web_search`/MCP (`agent.rs:521`); 5 tool còn lại trả văn bản thô. Hậu quả: `write_file`/`run_shell` đã được "cho phép trong phiên" trước đó sẽ chạy hoàn toàn không hỏi lại sau khi agent đọc một file độc — kể cả để tự ghi đè `MEMORY.md`/`USER.md`. Đã có test tái hiện bằng tool thật, đang FAIL (`crates/beanagent-core/tests/untrusted_file.rs`). | Bọc `<untrusted_content>` + bật cờ cho `read_file`/`grep`/`glob`/`list_dir`/output `run_shell`, tái dùng `beanagent_tools::untrusted::wrap`. Cân nhắc thêm `Tool::marks_untrusted()` tường minh thay vì suy luận qua nội dung output. Xem chi tiết và đề xuất đầy đủ: `docs/security-review-2026-09-25.md` mục 2.5. | **cao** | Ngay khi có thể — trước khi chạy `serve` với provider thật trên workspace có nội dung không tự viết |
+| S1 | **Prompt injection qua tool đọc file/lệnh (`read_file`, `grep`, `glob`, `list_dir`, `run_shell`) — không bọc `<untrusted_content>`, không bật `untrusted_seen`.** | Vi phạm trực tiếp mục 15.4: cờ `untrusted_seen` chỉ được bật bởi `web_fetch`/`web_search`/MCP (`agent.rs:521`); 5 tool còn lại trả văn bản thô. Hậu quả: `write_file`/`run_shell` đã được "cho phép trong phiên" trước đó sẽ chạy hoàn toàn không hỏi lại sau khi agent đọc một file độc — kể cả để tự ghi đè `MEMORY.md`/`USER.md`. Đã có test tái hiện bằng tool thật, đang FAIL (`crates/bean-core/tests/untrusted_file.rs`). | Bọc `<untrusted_content>` + bật cờ cho `read_file`/`grep`/`glob`/`list_dir`/output `run_shell`, tái dùng `bean_tools::untrusted::wrap`. Cân nhắc thêm `Tool::marks_untrusted()` tường minh thay vì suy luận qua nội dung output. Xem chi tiết và đề xuất đầy đủ: `docs/security-review-2026-09-25.md` mục 2.5. | **cao** | Ngay khi có thể — trước khi chạy `serve` với provider thật trên workspace có nội dung không tự viết |
 ```
 
 ### 3b. Cập nhật mục 4 (Việc cần nhặt lại theo milestone)
@@ -114,7 +120,7 @@ thật, đúng như `security-review.md` mục 7 tự ghi chú là còn thiếu 
   — prompt injection qua `read_file`/`grep`/`glob`/`list_dir`/`run_shell`, cùng lớp lỗi với K1
   nhưng đã có test tái hiện bằng tool thật chứng minh khai thác được (không chỉ là rủi ro lý
   thuyết). Xem `docs/security-review-2026-09-25.md`. **Chưa sửa.**
-- **`make check` hiện ĐỎ** ở đúng một file test (`crates/beanagent-core/tests/untrusted_file.rs`,
+- **`make check` hiện ĐỎ** ở đúng một file test (`crates/bean-core/tests/untrusted_file.rs`,
   cố ý để fail làm bằng chứng cho S1) — bảng "✅ Pass" ở mục 4 của báo cáo này phản ánh trạng
   thái tại HEAD `62e8350`, không còn đúng ở commit `399992d`.
 ```
@@ -162,17 +168,17 @@ Bối cảnh:
   đọc untrusted trong một lượt, mọi tool Confirm trở lên phải hỏi lại (mất "cho phép trong
   phiên"). Cờ untrusted_seen hiện chỉ được bật bởi web_fetch/web_search/MCP (agent.rs:521),
   KHÔNG bật bởi read_file/grep/glob/list_dir/run_shell.
-- Đã có test tái hiện bằng tool thật (không phải tool giả): crates/beanagent-core/tests/untrusted_file.rs,
+- Đã có test tái hiện bằng tool thật (không phải tool giả): crates/bean-core/tests/untrusted_file.rs,
   hiện đang FAIL đúng như kỳ vọng. KHÔNG sửa test này để nó pass bằng cách nới lỏng assertion —
   chỉ sửa code sản phẩm để test pass tự nhiên. Nếu thấy test có vấn đề về logic, dừng lại và hỏi
   trước khi sửa test.
 
 Việc cần làm (theo đề xuất ở security-review-2026-09-25.md mục 2.5, điểm 1-5; điểm 6 — sửa
 chung K1 — để riêng, hỏi tôi trước):
-1. Bọc output của read_file, grep, glob, list_dir (crates/beanagent-tools/src/builtin/files/tool.rs)
-   và output stdout/stderr của run_shell (crates/beanagent-security/src/shell.rs) trong
+1. Bọc output của read_file, grep, glob, list_dir (crates/bean-tools/src/builtin/files/tool.rs)
+   và output stdout/stderr của run_shell (crates/bean-security/src/shell.rs) trong
    <untrusted_content>, escape thẻ đóng nếu nội dung chứa nó. Tái dùng hàm bọc đã có
-   (beanagent_tools::untrusted::wrap) — không viết thuật toán mới.
+   (bean_tools::untrusted::wrap) — không viết thuật toán mới.
 2. Đảm bảo agent.rs:521 (hoặc cơ chế thay thế ở bước 4) bật untrusted_seen đúng cho cả 5 tool
    này, giống cách web.rs:103-104 đang làm cho web_fetch.
 3. Cắt output vẫn phải ở ranh giới ký tự UTF-8 sau khi bọc thêm thẻ (tái dùng truncate_chars/
@@ -192,7 +198,7 @@ Không đổi API công khai của tool đã có, không đổi tool schema gử
 Test bắt buộc:
 - 2 test hiện có trong untrusted_file.rs chuyển từ FAIL sang PASS mà không sửa assertion.
 - Test mới cho grep/glob/list_dir/run_shell tương tự (dùng tool thật, không dùng tool giả).
-- cargo test -p beanagent-core --test untrusted_file và cargo test --workspace đều xanh.
+- cargo test -p bean-core --test untrusted_file và cargo test --workspace đều xanh.
 - make check xanh (fmt, clippy -D warnings, toàn bộ test, type export nếu có tool schema đổi).
 
 Sau khi vá xong, nhắc tôi cập nhật:

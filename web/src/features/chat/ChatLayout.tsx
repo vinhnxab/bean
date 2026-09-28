@@ -74,7 +74,7 @@ export function ChatLayout() {
       >
         <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
           <div>
-            <p className="text-lg font-bold">BeanAgent</p>
+            <p className="text-lg font-bold">Bean</p>
             <p className="text-xs text-slate-500 dark:text-slate-400">{t("app.tagline")}</p>
           </div>
           <button

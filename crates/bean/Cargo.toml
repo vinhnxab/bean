@@ -1,0 +1,68 @@
+[package]
+name = "bean"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Personal AI agent: một binary Rust (CLI + web + Telegram)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "bean"
+path = "src/main.rs"
+
+[features]
+default = ["ui"]
+# `ui`: nhúng giao diện React đã build (rust-embed) — bật ở M9.
+# `cargo build --no-default-features` cho bản headless không cần Node (agents.md mục 2).
+ui = ["bean-web/ui"]
+
+[dependencies]
+bean-billing.workspace = true
+bean-browser.workspace = true
+bean-marketing.workspace = true
+bean-scan.workspace = true
+bean-qa.workspace = true
+bean-llm.workspace = true
+bean-types.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+rustyline.workspace = true
+rpassword.workspace = true
+secrecy.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Web server (axum) — chỉ có khi feature `ui`. M1: crate còn rỗng.
+bean-web = { workspace = true }
+
+# Các crate dưới đây sẽ được dùng ở các milestone sau (agents.md mục 21);
+# khai báo sẵn để `serve` ghép được toàn bộ hệ thống mà không phải sửa Cargo.toml.
+bean-channels.workspace = true
+bean-core.workspace = true
+bean-memory.workspace = true
+bean-security.workspace = true
+bean-skills.workspace = true
+bean-tools.workspace = true
+# M25: `ServiceExt::oneshot` để chuyển tiếp request HTTP sang `StreamableHttpService`,
+# và mốc thời gian khi cấp/thu hồi token client MCP.
+tower.workspace = true
+chrono.workspace = true
+# K24: `record_denied` trong `mcp.rs` dựng `args` cho bản ghi audit từ chối.
+serde_json.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+reqwest.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+toml.workspace = true
+wiremock.workspace = true

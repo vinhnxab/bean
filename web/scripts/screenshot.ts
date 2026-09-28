@@ -20,7 +20,7 @@ const outDir = resolve(root, "../.screenshots");
 const PORT = Number(process.env.SHOT_PORT ?? 4180);
 mkdirSync(outDir, { recursive: true });
 
-/** Agent mô phỏng — phản ánh `[[roles]]` trong `BeanAgent.example.toml`. */
+/** Agent mô phỏng — phản ánh `[[roles]]` trong `bean.example.toml`. */
 const AGENTS = [
   { role: "developer", status: "working", summary: "đang thực hiện lượt", risks: [], relation: "manages" },
   { role: "monitor", status: "idle", summary: "không có việc nào đang chạy", risks: [], relation: "manages" },

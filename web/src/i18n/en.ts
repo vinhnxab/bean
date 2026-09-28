@@ -1,7 +1,7 @@
 import type { MessageKey } from "@/i18n/vi";
 
 export const en: Record<MessageKey, string> = {
-  "app.title": "BeanAgent",
+  "app.title": "Bean",
   "app.tagline": "A self-hosted personal AI assistant",
   // --- HUB (operations hub) ------------------------------------------------
   "nav.hub": "Hub",
@@ -37,7 +37,7 @@ export const en: Record<MessageKey, string> = {
   "common.save": "Save",
   "common.delete": "Delete",
   "auth.checking": "Checking your session…",
-  "login.title": "Sign in to BeanAgent",
+  "login.title": "Sign in to Bean",
   "login.subtitle": "Your personal AI, on your machine.",
   "login.password": "Password",
   "login.submit": "Sign in",
@@ -160,7 +160,7 @@ export const en: Record<MessageKey, string> = {
   "audit.viewArgs": "View arguments",
   "audit.loadMore": "Load more",
   "status.title": "System status",
-  "status.description": "BeanAgent runtime information, refreshed periodically.",
+  "status.description": "Bean runtime information, refreshed periodically.",
   "status.version": "Version",
   "status.model": "Model",
   "status.maxSteps": "Steps per run",

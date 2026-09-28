@@ -16,7 +16,7 @@ web/.vite/
 !/workspace/.gitkeep
 /data/
 /skills/_drafts/
-BeanAgent.toml
+bean.toml
 auth.toml
 
 # Secret / log / môi trường

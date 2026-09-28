@@ -1,4 +1,11 @@
-# Báo cáo trạng thái BeanAgent
+# Báo cáo trạng thái Bean
+
+> **Ghi chú đổi tên (2026-09-28).** Đổi tên `BeanAgent`/`beanagent-*` → `bean`/`bean-*` trên
+> toàn repo (xem `docs/decisions.md`, mục 19 — D18.x). Báo cáo này mô tả trạng thái tại
+> commit `62e8350`; sau rename, **lệnh và tên crate trong báo cáo đã được cập nhật sang tên
+> mới** để còn chạy được. Tag `pre-rename-beanagent` giữ nguyên trạng thái commit gốc mà
+> báo cáo này mô tả, dùng khi cần tái hiện đúng môi trường cũ. Các **mã commit** trong
+> báo cáo (`62e8350`, `882363d`…) là dữ liệu git thật nên **không** đổi.
 
 **Ngày cập nhật:** 2026-09-25
 **Nhánh:** `master`
@@ -118,27 +125,27 @@ Dependency chain: `teloxide 0.17.0` → `aquamarine 0.6.0` → `proc-macro-error
 
 ## 5. Trạng thái local trên máy hiện tại
 
-- Có binary release tại `target/release/BeanAgent`.
-- Đã tạo `~/.BeanAgent/auth.toml` với quyền `0600`.
-- **Chưa có `BeanAgent.toml`**, nên `serve` dùng provider mặc định Anthropic và yêu cầu `ANTHROPIC_API_KEY`.
+- Có binary release tại `target/release/bean`.
+- Đã tạo `~/.bean/auth.toml` với quyền `0600`.
+- **Chưa có `bean.toml`**, nên `serve` dùng provider mặc định Anthropic và yêu cầu `ANTHROPIC_API_KEY`.
 - `auth.toml` đã có, nên bước xác thực Web đã sẵn sàng.
 - Để chạy fake/demo không cần key:
 
 ```bash
-./target/release/BeanAgent serve --fake-llm tests/e2e/demo_hello.json
+./target/release/bean serve --fake-llm tests/e2e/demo_hello.json
 ```
 
 - Để chạy thật:
 
 ```bash
 export ANTHROPIC_API_KEY='...'
-./target/release/BeanAgent serve
+./target/release/bean serve
 ```
 
 - Để tránh phụ thuộc key mặc định và cấu hình đầy đủ, nên copy file mẫu trước:
 
 ```bash
-cp BeanAgent.example.toml BeanAgent.toml
+cp bean.example.toml bean.toml
 ```
 
 ## 6. Các phần chưa hoàn thành
@@ -240,7 +247,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 
 1. **An toàn:** S1, K1, S2 đã đóng. Việc còn lại là rà S3/S4 khi chuyển multi-user và khi
    thêm cảnh báo UI cho task `Dangerous`; cân nhắc `K1-followup` nếu dùng thật thấy mỏi tay.
-2. **Vận hành tối thiểu:** tạo `BeanAgent.toml`, đặt secret qua biến môi trường, chạy một smoke test provider thật và một smoke test Telegram thật.
+2. **Vận hành tối thiểu:** tạo `bean.toml`, đặt secret qua biến môi trường, chạy một smoke test provider thật và một smoke test Telegram thật.
 3. **E2E bền vững:** đóng gói K11 và K18; kiểm tra restart, scheduler, learning draft và skill activation.
 4. **Độ bền:** xử lý hoặc ghi nhận rõ K2–K7 trước khi có phiên dài và DB lớn.
 5. **Phát hành:** thêm CI, soak test 24 giờ, Playwright tùy chọn, cài systemd/Docker trên host thật và diễn tập backup/restore.
@@ -267,4 +274,4 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 
 ## 11. Kết luận
 
-BeanAgent hiện là một **bản v1 chức năng phong phú, tự kiểm thử tốt và có thể chạy demo bằng FakeProvider**. M17(A) đã hoàn thành. Rủi ro lớn nhất hiện nay không nằm ở thiếu chức năng chính, mà ở việc chưa kiểm chứng hệ thống thật: **K1**, credential/provider/Telegram, E2E bền vững, soak test và production deployment.
+Bean hiện là một **bản v1 chức năng phong phú, tự kiểm thử tốt và có thể chạy demo bằng FakeProvider**. M17(A) đã hoàn thành. Rủi ro lớn nhất hiện nay không nằm ở thiếu chức năng chính, mà ở việc chưa kiểm chứng hệ thống thật: **K1**, credential/provider/Telegram, E2E bền vững, soak test và production deployment.

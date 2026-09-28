@@ -1,5 +1,10 @@
 # Quyết định thiết kế (bổ sung/giải thích cho `agents.md`)
 
+> **Ghi chú đổi tên (2026-09-28).** Đổi tên `BeanAgent`/`beanagent-*` → `bean`/`bean-*` trên
+> toàn repo. Mục **19 (D18.x)** ghi quyết định mới; **D5.13 được giữ nguyên lập luận gốc**
+> kèm khối "Đã thay thế bởi rename" ngay bên dưới — không viết đè lịch sử quyết định.
+> Tag `pre-rename-beanagent` giữ trạng thái commit gốc cho mọi tài liệu lịch sử.
+
 File này ghi lại các điểm mà `agents.md` còn mơ hồ, mâu thuẫn hoặc thiếu, kèm quyết định
 đã chốt và lý do. Người dùng đã uỷ quyền cho coding agent tự chốt các điểm này (2026-09-21).
 Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sang trạng thái "đã vào spec".
@@ -20,14 +25,14 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   * M8: Router cung cấp `RouterIo` cùng trait — `on_*` phát `RunEvent` lên broadcast,
     `confirm()` sinh `confirm_id`, phát `ConfirmRequest`, chờ `oneshot` với `timeout_seconds`,
     hết hạn ⇒ `DENY`.
-* **D1.3 — Một enum sự kiện duy nhất.** `RunEvent` (định nghĩa ở `BeanAgent-types`) luôn mang
-  `session_id`, `run_id`, và `message_id` khi có. `BeanAgent-web` chỉ **map** 1-1 sang `ServerMsg`
+* **D1.3 — Một enum sự kiện duy nhất.** `RunEvent` (định nghĩa ở `bean-types`) luôn mang
+  `session_id`, `run_id`, và `message_id` khi có. `bean-web` chỉ **map** 1-1 sang `ServerMsg`
   (thêm trường `type` cho TS); không định nghĩa hai enum song song gần giống nhau.
 * **D1.4 — `Incoming` có `session_id: Option<SessionId>`.** Web: mỗi hội thoại = 1 session = 1
   `chat_id` (uuid). `session_id = None` ⇒ resolve theo `(channel, chat_id)` như mục 8.1
   (CLI/Telegram). Nếu có `session_id`, Router phải kiểm tra session đó thuộc đúng
   `channel`/`chat_id`/`user_id` trước khi dùng (chống IDOR).
-* **D1.5 — Web là một `Channel`.** `BeanAgent-web::WebChannel`: `run()` = chạy axum server và chờ
+* **D1.5 — Web là một `Channel`.** `bean-web::WebChannel`: `run()` = chạy axum server và chờ
   `shutdown`; `send(chat_id, Outbound)` = broadcast `Notification` tới mọi kết nối WS.
   Router giữ registry `HashMap<&'static str, Arc<dyn Channel>>` (`register_channel`).
 * **D1.6 — `Outbound` có kiểu** `{ session_id, message_id, text, kind }`. Kênh đẩy (Telegram)
@@ -67,7 +72,7 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   `default-features = false` + `["client", "transport-child-process"]`. API đã đối chiếu source
   crate đã tải: `TokioChildProcess::new`, `ServiceExt::serve`, `Peer::list_all_tools`,
   `RunningService::call_tool_once`, `CallToolRequestParams`; không dùng server/macros/HTTP của
-  `rmcp`. `TokioChildProcess` tự kill/reap khi drop; BeanAgent vẫn gọi `close_with_timeout`
+  `rmcp`. `TokioChildProcess` tự kill/reap khi drop; Bean vẫn gọi `close_with_timeout`
   tường minh khi `chat`/`serve` thoát.
 * **D3.5** `tower-http 0.7` (+ `csrf` layer làm lớp phụ cho mục 15.7, và `services::fs::Backend`
   để phục vụ asset nhúng ở M9).
@@ -102,7 +107,7 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
 * **D4.5** UI khử trùng theo `message_id`/`run_id`: lịch sử luôn lấy từ REST, `Sync` để khôi phục
   run/confirm đang chạy; event đến sau khi REST đã nạp thì bỏ qua theo `message_id`.
 * **D4.6** `serve` từ chối bật web nếu chưa có `data.dir/auth.toml` (đặt bằng
-  `BeanAgent auth set-password`: hash `argon2id`, file quyền `0600`).
+  `bean auth set-password`: hash `argon2id`, file quyền `0600`).
 
 ## 5. Nhỏ nhưng cần chốt để không tự suy diễn
 
@@ -111,40 +116,47 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   `cargo test --workspace export_bindings` với `TS_RS_EXPORT_DIR=web/src/api/generated`
   (đặt trong `.cargo/config.toml`), và `make check-rust` so `git diff --exit-code` trên thư mục đó.
 * **D5.3** `cargo build --no-default-features` chạy ở gốc workspace nhờ
-  `default-members = ["crates/BeanAgent"]`.
+  `default-members = ["crates/bean"]`.
 * **D5.4** `run_turn()` trả `RunOutcome { text, ended: EndReason }` với
   `EndReason::{Final, MaxSteps, Cancelled, BudgetExceeded, LoopGuard}` (mục 6 chỉ trả `String`,
   không phân biệt được lý do dừng để UI/Telegram thông báo cho đúng).
 * **D5.5** Chống lặp so sánh **JSON đã chuẩn hoá** (sort khoá) của `(tool, args)`.
 * **D5.6** `allowed_users` bị kiểm tra **trước** khi tạo session/ghi message; chỉ log warn.
-* **D5.7** `/model` chỉ đổi trong runtime, áp dụng cho run kế tiếp, không ghi vào `BeanAgent.toml`.
+* **D5.7** `/model` chỉ đổi trong runtime, áp dụng cho run kế tiếp, không ghi vào `bean.toml`.
 * **D5.8** Hai chỗ dùng múi giờ khác nhau: `agent.timezone` cho **parse cron/hiển thị phía server**;
   UI luôn hiển thị theo múi giờ trình duyệt.
-* **D5.9** `Risk` được định nghĩa ở `BeanAgent-types` (mục 7.1 đặt ở `BeanAgent-tools`) để
-  `tools`, `core` và `web` dùng chung một kiểu; `BeanAgent-tools` re-export lại.
-* **D5.10** `BeanAgent.toml` dùng `#[serde(deny_unknown_fields)]` để bắt lỗi gõ sai khoá; khoá thêm
+* **D5.9** `Risk` được định nghĩa ở `bean-types` (mục 7.1 đặt ở `bean-tools`) để
+  `tools`, `core` và `web` dùng chung một kiểu; `bean-tools` re-export lại.
+* **D5.10** `bean.toml` dùng `#[serde(deny_unknown_fields)]` để bắt lỗi gõ sai khoá; khoá thêm
   ngoài mục 18 (`web.trust_proxy`) đều có `#[serde(default)]` và nằm trong file mẫu dạng comment.
-* **D5.11** `chat` chạy được **không cần** `BeanAgent.toml` (dùng giá trị mặc định, có cảnh báo)
-  để `cargo run -p BeanAgent -- chat` là lệnh smoke test của M1.
+* **D5.11** `chat` chạy được **không cần** `bean.toml` (dùng giá trị mặc định, có cảnh báo)
+  để `cargo run -p bean -- chat` là lệnh smoke test của M1.
 * **D5.12** Mọi crate: `#![forbid(unsafe_code)]`; clippy `unwrap_used`/`expect_used`/`panic`/`todo`
   = `deny` ở `[workspace.lints]`; file test được phép dùng `unwrap`/`panic` qua `#![allow(...)]`
   ở đầu file.
-* **D5.13** Tên **package** của các crate thư viện là kebab-case chữ thường (`beanagent-types`,
-  `beanagent-llm`, …) và thư mục cũng vậy (`crates/beanagent-types`), vì Rust dùng tên package
-  làm tên crate trong code: `BeanAgent-types` sẽ buộc phải viết `BeanAgent_types::…` (không
-  idiomatic). Package của binary vẫn là `BeanAgent` (để `cargo run -p BeanAgent -- chat` và tên
-  file binary là `BeanAgent`), và `[[bin]] name = "BeanAgent"` được khai báo tường minh.
+* **D5.13** Tên **package** của các crate thư viện là kebab-case chữ thường (`bean-types`,
+  `bean-llm`, …) và thư mục cũng vậy (`crates/bean-types`), vì Rust dùng tên package
+  làm tên crate trong code: `bean-types` sẽ buộc phải viết `bean_types::…` (không
+  idiomatic). Package của binary vẫn là `bean` (để `cargo run -p bean -- chat` và tên
+  file binary là `bean`), và `[[bin]] name = "bean"` được khai báo tường minh.
   Đây là sai khác nhỏ so với sơ đồ mục 4 của `agents.md` (chỉ khác chữ hoa/thường).
+
+  > **Đã thay thế bởi rename 2026-09-28 — xem D18.x (mục 19).**
+  > Đoạn lập luận trên được giữ nguyên theo nguyên tắc "không viết đè lịch sử": nó mô tả
+  > trạng thái *trước* khi đổi tên, khi package của binary còn là `BeanAgent` (CamelCase).
+  > Rename M28 đã đổi cả package lẫn tên binary sang chữ thường `bean`; phần "sai khác
+  > nhỏ so với sơ đồ mục 4" **không còn tồn tại** vì nay khớp hẳn với sơ đồ.
+  > Lý do gốc (kebab-case để import `bean_types::…` idiomatic) vẫn nguyên hiệu lực.
 
 ## 6. Quyết định riêng của M2 (providers)
 
 * **D6.1** Mỗi lượt `LlmProvider::chat` phát đúng **một** HTTP request; retry/backoff nằm ở
-  `beanagent_llm::retry::retry_with_backoff` (tối đa 3 lần, tôn trọng `Retry-After` giây,
+  `bean_llm::retry::retry_with_backoff` (tối đa 3 lần, tôn trọng `Retry-After` giây,
   backoff 1s→2s→4s + jitter ≤ 25%) **bọc ngoài** closure request, không nằm trong provider.
   Lý do: test đo được số request qua wiremock, và M17 (streaming) không phải nhân bản logic.
 * **D6.2** `reqwest` giữ backend mặc định rustls (0.13: rustls là default; **không** khai
   feature `rustls-tls` — feature này đã đổi tên ở 0.13, khai sai sẽ fail build). Chỉ thêm
-  feature `json`. Timeout tổng 300s, connect 30s, User-Agent `BeanAgent/<version>`.
+  feature `json`. Timeout tổng 300s, connect 30s, User-Agent `bean/<version>`.
 * **D6.3** `LlmError::HttpStatus` nhúng tối đa **500 ký tự** body lỗi (cắt theo ranh giới
   ký tự, không cắt giữa codepoint). Body lỗi không log ở mức info; chỉ đi vào `Display`
   của lỗi khi hiện cho người dùng (CLI) hoặc trả về client ở M9.
@@ -175,7 +187,7 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
 
 ## 7. Quyết định riêng của M3 (tools + agent loop)
 
-* **D7.1** Path jail đặt sau trait `WorkspaceFs` (`beanagent_tools::workspace`): M3 dùng
+* **D7.1** Path jail đặt sau trait `WorkspaceFs` (`bean_tools::workspace`): M3 dùng
   `FsWorkspace` với kiểm tra đơn giản (chặn đường dẫn tuyệt đối, thành phần `..`, và
   symlink thoát ra qua `canonicalize` + kiểm tra prefix). M4 thay bằng `cap-std::fs::Dir`
   — chỉ cài lại trait này, tool và agent loop không đổi.
@@ -189,7 +201,7 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   rồi run kết thúc bằng `AgentError::Cancelled`.
 * **D7.4** `ToolSpec::new(name, description, parameters)` — JSON schema thô từ schemars;
   việc chuẩn hoá là trách nhiệm của provider (D6.10).
-* **D7.5** `MemoryStore` (`beanagent-core::store`): in-memory; `history(session, before,
+* **D7.5** `MemoryStore` (`bean-core::store`): in-memory; `history(session, before,
   limit)` trả message cũ → mới, tối đa `limit` message gần nhất (`before` = chỉ lấy
   trước seq đó, `limit = 0` = không giới hạn). SQLite thay ở M5, giữ nguyên trait `Store`.
 * **D7.6** System prompt (M3) theo mẫu mục 19 nhưng mục Skills/Memory để trống —
@@ -211,7 +223,7 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
   `libsqlite3-sys-0.38.2/build.rs`, dòng 157–160). Vì vậy **không** cần `SQLITE3_CFLAGS`
   hay `LIBSQLITE3_FLAGS` trong Makefile/`.cargo/config.toml`; nếu bản build tương lai bỏ
   cờ này thì migration báo lỗi rõ "thiếu FTS5 trong SQLite?".
-* **D8.2** **Một** thread riêng (`beanagent-memory-worker`) sở hữu `rusqlite::Connection`
+* **D8.2** **Một** thread riêng (`bean-memory-worker`) sở hữu `rusqlite::Connection`
   duy nhất: `SqliteStore::open` tạo connection, chạy pragma + migration **đồng bộ**, rồi
   spawn worker; mọi thao tác đi qua `std::sync::mpsc::Sender<DbCommand>` + `oneshot` trả
   kết quả. Lý do: `rusqlite` blocking (mục 22.8) và SQLite ghi tốt nhất với một writer.
@@ -238,8 +250,8 @@ Khi `agents.md` được cập nhật, mục tương ứng ở đây chuyển sa
 * **D8.8** `MemoryStore` (in-memory) vẫn được giữ và **cùng** trait `Store` để test M3
   không phải đổi: test vòng lặp ghi thẳng `SessionId::new(1)` nên `append` tự tạo phiên và
   `history` trả rỗng cho phiên chưa biết (thay vì `NotFound`). `SqliteStore` là bản dùng
-  thật ở `BeanAgent chat`; CLI bọc nó trong `Arc` để chia sẻ với tool bộ nhớ.
-* **D8.9** Context builder (mục 8.2) đặt ở `beanagent-core::context::build(store, config,
+  thật ở `bean chat`; CLI bọc nó trong `Arc` để chia sẻ với tool bộ nhớ.
+* **D8.9** Context builder (mục 8.2) đặt ở `bean-core::context::build(store, config,
   session, workspace)` vì cần `WorkspaceFs` để đọc `MEMORY.md`/`USER.md` qua path jail
   (không tự nối đường dẫn). Ngân sách ở điểm 3 của mục 8.2 tính **riêng** cho lịch sử
   (`context_budget_tokens`), không trừ system prompt; message mới nhất luôn được giữ, và
@@ -345,7 +357,7 @@ lượt* của một phiên đã compact.
   Hướng tinh giản nếu sau này thấy mỏi tay: xem backlog `K1-followup` trong
   `docs/known-issues.md`.
 
-* **D9.8 — S2: lọc escape ở `beanagent_tools::text::strip_terminal_escapes`, áp dụng theo
+* **D9.8 — S2: lọc escape ở `bean_tools::text::strip_terminal_escapes`, áp dụng theo
   khai báo `marks_untrusted()`.** Một điểm dùng chung duy nhất (không lọc rải rác), và CLI
   lấy danh sách tool untrusted từ **chính khai báo D9.1** lúc khởi động ⇒ không có danh sách
   tool thứ hai phải đồng bộ, thêm tool mới tự động được lọc.
@@ -395,7 +407,7 @@ lượt* của một phiên đã compact.
   * `required_tags() = &[]` chỉ nghĩa *"không cần thẻ đặc biệt"* — với role **đã** được cấp quyền.
   * `no-access` là tên **dự phòng của hệ thống**: `validate()` **từ chối** nếu khai báo lại nó
     trong `[[roles]]`, tránh cấu hình tự mâu thuẫn.
-  * Bằng chứng: `crates/beanagent-core/tests/rbac.rs::user_without_role_is_no_access_and_sees_no_tool`.
+  * Bằng chứng: `crates/bean-core/tests/rbac.rs::user_without_role_is_no_access_and_sees_no_tool`.
 
 * **D11.2 — RBAC chỉ bật khi `agent.user_roles` khác rỗng.** Nếu bật vô điều kiện thì mọi cài
   đặt một-người-dùng sẵn có **đột nhiên mất hết tool** ngay sau khi nâng cấp. Vì vậy
@@ -404,7 +416,7 @@ lượt* của một phiên đã compact.
 
 * **D11.3 — Một kiểu `RolePermissions` tuần tự hoá được, quyết định đúng một chỗ.**
   `Plan.md` mục 4 ràng buộc (1) giao tiếp serializable và (3) RBAC check ở đúng một điểm.
-  `RolePermissions` (`beanagent-types::rbac`) là hiện thân của cả hai: Router gọi
+  `RolePermissions` (`bean-types::rbac`) là hiện thân của cả hai: Router gọi
   `Config::permissions_for(user_id)` **một lần** mỗi run, rồi truyền struct xuống agent loop
   qua `RunTurnArgs::permissions`. Agent loop **không** tự tra cứu role.
 
@@ -476,7 +488,7 @@ lượt* của một phiên đã compact.
 * **D13.1 — Đi hướng GENERIC thay vì chọn hẳn AWS/Azure/GCP.** `Plan.md` M22a ghi *"chọn theo nhà
   cung cấp cloud công ty đang dùng"* nhưng chưa chốt được nhà cung cấp. Hard-code một provider sẽ
   phải viết lại khi đổi, nên tool lấy `base_url` + credential từ cấu hình. Đổi provider chỉ cần
-  sửa `BeanAgent.toml`, **không sửa/build lại binary** — đúng tinh thần kiến trúc A (một tiến
+  sửa `bean.toml`, **không sửa/build lại binary** — đúng tinh thần kiến trúc A (một tiến
   trình, cấu hình quyết định hành vi).
 
 * **D13.2 — Ràng buộc "credential phải riêng" kiểm ở TẦNG CODE, không chỉ bằng tài liệu.**
@@ -497,14 +509,14 @@ lượt* của một phiên đã compact.
   khai báo `finance-readonly.forbid_tags = ["infra-read", "infra-scan"]` để tầng code chặn lẫn
   domain (M22a yêu cầu 3), tái dùng đúng cơ chế `forbid_tags` đã có từ M21 thay vì thêm logic mới.
 
-* **D13.5 — Tool trong crate riêng `beanagent-billing`.** Giữ đúng nguyên tắc "domain tách biệt"
-  của M21–M24: billing không lẫn vào `beanagent-security` (đó là crate SSRF/sandbox) hay
-  `beanagent-tools` (đó là trait/registry). Thêm source ở M22a rẻ hơn nhiều so với dồn về sau.
+* **D13.5 — Tool trong crate riêng `bean-billing`.** Giữ đúng nguyên tắc "domain tách biệt"
+  của M21–M24: billing không lẫn vào `bean-security` (đó là crate SSRF/sandbox) hay
+  `bean-tools` (đó là trait/registry). Thêm source ở M22a rẻ hơn nhiều so với dồn về sau.
 
 ## 14. Security-scan (D14.x — 2026-09-26)
 
 Chủ dự án đã **mở khóa M23** (S1 đã vá, `make check` xanh) và chọn `[[infra_scope]]` **rỗng**
-(fail-closed) cho tới khi họ điền target thật. Công cụ mới: `crates/beanagent-scan`.
+(fail-closed) cho tới khi họ điền target thật. Công cụ mới: `crates/bean-scan`.
 
 | # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
 |---|-----------|--------|---------------------|
@@ -517,8 +529,8 @@ Chủ dự án đã **mở khóa M23** (S1 đã vá, `make check` xanh) và ch�
 | D14.7 | Output scanner bọc `<untrusted_content>` | Banner mà scanner đọc được từ target do **kẻ tấn công kiểm soát** — đúng loại payload mà S1 (2026-09-26) đã vá cho `read_file`/`run_shell` (mục 22.5 áp cho MỌI tool có nguồn ngoài lõi). | Test khẳng định payload cài `</untrusted_content>` bị escape, khối chỉ còn **một** thẻ đóng. |
 | D14.8 | Tự viết so khớp CIDR, **không** thêm crate `ipnet` | Vài chục dòng `std` đủ; thêm dependency vào công cụ bảo mật để tránh 20 dòng tự viết là đánh đổi xấu (mục 15.10 chuỗi cung ứng). | Phải tự bảo đảm IPv4/IPv6 không bao giờ "rơi" xuống khớp chéo — có test riêng. |
 
-**Bằng chứng:** `crates/beanagent-scan/tests/scan.rs` (12 test) + `crates/beanagent-scan/src/scope.rs`
-(6 unit test) + `crates/beanagent-types/tests/config.rs` (9 test M23). Test dùng sandbox chế
+**Bằng chứng:** `crates/bean-scan/tests/scan.rs` (12 test) + `crates/bean-scan/src/scope.rs`
+(6 unit test) + `crates/bean-types/tests/config.rs` (9 test M23). Test dùng sandbox chế
 độ host với script tự tạo, nên **không cần Docker, không cần mạng, không cần image scanner**.
 
 ### D14.9 — Cảnh báo qua trait `AlertSink`, không tham chiếu `Router` (đóng K23)
@@ -529,15 +541,15 @@ một khoảng trống dễ khiến người dùng tin là đã có cảnh báo 
 
 | # | Quyết định | Vì sao |
 |---|-----------|--------|
-| D14.9 | Trait `AlertSink` đặt ở `beanagent-tools` (cùng `ToolCtx`), **không** đặt ở `beanagent-core` | `beanagent-scan` cần gửi cảnh báo, mà `beanagent-core` lại điều phối tool. Nếu tham chiếu thẳng `Router` sẽ thành phụ thuộc vòng. M23 chỉ cần một trait một hàm, không cần cả Router. |
+| D14.9 | Trait `AlertSink` đặt ở `bean-tools` (cùng `ToolCtx`), **không** đặt ở `bean-core` | `bean-scan` cần gửi cảnh báo, mà `bean-core` lại điều phối tool. Nếu tham chiếu thẳng `Router` sẽ thành phụ thuộc vòng. M23 chỉ cần một trait một hàm, không cần cả Router. |
 | D14.10 | `RouterAlertSink` bọc quanh `Router::notify` | Giữ **một** đường gửi duy nhất ⇒ lỗi gửi rơi vào outbox và được thử lại, không mất tin cảnh báo an ninh (không tạo đường gửi "song song" riêng). |
 | D14.11 | Chỉ mức `High` mới gửi cảnh báo trực tiếp; `Low`/`Medium` chỉ nằm trong báo cáo | `Plan.md` M23 nói *"cảnh báo mức cao"*. Gửi mọi lần quét sẽ biến kênh chính thành spam và dạy bạn bỏ qua nó. Quy tắc nằm ở `AlertSeverity::needs_direct_alert()` — một chỗ duy nhất. |
 | D14.12 | Lỗi gửi cảnh báo chỉ ghi log, **không** làm hỏng tool | Mục 6: lỗi tool không được làm hỏng vòng lặp. Kênh chính hỏng không phải lý do để bỏ dở lần quét. |
 
-**Bằng chứng:** `crates/beanagent-core/tests/router.rs` — `security_scan_high_alert_reaches_the_main_channel`
+**Bằng chứng:** `crates/bean-core/tests/router.rs` — `security_scan_high_alert_reaches_the_main_channel`
 gọi tool `security_scan` **thật** (script in `22/tcp open ssh`) rồi khẳng định cảnh báo tới
 đúng channel, có `message_id` thật trong DB; `failed_alert_goes_to_outbox_instead_of_being_lost`;
-`alert_sink_is_none_when_not_configured`. Cộng 4 test ở `crates/beanagent-scan/tests/scan.rs`
+`alert_sink_is_none_when_not_configured`. Cộng 4 test ở `crates/bean-scan/tests/scan.rs`
 cho ranh giới mức nghiêm trọng và việc lỗi gửi không làm hỏng tool.
 
 ## 15. Marketing (D15.x — 2026-09-26)
@@ -552,7 +564,7 @@ cho ranh giới mức nghiêm trọng và việc lỗi gửi không làm hỏng 
 | D15.6 | `SafeHttpClient::post_bearer` thêm mới, **không** tái dùng đường nào khác | `fetch` chỉ có GET. Thêm hàm riêng thay vì mở rộng `fetch` để không làm nongỏ chỗ kiểm SSRF cho request có body. | Mọi kiểm tra của `fetch_bearer` (validate URL, resolver, redirect từng bước, giới hạn body) được nhân bản nguyên vẹn. |
 | D15.7 | `marketing.enabled` mà thiếu biến credential ⇒ **lỗi lúc khởi động**, không phải stub | Khác hẳn M22a (billing) vốn cho stub im lặng: đăng bài không hoàn tác được, nên "tưởng đã cấu hình" là nguy hiểm. | Thiếu biến là thấy ngay, không phải lúc chạy. |
 
-**Bằng chứng:** `crates/beanagent-marketing/tests/marketing.rs` (13 test) — đủ ba yêu cầu kiểm thử
+**Bằng chứng:** `crates/bean-marketing/tests/marketing.rs` (13 test) — đủ ba yêu cầu kiểm thử
 bắt buộc của M24: marketing không thấy/gọi được tool ngoài tag, `marketing_publish` luôn
 Confirm kể cả sau allow-in-session, `marketing_draft` không có network call.
 
@@ -561,8 +573,8 @@ Confirm kể cả sau allow-in-session, `marketing_draft` không có network cal
 | # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
 |---|-----------|--------|---------------------|
 | D16.1 | Cổng expose **cứng** `MCP_EXPOSED_TAGS` + `Risk::Safe`, kiểm **trước** RBAC | `RolePermissions::allows` trả `true` cho *mọi* tool khi role giữ tag `*`. Nếu chỉ dựa vào RBAC thì client MCP gắn role `admin` sẽ thấy và gọi được `write_file`/`run_shell`/`security_scan` — vi phạm phạm vi cứng của M25 (*"kể cả nếu client tự xưng có quyền cao"*). | Cổng này **thắt trên** RBAC chứ không thay thế nó: tool phải qua cả hai. Tool `Confirm` cũng bị loại vì client MCP không có ai bấm nút xác nhận. |
-| D16.2 | Cổng nằm ở `beanagent-core`, `Router::call_tool_as` gọi lại **cùng** `Config::permissions_for` + `RolePermissions::allows` | `Plan.md` mục 4.3 cấm rải logic RBAC. Đường MCP không đi qua `Router::submit` (đó là vòng lặp agent có LLM) nên cần một điểm gọi thứ hai — nhưng nó **áp dụng** kết quả quyết định, không viết lại. | Handler `ServerHandler` không tự so sánh tag; test chứng minh cả hai lớp không thể lệch. |
-| D16.3 | Token lưu **hash SHA-256** trong bảng `mcp_clients`, **không** đặt trong `BeanAgent.toml` | `Plan.md` M25 nói "lưu hash". Nhưng cấu hình thường được commit còn `data.dir` thì không — đặt hash ở config là rò bí mật vào git. | `[[mcp_clients]]` chỉ là **chính sách** (ai → role nào); credential nằm trong `data.dir/beanagent.db`, thu hồi bằng `auth mcp-token revoke`. |
+| D16.2 | Cổng nằm ở `bean-core`, `Router::call_tool_as` gọi lại **cùng** `Config::permissions_for` + `RolePermissions::allows` | `Plan.md` mục 4.3 cấm rải logic RBAC. Đường MCP không đi qua `Router::submit` (đó là vòng lặp agent có LLM) nên cần một điểm gọi thứ hai — nhưng nó **áp dụng** kết quả quyết định, không viết lại. | Handler `ServerHandler` không tự so sánh tag; test chứng minh cả hai lớp không thể lệch. |
+| D16.3 | Token lưu **hash SHA-256** trong bảng `mcp_clients`, **không** đặt trong `bean.toml` | `Plan.md` M25 nói "lưu hash". Nhưng cấu hình thường được commit còn `data.dir` thì không — đặt hash ở config là rò bí mật vào git. | `[[mcp_clients]]` chỉ là **chính sách** (ai → role nào); credential nằm trong `data.dir/bean.db`, thu hồi bằng `auth mcp-token revoke`. |
 | D16.4 | Xác thực **trước khi tạo handler**, không phải trong `initialize` | Yêu cầu M25 là "từ chối ở bước handshake". Kiểm sớm hơn một bước còn tốt hơn: client không biết Bean tồn tại, không thấy tool nào, không gửi được tham số nào xuống tầng dưới. | stdio thiếu/sai token ⇒ tiến trình thoát trước khi đọc stdin; HTTP ⇒ `401` trước khi chạm `StreamableHttpService`. |
 | D16.5 | Tham số được làm sạch trong `Router::call_tool_as`, **không** ở handler | `call_tool_as` là ranh giới duy nhất đi vào tool từ phía ngoài; đặt ở handler thì một caller mới sau này có thể quên. | Lớp làm sạch không thể bị bỏ sót, và test gọi thẳng `call_tool_as` vẫn được bảo vệ. |
 | D16.6 | `memory_query` mang tag riêng `memory-read`, không dùng lại nhóm `memory` | M25 đòi expose "đúng ba tag". Tool untagged sẽ bị mọi role thấy, và tag tường minh giúp người đọc cấu hình hiểu ngay đường MCP đọc được gì. | Thêm một hằng tag; role muốn đọc ghi chú qua MCP phải được cấp `memory-read` một cách tường minh. |
@@ -570,7 +582,7 @@ Confirm kể cả sau allow-in-session, `marketing_draft` không có network cal
 | D16.8 | Mỗi client có **service HTTP riêng** được cache lại, không dựng mới mỗi request | `StreamableHttpService` giữ `LocalSessionManager` bên trong. Dựng mỗi request ⇒ session tạo ở `initialize` biến mất ngay và client không gọi được `tools/call`. Đồng thời cô lập session của client này khỏi client khác. | Bộ nhớ đệm theo `mcp-client:<name>`; mỗi client giữ đúng một tập session riêng. |
 | D16.9 | Log của toàn hệ thống ghi ra **stderr** | Ở `mcp serve` (stdio) thì stdout **chính là** kênh JSON-RPC; một dòng log trộn vào đó khiến client không đọc được phản hồi nào. | Đây là lỗi thật do smoke test mới bắt được, không phải lý thuyết. |
 
-**Bằng chứng:** `crates/beanagent-core/tests/mcp_server.rs` (12 test) — đủ bốn yêu cầu kiểm thử
+**Bằng chứng:** `crates/bean-core/tests/mcp_server.rs` (12 test) — đủ bốn yêu cầu kiểm thử
 bắt buộc của M25: token không hợp lệ bị từ chối trước handshake, `finance-readonly` chỉ
 thấy tool `billing-read`, gọi thẳng `dev_write` bị **từ chối** ở tầng thực thi, tham số
 chứa chuỗi giống SQL/FTS injection bị làm sạch; cộng `admin_wildcard_cannot_reach_write_tools_through_mcp`
@@ -582,7 +594,7 @@ cho thấy tag `*` không vượt được cổng. Smoke test thật (stdio + st
 | # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
 |---|-----------|--------|---------------------|
 | D16.10 | `mcp.jsonl` ghi **song song** với `audit.jsonl`, **không thay thế** | Đây là lựa chọn được hỏi rõ ràng và chủ dự án chốt **song song**. Lý do kỹ thuật khiến nó ít rủi ro hơn: `GET /api/audit` và trang Audit trong UI đọc `audit.jsonl` qua `AuditLog::read_recent`, và các bản ghi `channel = mcp-client:*` **đang** hiển thị ở đó. Thay thế hoàn toàn ⇒ xoá lịch sử khỏi nơi người dùng thật sự đọc, không ai hỏi, và phải sửa cả REST lẫn UI. | Mỗi sự kiện MCP nằm ở hai file. Đổi lại: `tail -f data.dir/audit/mcp.jsonl` là nguồn **duy nhất** về MCP để phát hiện lạm dụng, không phải lọc giữa kênh. Nếu sau này muốn bỏ bản ghi chung thì đổi ở `BeanMcpHandler::audit_event` — một chỗ. |
-| D16.11 | Rút thuật toán của `POST /api/auth/login` ra `beanagent_security::ratelimit::RateLimiter` cho **cả hai** dùng chung | K24 yêu cầu "không viết thuật toán giới hạn tần suất mới". Toàn bộ toán học (cửa sổ 60s, khoá tăng dần `1<<min(n-5,8)`, trần 300s) nằm ở đúng một chỗ; `AuthService` chỉ đổi chỗ gọi. | Login **không** đổi hành vi — test `logout_and_rate_limit_are_server_side` (5 lần sai ⇒ 401, lần 6 ⇒ 429) vẫn xanh nguyên trạng. Đổi ngưỡng login về sau tự động áp cho MCP. |
+| D16.11 | Rút thuật toán của `POST /api/auth/login` ra `bean_security::ratelimit::RateLimiter` cho **cả hai** dùng chung | K24 yêu cầu "không viết thuật toán giới hạn tần suất mới". Toàn bộ toán học (cửa sổ 60s, khoá tăng dần `1<<min(n-5,8)`, trần 300s) nằm ở đúng một chỗ; `AuthService` chỉ đổi chỗ gọi. | Login **không** đổi hành vi — test `logout_and_rate_limit_are_server_side` (5 lần sai ⇒ 401, lần 6 ⇒ 429) vẫn xanh nguyên trạng. Đổi ngưỡng login về sau tự động áp cho MCP. |
 | D16.12 | `ServeContext` có hai cửa **bất đối xứng**: `authenticate_stdio` vs `authenticate_http` | Yêu cầu "áp rate-limit CHỈ cho HTTP" dễ bị vi phạm vô tình về sau. Làm nó **không thể** vi phạm bằng chữ ký hàm: `authenticate_stdio` không có tham số limiter nào để truyền, nên không ai gọi nhầm được. | Một cặp hàm phải giữ đồng bộ khi sửa. Đổi lại: stdio **không thể** bị khoá nhầm, kể cả do ai đó thêm limiter vào hàm cũ. |
 | D16.13 | Kiểm tra giới hạn **trước**, tra DB **sau**; khoá theo `hash_token`; trần cấu hình được, `http_enabled` + `0` thì validate chặn | `authenticate` băm token rồi tra `mcp_clients`; tra trước thì kẻ dò token bắn được hàng loạt truy vấn SQLite. Token thô là bí mật dài hạn — làm khoá `HashMap` sẽ giữ nó sống trong bộ nhớ tiến trình (và core dump). Còn việc cho phép `0` là để người dùng tự chịu trách nhiệm, nhưng **phải nói ra**: `http_enabled = true` mà `0` thì chết lúc nạp cấu hình. | IP lấy từ `ConnectInfo` (socket), **không** đọc `X-Forwarded-For` — header do client chọn, tin vào nó là để kẻ tấn công tự chọn khoá nào bị khoá. Phải gọi `into_make_service_with_connect_info` nếu không sẽ mọi request rơi về cùng một khoá loopback. |
 
@@ -598,7 +610,7 @@ cho thấy tag `*` không vượt được cổng. Smoke test thật (stdio + st
 vỡ phiên coding dài; nhưng vẫn chặn được việc quét hàng loạt. IP nhân 5 vì nhiều client hợp
 lệ có thể đi chung một IP (reverse proxy, NAT, nhiều IDE trên một máy).
 
-**Bằng chứng:** `crates/beanagent-core/tests/mcp_server.rs` — 4 test bắt buộc của K24:
+**Bằng chứng:** `crates/bean-core/tests/mcp_server.rs` — 4 test bắt buộc của K24:
 `http_transport_locks_out_after_repeated_token_failures` (5 lần sai ⇒ 401, lần 6 ⇒
 `RateLimited`), `valid_token_below_the_limit_keeps_working` (100 request hợp lệ liên tiếp
 dưới ngưỡng đều qua — hồi quy chống rate-limit nhầm), `valid_token_above_the_volume_limit_is_limited`
@@ -608,19 +620,19 @@ dưới ngưỡng đều qua — hồi quy chống rate-limit nhầm), `valid_to
 Cộng `mcp_request_is_written_to_the_dedicated_log` (client + tool + thời điểm RFC3339 trong
 `mcp.jsonl`, **và** `audit.jsonl` vẫn giữ bản ghi — bằng chứng cho D16.10),
 `audit_open_named_rejects_paths_outside_the_audit_dir`. Thêm
-`crates/beanagent-security/src/ratelimit.rs` (6 unit test, gồm trần bộ nhớ) và
-`crates/beanagent-types/tests/config.rs` (2 test cho ngưỡng + validate).
+`crates/bean-security/src/ratelimit.rs` (6 unit test, gồm trần bộ nhớ) và
+`crates/bean-types/tests/config.rs` (2 test cho ngưỡng + validate).
 
 ## 17. Tool browser nội bộ — nói thẳng CDP (D26.x — 2026-09-28)
 
 Thay chrome-devtools-mcp (npm/MCP) bằng crate Rust `chromiumoxide` trong crate mới
-`crates/beanagent-browser`. Không phụ thuộc Node ở bất kỳ đâu.
+`crates/bean-browser`. Không phụ thuộc Node ở bất kỳ đâu.
 
 | # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
 |---|-----------|--------|---------------------|
 | D26.1 | Thêm `ToolOutput` + `Tool::call_rich` (có default impl) thay vì đổi chữ ký `call` | Đổi `call` thành `Result<ToolOutput, _>` sẽ chạm 25+ tool built-in, `TypedTool`, wrapper MCP, mọi adapter kênh và hàng chục test — trong khi nhu cầu thật chỉ có **một** tool trả ảnh. Default impl gọi lại `call` nên **tool cũ không đổi một dòng nào** và agent loop gọi `call_rich` mà không cần biết tool nào trả ảnh. | Thêm một biến thể hàm trong trait. Đổi lại: phạm vi thay đổi thu hẹp còn **một impl** (`ScreenshotTool`), và `ToolOutput` là kiểu mở rộng được cho tương lai. |
 | D26.2 | `chromiumoxide = "=0.9.1"` + `default-features = false` | CDP type được **sinh tự động** từ `protocol.json`; một bản minor mới có thể đổi shape của type nên `0.9` khiến build không tái lập được. Tắt `default-features` loại `chromiumoxide_fetcher` khỏi dependency graph — nguyên tắc "cài trước, không tải lúc chạy" được bảo đảm ở **tầng build**, không phải lời hứa lúc chạy. | Người dùng phải **tự cài** Chrome/Chromium. Test `chrome_fetcher_is_absent_from_the_dependency_graph` + `chromiumoxide_version_is_pinned_exactly` chốt hồi quy. Nâng phiên bản là việc có chủ đích, có kiểm thử. |
-| D26.3 | Lớp kiểm tra URL **riêng** cho domain browser, không sửa `beanagent_security::ssrf` | `web_fetch` dùng resolver DNS tuỳ biến lọc IP ngay lúc kết nối (chống DNS rebinding đúng) và cố ý chặn loopback. Thêm "ngoại lệ cho browser" vào `ssrf` sẽ làm hỏng bảo đảm đó của **mọi** request `web_fetch`. | Hai bộ quy tắc phải giữ đồng bộ khi sửa. Đổi lại: `ssrf` của hệ thống không bao giờ nới lỏng. Khoảng hở DNS rebinding còn lại ghi ở `known-issues.md` K23. |
+| D26.3 | Lớp kiểm tra URL **riêng** cho domain browser, không sửa `bean_security::ssrf` | `web_fetch` dùng resolver DNS tuỳ biến lọc IP ngay lúc kết nối (chống DNS rebinding đúng) và cố ý chặn loopback. Thêm "ngoại lệ cho browser" vào `ssrf` sẽ làm hỏng bảo đảm đó của **mọi** request `web_fetch`. | Hai bộ quy tắc phải giữ đồng bộ khi sửa. Đổi lại: `ssrf` của hệ thống không bao giờ nới lỏng. Khoảng hở DNS rebinding còn lại ghi ở `known-issues.md` K23. |
 | D26.4 | Ảnh có **định phí token cố định** (`IMAGE_BUDGET_TOKENS`), không dùng `chars/4` | Công thức `chars/4` ước lượng **văn bản**. Base64 không phải văn bản: ảnh PNG 200 KB thành ~270.000 ký tự ⇒ `chars/4` cho ~67.500 token, gấp hơn 40 lần chi phí thật, và một lần chụp sẽ tự loại hết lịch sử của lượt đó. | Ảnh luôn tốn 1.600 token bất kể kích thước. Hệ quả có chủ đích: ảnh **rẻ hơn** văn bản cùng dung lượng nên `trim_history` loại ảnh cũ trước khi loại lời thoại. |
 | D26.5 | Audit chỉ ghi **tham chiếu** `image:<mime>:<sha256>:<len>`, không ghi base64 | Ghi payload ảnh (hàng trăm KB/call) làm phình `audit.jsonl` vô hạn theo thời gian, và audit log hay bị copy đi lưu. SHA-256 của byte ảnh đủ để đối chiếu với `Message.image` trong SQLite mà không nhân bản payload. | Muốn xem ảnh thì đọc SQLite (giữ nguyên định dạng `Message` cho provider). `AuditEntry::artifact` cũng đi qua `redact_text_secrets` như `error`. |
 | D26.6 | Không gọi `no_sandbox()` cho Chrome | Sandbox renderer của Chromium là lớp phòng thủ chính chống exploit-render-escape. Tắt nó cho "chạy được trong container" là đánh đổi sai: mất lớp phòng thủ để đổi lấy tiện lợi. | Chạy trong container thiếu kernel phù hợp thì Chrome không khởi động ⇒ lỗi rõ ràng, **không** tự tắt sandbox. Cần thì chạy trên host với profile cô lập. |
@@ -631,8 +643,8 @@ Thay chrome-devtools-mcp (npm/MCP) bằng crate Rust `chromiumoxide` trong crate
 
 Đóng khoảng trống: tag `test-run` đã tồn tại trong RBAC (M21) nhưng **chưa tool nào dùng**,
 nên vai trò `qa` không chạy được lệnh test nào — dù `Plan.md` mục 2b giao cho nó đúng việc
-"review diff, chạy test độc lập". Crate mới `crates/beanagent-qa`, khuôn mẫu bắt buộc là
-`beanagent-scan` (M23).
+"review diff, chạy test độc lập". Crate mới `crates/bean-qa`, khuôn mẫu bắt buộc là
+`bean-scan` (M23).
 
 | # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
 |---|-----------|--------|---------------------|
@@ -647,8 +659,31 @@ nên vai trò `qa` không chạy được lệnh test nào — dù `Plan.md` m�
 
 **Xác nhận tường minh (yêu cầu milestone):** M27 **không** mở bất kỳ đường ghi file nào cho
 vai trò `qa` dưới bất kỳ hình thức nào — kể cả thư mục "riêng của QA". `forbid_tags =
-["dev-write"]` của role `qa` trong `BeanAgent.example.toml` **không bị đụng tới**, và
+["dev-write"]` của role `qa` trong `bean.example.toml` **không bị đụng tới**, và
 `run_shell` giữ nguyên `required_tags = ["dev-write", "infra-scan"]`. Bằng chứng:
 `qa_role_can_run_tests_but_never_write_code` (qa chạy được `qa_test` nhưng không thấy/gọi
 được `write_file`/`edit_file`/`run_shell`) và `readonly_sandbox_blocks_writes_into_workspace`
 (mount `:ro` ⇒ ghi vào `/workspace` thất bại, cây thư mục workspace thật không đổi trước/sau).
+
+
+## 19. Đổi tên `BeanAgent`/`beanagent-*` → `bean`/`bean-*` (D18.x — 2026-09-28, milestone M28)
+
+Milestone thuần tuý đổi tên, **không thêm tính năng nào**. Đây là lần đổi tên duy nhất
+trước khi coi dự án là production — không để lại giai đoạn "đổi một phần, sau tính tiếp".
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D18.1 | Tag `pre-rename-beanagent` **bắt buộc tạo trước mọi thay đổi khác** | Sau khi đổi tên, các tài liệu lịch sử (`status-report.md`, `security-review.md`) **không còn khớp** lệnh/tên crate tại đúng commit chúng mô tả (`399992d`, `62e8350`, `882363d`). Không giữ tên cũ trong văn bản vì những tài liệu đó là bằng chứng, không phải hướng dẫn chạy được. | Tag là cách bù đắp duy nhất: `git checkout pre-rename-beanagent` tái hiện đúng môi trường cũ. Đã xác nhận `git show pre-rename-beanagent:Cargo.toml` vẫn hiện `crates/BeanAgent`, `crates/beanagent-*`. |
+| D18.2 | Đổi **cả package lẫn tên binary** của crate bin sang chữ thường `bean` (thay vì giữ CamelCase như D5.13) | `BeanAgent` viết hoa chữ đầu là thứ hiếm trong hệ sinh thái Rust và trông thừa khi gõ `bean chat` — lệnh thực thi viết thường, tên package viết hoa thì phải gõ `BeanAgent chat`. Nay đã **khớp hẳn** với sơ đồ mục 4 của `agents.md`, tức là "sai khác nhỏ" mà D5.13 ghi nhận **không còn tồn tại**. | `[[bin]] name = "bean"`; `Makefile` dùng `BIN := bean` cho `cargo build -p $(BIN)`; test dùng `env!("CARGO_BIN_EXE_bean")`. **Phá D5.13 có chủ đích** — đoạn lập luận gốc được giữ nguyên kèm khối "Đã thay thế bởi rename" ngay bên dưới, không viết đè. |
+| D18.3 | `data.dir` đổi `~/.BeanAgent` → `~/.bean` **không migration tự động** | Dữ liệu cũ gồm `bean.db` (SQLite + FTS5), `auth.toml`, audit log. Tự động copy/sang sẽ là hành động ghi file mà người dùng không yêu cầu, và lệnh copy sai có thể để lại `auth.toml` ở chỗ cũ — tệ hơn hậu quả của việc phải tự chuyển thủ công. | Đây là **breaking change** có chủ đích. Người dùng cũ phải `mv ~/.BeanAgent ~/.bean` một lần; ghi rõ trong `README.md`. Không có đường code nào đọc thư mục tên cũ. |
+| D18.4 | Đổi cả biến môi trường và hằng số chuỗi chứa tên: `BEANAGENT_*` → `BEAN_*`, cookie `beanagent_session` → `bean_session`, `beanagent.db` → `bean.db`, image `beanagent-sandbox` → `bean-sandbox` | `grep -rn "beanagent"` sạch trong code là tiêu chí nghiệm thu của milestone. Nếu giữ lại một biến môi trường cũ thì tài liệu hướng dẫn cấu hình phải nhắc cả hai tên ⇒ vi phạm chính tiêu chí đó và gây nhầm lẫn. | `BEAN_MCP_TOKEN`, `BEAN_CONFIG`, `BEAN_MCP_TEST_PID_FILE`, `BEAN_MCP_TEST_DROP_FILE`. `User-Agent` đổi `BeanAgent/<version>` → `bean/<version>` (3 chỗ: `bean-llm/src/http.rs`, `bean-security/src/{ssrf,web}.rs`). |
+| D18.5 | Đổi cả user/group hệ điều hành `beanagent` → `bean` và các đường dẫn `/etc|/var/lib|/srv/beanagent` | Cùng lý do với D18.4 — deploy artifact (systemd unit, Dockerfile) là nơi tên cũ dễ sót nhất và tài liệu mục 23 mô tả trực tiếp các đường dẫn này. | `deploy/systemd/bean.service` với `User=bean`, `StateDirectory=bean`, `ConfigurationDirectory=bean`. Dịch vụ cũ phải được `systemctl disable` trước khi deploy bản mới (tên unit đổi ⇒ không upgrade được, phải cài lại). |
+| D18.6 | Tài liệu: đổi **mọi** tên identifier kỹ thuật trong tất cả `.md`, kể cả file lịch sử; tên sản phẩm trong văn xuôi → "Bean" | Tài liệu mà không chạy được là tài liệu sai. `README.md` còn ghi `./target/release/BeanAgent` thì người đọc copy lệnh sẽ nhận "No such file or directory" — hỏng hơn cả việc không có tài liệu. | 9 file `.md` được sửa (`AGENTS.md`, `README.md`, `PROMPTS.md`, `Plan.md`, `Updating.md`, `docs/{decisions,known-issues,status-report,security-review}.md`), mỗi file lịch sử thêm dòng ghi chú đầu file trỏ về tag. |
+| D18.7 | **Không đổi** tên tool đã đăng ký, **không đổi** kiểu API/giao thức (`ClientMsg`/`ServerMsg`/REST path), **không** viết wizard setup | Đổi tên tool sẽ phá mọi session lịch sử, mọi `allowed_tools` trong `bean.toml`, và mọi RBAC tag đã cấu hình — chi phí vượt xa lợi ích của việc giữ tên nhất quán. Đổi REST path là breaking change với client ngoài. | Đây là **rename thuần tuý**: `read_file`, `run_shell`, `qa_test`… giữ nguyên; `/api/*` giữ nguyên; `web/src/api/generated/` chỉ đổi doc comment phản ánh crate mới. |
+| D18.8 | Thay đổi `data.dir` và tên env **không** có đường nâng cấp tương thích ngược | Giữ một lớp đọc tên cũ chỉ để tương thích sẽ phải giữ mã cũ sống mãi, và sẽ mâu thuẫn với D18.4 (tên cũ phải biến mất khỏi code). | Người dùng cũ chấp nhận một bước thủ công. Đây là hệ quả được chấp nhận của việc coi đây là lần đổi tên duy nhất trước production. |
+
+**Kiểm chứng:** `cargo build` + `cargo test --workspace --locked` + `make check` xanh;
+`grep -rn "beanagent\|BeanAgent"` trong code (không tính `.md`) **không còn kết quả nào**;
+`grep -rln "BeanAgent\|beanagent" *.md docs/*.md` chỉ còn khớp trong các khối bằng chứng
+đã liệt kê ở mục "Ngoại lệ cố ý giữ" của báo cáo milestone M28.
+

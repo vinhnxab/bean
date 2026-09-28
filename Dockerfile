@@ -13,20 +13,20 @@ FROM rust:1.98-bookworm AS rust-build
 WORKDIR /src
 COPY . ./
 COPY --from=web-build /src/web/dist web/dist
-RUN cargo build --release --locked -p BeanAgent --features ui
+RUN cargo build --release --locked -p bean --features ui
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 10001 beanagent \
-    && useradd --system --uid 10001 --gid beanagent --home-dir /var/lib/beanagent --create-home beanagent
-COPY --from=rust-build /src/target/release/BeanAgent /usr/local/bin/BeanAgent
-RUN install -d -o 10001 -g 10001 -m 0700 /var/lib/beanagent /srv/beanagent/workspace
-WORKDIR /srv/beanagent
+    && groupadd --system --gid 10001 bean \
+    && useradd --system --uid 10001 --gid bean --home-dir /var/lib/bean --create-home bean
+COPY --from=rust-build /src/target/release/bean /usr/local/bin/bean
+RUN install -d -o 10001 -g 10001 -m 0700 /var/lib/bean /srv/bean/workspace
+WORKDIR /srv/bean
 USER 10001:10001
-ENV RUST_LOG=info,beanagent_security=warn
+ENV RUST_LOG=info,bean_security=warn
 EXPOSE 7878
-VOLUME ["/var/lib/beanagent", "/srv/beanagent/workspace"]
-ENTRYPOINT ["/usr/local/bin/BeanAgent"]
-CMD ["--config", "/etc/beanagent/BeanAgent.toml", "serve"]
+VOLUME ["/var/lib/bean", "/srv/bean/workspace"]
+ENTRYPOINT ["/usr/local/bin/bean"]
+CMD ["--config", "/etc/bean/bean.toml", "serve"]

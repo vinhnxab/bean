@@ -29,9 +29,7 @@ describe("App", () => {
 
     renderApp();
 
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /Đăng nhập BeanAgent/ })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Đăng nhập Bean/ })).toBeInTheDocument());
     expect(screen.getByLabelText("Mật khẩu")).toBeInTheDocument();
   });
 });

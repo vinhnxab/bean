@@ -14,7 +14,7 @@ import { agentsHandler, FULL_AGENTS, testServer } from "@/test/server";
  *
  * # Phạm vi thật sự của các test này
  *
- * Test RBAC **không** nằm ở đây mà ở `crates/beanagent-web/tests/hub_agents.rs`
+ * Test RBAC **không** nằm ở đây mà ở `crates/bean-web/tests/hub_agents.rs`
  * (tầng API) — vì ẩn/hiện ở DOM không phải phân quyền. Ở đây chỉ khẳng định UI
  * **render đúng những gì API trả**, không tự lọc thêm và không bỏ sót hiển thị.
  */

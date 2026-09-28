@@ -1,0 +1,31 @@
+[package]
+name = "bean-channels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Adapter kênh ngoài (Telegram)"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bean-core.workspace = true
+bean-skills.workspace = true
+bean-types.workspace = true
+secrecy.workspace = true
+teloxide.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+bean-llm.workspace = true
+bean-security.workspace = true
+bean-tools.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

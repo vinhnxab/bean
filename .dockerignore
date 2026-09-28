@@ -9,5 +9,5 @@ workspace/*
 skills/_drafts
 *.log
 *.jsonl
-BeanAgent.toml
+bean.toml
 auth.toml

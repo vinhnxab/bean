@@ -1,4 +1,4 @@
-# BeanAgent— Đặc tả kỹ thuật (v3: Rust toàn bộ + giao diện React)
+# Bean— Đặc tả kỹ thuật (v3: Rust toàn bộ + giao diện React)
 
 ## 0. Quy tắc làm việc dành cho coding agent
 
@@ -18,7 +18,7 @@
 
 ## 1. Mục tiêu
 
-Xây dựng **personal AI agent self-hosted, chạy lâu dài**, phát hành dưới dạng **một binary Rust** (`BeanAgent`) gồm:
+Xây dựng **personal AI agent self-hosted, chạy lâu dài**, phát hành dưới dạng **một binary Rust** (`Bean`) gồm:
 
 - Vòng lặp agent: LLM gọi công cụ nhiều bước để hoàn thành nhiệm vụ.
 - Nhiều LLM provider (Anthropic, OpenAI, mọi endpoint tương thích OpenAI, model local qua Ollama).
@@ -108,7 +108,7 @@ Toolchain `stable`, Cargo workspace, `tokio`.
 | `make check-web` | `pnpm biome check` · `pnpm tsc --noEmit` · `pnpm vitest run` · `pnpm build` |
 | `make check` | `check-rust` + `check-web` |
 | `make audit` | `cargo audit` (hoặc `cargo deny check`) · `pnpm audit --prod` |
-| `make e2e` | Chạy `BeanAgent serve --fake-llm kichban.json` và bộ test end-to-end (mục 20) |
+| `make e2e` | Chạy `bean serve --fake-llm kichban.json` và bộ test end-to-end (mục 20) |
 | `make build` | Build web → build Rust release nhúng UI. `make build-headless`: Rust không UI, không cần Node |
 
 ---
@@ -116,21 +116,21 @@ Toolchain `stable`, Cargo workspace, `tokio`.
 ## 4. Cấu trúc repo
 
 ```
-BeanAgent/
+bean/
 ├─ AGENTS.md                        # file này
 ├─ Makefile
 ├─ Cargo.toml                       # workspace
 ├─ crates/
-│  ├─ BeanAgent-types/                # Message, ToolCall, ToolSpec, LlmResponse...
-│  ├─ BeanAgent-llm/                  # trait LlmProvider, anthropic, openai_compat, fake
-│  ├─ BeanAgent-security/             # paths (cap-std), sandbox, ssrf, policy, audit
-│  ├─ BeanAgent-tools/                # trait Tool, registry, builtin/*, mcp
-│  ├─ BeanAgent-memory/               # SQLite store, FTS5, compaction
-│  ├─ BeanAgent-skills/               # loader, skill tools
-│  ├─ BeanAgent-core/                 # agent loop, context, router, scheduler, learning, trait Channel
-│  ├─ BeanAgent-channels/             # telegram (bộ kênh cuối cùng: web + telegram)
-│  ├─ BeanAgent-web/                  # axum: auth, REST, WebSocket, phục vụ UI nhúng, kiểu API (ts-rs)
-│  └─ BeanAgent/                      # bin: `BeanAgent chat | serve | auth`
+│  ├─ bean-types/                   # Message, ToolCall, ToolSpec, LlmResponse...
+│  ├─ bean-llm/                     # trait LlmProvider, anthropic, openai_compat, fake
+│  ├─ bean-security/                # paths (cap-std), sandbox, ssrf, policy, audit
+│  ├─ bean-tools/                   # trait Tool, registry, builtin/*, mcp
+│  ├─ bean-memory/                  # SQLite store, FTS5, compaction
+│  ├─ bean-skills/                  # loader, skill tools
+│  ├─ bean-core/                    # agent loop, context, router, scheduler, learning, trait Channel
+│  ├─ bean-channels/                # telegram (bộ kênh cuối cùng: web + telegram)
+│  ├─ bean-web/                     # axum: auth, REST, WebSocket, phục vụ UI nhúng, kiểu API (ts-rs)
+│  └─ bean/                         # bin: `bean chat | serve | auth`
 ├─ web/                             # React app (mục 12)
 │  ├─ package.json  pnpm-lock.yaml  vite.config.ts  biome.json  tsconfig.json
 │  └─ src/
@@ -147,7 +147,7 @@ BeanAgent/
 └─ tests/e2e/
 ```
 
-Cấu hình: một file `BeanAgent.toml` (mục 18). Dữ liệu chạy (SQLite, audit log, auth) ở `data.dir` (mặc định `~/.BeanAgent`).
+Cấu hình: một file `bean.toml` (mục 18). Dữ liệu chạy (SQLite, audit log, auth) ở `data.dir` (mặc định `~/.bean`).
 
 ---
 
@@ -156,7 +156,7 @@ Cấu hình: một file `BeanAgent.toml` (mục 18). Dữ liệu chạy (SQLite,
 Định dạng message **trung lập với provider**; mỗi provider tự chuyển đổi qua lại.
 
 ```rust
-// BeanAgent-types
+// bean-types
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ToolCall { pub id: String, pub name: String, pub args: serde_json::Value }
 
@@ -180,7 +180,7 @@ pub struct LlmResponse { pub text: Option<String>, pub tool_calls: Vec<ToolCall>
 ```
 
 ```rust
-// BeanAgent-llm
+// bean-llm
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError>;
@@ -375,7 +375,7 @@ description: Khi nào nên dùng skill này (1-2 câu, tối đa 300 ký tự).
 Các bước, ví dụ, lưu ý...
 ```
 
-- Loader quét `./skills/` và `~/.BeanAgent/skills/`, parse frontmatter (dùng crate YAML còn được bảo trì hoặc tự parse tối giản hai trường; **không** dùng `serde_yaml` vì đã ngừng phát triển), validate, bỏ qua và log skill lỗi.
+- Loader quét `./skills/` và `~/.bean/skills/`, parse frontmatter (dùng crate YAML còn được bảo trì hoặc tự parse tối giản hai trường; **không** dùng `serde_yaml` vì đã ngừng phát triển), validate, bỏ qua và log skill lỗi.
 - **Progressive disclosure:** system prompt chỉ chứa danh sách `name: description`. Nội dung đầy đủ chỉ nạp khi model gọi `load_skill(name)` (trả về nội dung SKILL.md và đường dẫn thư mục để chạy script kèm theo bằng `run_shell`).
 - `create_skill(name, description, body)` (Confirm) tạo skill mới, chặn ghi đè skill có sẵn, chặn tên chứa ký tự đường dẫn.
 
@@ -383,7 +383,7 @@ Các bước, ví dụ, lưu ý...
 
 ## 10. Router và Channel (trong tiến trình)
 
-Tất cả kênh (CLI, web, Telegram) là **adapter mỏng** gọi vào `Router` của `BeanAgent-core`. Không có logic agent trong adapter.
+Tất cả kênh (CLI, web, Telegram) là **adapter mỏng** gọi vào `Router` của `bean-core`. Không có logic agent trong adapter.
 
 ```rust
 pub struct Incoming { pub channel: String, pub chat_id: String, pub user_id: String, pub text: String }
@@ -423,7 +423,7 @@ Quy tắc:
 
 ## 11. Web API (REST + WebSocket)
 
-Do `BeanAgent-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thực bằng cookie phiên (mục 15.7). Kiểu request/response/sự kiện định nghĩa **một lần trong Rust** và sinh sang TypeScript bằng `ts-rs`; UI không tự khai báo lại.
+Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thực bằng cookie phiên (mục 15.7). Kiểu request/response/sự kiện định nghĩa **một lần trong Rust** và sinh sang TypeScript bằng `ts-rs`; UI không tự khai báo lại.
 
 ### 11.1 REST
 
@@ -523,7 +523,7 @@ Output của model có thể chứa nội dung độc hại lấy từ web/email
 
 ---
 
-## 13. Telegram (`BeanAgent-channels`)
+## 13. Telegram (`bean-channels`)
 
 - `teloxide`, long polling. Implement `Channel`; **allowlist user id bắt buộc**, người lạ bị bỏ qua và ghi log (không trả lời để không lộ sự tồn tại của bot).
 - Giới hạn tần suất mỗi chat; chống xử lý trùng update.
@@ -537,7 +537,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 
 ---
 
-## 14. Scheduler (trong `BeanAgent-core`)
+## 14. Scheduler (trong `bean-core`)
 
 - Một task tokio tick mỗi 30 giây, tìm `next_run <= now AND enabled = 1`.
 - Khi đến hạn: chạy agent bằng `prompt` đã lưu trong session gắn với task, gửi kết quả qua `Router::notify` (Telegram gửi tin; web nhận `Notification` và thấy tin trong phiên tương ứng).
@@ -557,7 +557,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 6. **Secrets:** chỉ từ biến môi trường, bọc `secrecy`, redact khỏi log/audit, không đưa vào prompt.
 7. **Web server** (agent có quyền chạy lệnh nên web server là bề mặt tấn công nghiêm trọng):
    - Mặc định bind `127.0.0.1`. Bind địa chỉ khác chỉ khi `web.allow_remote = true`, in cảnh báo rõ ràng, và tài liệu hoá việc đặt sau reverse proxy có TLS (Caddy/nginx) hoặc mạng riêng (Tailscale/WireGuard); không tự làm TLS ở v1.
-   - **Không có mật khẩu thì không bật web.** Lệnh `BeanAgent auth set-password` lưu hash `argon2id` vào `data.dir/auth.toml` (quyền `0600`); `serve` từ chối bật web nếu chưa đặt.
+   - **Không có mật khẩu thì không bật web.** Lệnh `bean auth set-password` lưu hash `argon2id` vào `data.dir/auth.toml` (quyền `0600`); `serve` từ chối bật web nếu chưa đặt.
    - Đăng nhập: so sánh thời gian không đổi, giới hạn tần suất theo IP + lockout tăng dần khi sai liên tiếp; tạo token phiên ngẫu nhiên 256 bit, chỉ lưu **hash** trong `web_sessions`; cookie `HttpOnly; SameSite=Strict; Path=/` (+ `Secure` khi `public_origin` là https); TTL cấu hình được, đăng xuất xoá phiên phía server.
    - **CSRF/CORS:** không bật CORS; mọi request thay đổi dữ liệu yêu cầu `Content-Type: application/json` và kiểm tra `Origin`/`Host` khớp `public_origin`.
    - **WebSocket:** kiểm tra `Origin` + cookie trước khi nâng cấp (chống cross-site WebSocket hijacking).
@@ -569,7 +569,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 
 ---
 
-## 16. MCP (`BeanAgent-tools::mcp`)
+## 16. MCP (`bean-tools::mcp`)
 
 - Dùng `rmcp` (SDK Rust chính thức). Config khai báo danh sách server (stdio: `command`, `args`, `env`).
 - Khi khởi động: kết nối, lấy danh sách tool, đăng ký vào registry với tên `mcp__<server>__<tool>`, chuyển JSON Schema của MCP thành `ToolSpec`.
@@ -588,7 +588,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 
 ---
 
-## 18. Cấu hình (`BeanAgent.toml`)
+## 18. Cấu hình (`bean.toml`)
 
 ```toml
 [agent]
@@ -599,7 +599,7 @@ timezone = "Asia/Ho_Chi_Minh"
 allowed_users = ["web:admin", "telegram:123456789"]   # lớp kiểm tra thứ hai ở lõi
 
 [data]
-dir = "~/.BeanAgent"                 # sqlite, audit log, auth.toml
+dir = "~/.bean"                 # sqlite, audit log, auth.toml
 
 [llm]
 provider = "anthropic"             # anthropic | openai_compat
@@ -621,7 +621,7 @@ daily_token_budget = 2000000
 
 [security.sandbox]
 mode = "docker"                    # docker | host
-image = "BeanAgent-sandbox:latest"
+image = "bean-sandbox:latest"
 network = false
 memory = "512m"
 cpus = 1.0
@@ -647,7 +647,7 @@ args = []
 trust = false
 ```
 
-Lệnh: `BeanAgent chat` (REPL, không cần web) · `BeanAgent serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `BeanAgent auth set-password`.
+Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password`.
 
 ---
 
@@ -703,7 +703,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 - WS client: nối lại với backoff, xử lý `Sync`, không nhân đôi tin nhắn khi nối lại; store chat cập nhật đúng theo chuỗi `Queued → ToolStart → ToolEnd → Final`.
 - 401 chuyển về trang đăng nhập; i18n đủ khoá cho `vi` và `en`.
 
-**End-to-end** (`make e2e`): `BeanAgent serve --fake-llm kichban.json` với thư mục dữ liệu tạm; kịch bản qua HTTP/WS: đăng nhập → tạo phiên → gửi tin → tool cần xác nhận → duyệt → trả lời cuối; `Stop`; đóng WS giữa run rồi nối lại nhận `Sync`; người lạ trên kênh giả bị chặn. Tuỳ chọn ở M16: Playwright chạy một luồng chat trên trình duyệt thật.
+**End-to-end** (`make e2e`): `bean serve --fake-llm kichban.json` với thư mục dữ liệu tạm; kịch bản qua HTTP/WS: đăng nhập → tạo phiên → gửi tin → tool cần xác nhận → duyệt → trả lời cuối; `Stop`; đóng WS giữa run rồi nối lại nhận `Sync`; người lạ trên kênh giả bị chặn. Tuỳ chọn ở M16: Playwright chạy một luồng chat trên trình duyệt thật.
 
 ---
 
@@ -711,7 +711,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 
 | # | Nội dung | Định nghĩa "xong" |
 |---|---|---|
-| M1 | Skeleton: Cargo workspace, `web/` (Vite + React + TS), Makefile; types, config TOML, FakeProvider, CLI echo | `make check` xanh; `BeanAgent chat` chạy; `pnpm dev` hiện trang trống |
+| M1 | Skeleton: Cargo workspace, `web/` (Vite + React + TS), Makefile; types, config TOML, FakeProvider, CLI echo | `make check` xanh; `bean chat` chạy; `pnpm dev` hiện trang trống |
 | M2 | Provider Anthropic + OpenAI-compat | Test wiremock pass; chat thật 1 lượt qua CLI |
 | M3 | Trait `Tool`, registry, tool file, agent loop | Agent đọc/ghi file trong workspace qua CLI |
 | M4 | Bảo mật: path jail, sandbox, policy/confirm, audit | Toàn bộ test bảo mật pass |
@@ -764,7 +764,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 
 ## 23. Triển khai
 
-- **Mặc định: một binary + systemd** (`deploy/systemd/BeanAgent.service`): chạy dưới user riêng không phải root, thuộc nhóm `docker` để dùng sandbox (nêu rõ trong README rằng thành viên nhóm `docker` gần như tương đương root; phương án thay thế: rootless Docker/Podman). Hardening unit: `NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`...
+- **Mặc định: một binary + systemd** (`deploy/systemd/bean.service`): chạy dưới user riêng không phải root, thuộc nhóm `docker` để dùng sandbox (nêu rõ trong README rằng thành viên nhóm `docker` gần như tương đương root; phương án thay thế: rootless Docker/Podman). Hardening unit: `NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`...
 - Truy cập từ xa: giữ `bind = 127.0.0.1` và đặt reverse proxy có TLS (Caddy/nginx) hoặc dùng Tailscale/WireGuard; cấu hình `public_origin` đúng https.
 - Build release: `make build` (build web → `cargo build --release` với feature `ui`, `lto = "thin"`, `strip = true`). Binary cuối tự chứa giao diện; **không cần Node trên máy chạy**.
 - Bản headless: `make build-headless` (không cần Node).
