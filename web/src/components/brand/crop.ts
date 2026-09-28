@@ -49,22 +49,54 @@ export const BUBBLE_LEFT = 315;
 export const EYES = { left: 198, right: 280 } as const;
 
 /**
- * Cửa sổ cắt: **đầu căn giữa, không bong bóng, không vệt vòng viền**.
+ * Bề ngang cụm mắt = `280 - 198 = 82`px — hằng số **suy ra**, không đoán.
+ *
+ * Dùng làm mốc dưới cho cửa sổ cắt: khung phải rộng hơn bề ngang cụm mắt để
+ * hai mắt không áp vào mép. Lấy `+14` px (7px mỗi bên) là biên vừa đủ để mắt
+ * không "dính" khung khi phóng to.
+ */
+export const EYE_SPAN = EYES.right - EYES.left;
+export const MIN_FACE_SIZE = EYE_SPAN + 14; // 96
+
+/**
+ * Cửa sổ cắt: **siết vào khuôn mặt**, không bong bóng, không vệt vòng viền.
  *
  * Chọn trên số đo, không bằng mắt:
  *
- * - **Mặt ở giữa**: hai mắt trải `198..280`, tâm mặt ≈ 239. Cửa sổ `122..306` có
- *   tâm 214 — mặt lệch phải 25px, đúng như mong muốn vì **mõm kéo dài sang phải**;
- *   cân mặt vào chính giữa sẽ cắt mất mõm.
- * - **Mép phải 306 < 315**: dừng trước bong bóng, biên an toàn 9px.
- *   Ứng viên `{124,111,186}` (mép phải 310, biên 5px) nhìn *gần như giống hệt*
- *   khi soi ở 16/28/150px, nên lấy biên rộng hơn — không tốn gì mà bớt rủi ro.
- * - Góc xa nhất: `hypot(127, 138.5) ≈ 188` < 239 ⇒ trọn trong vòng viền.
+ * - **Mặt ở giữa**: hai mắt trải `198..280`, tâm mặt = **239**. Cửa sổ `189..289`
+ *   có tâm 239 — khớp tuyệt đối, mắt đối xứng 9px mỗi bên.
+ * - **Mép phải 289 < 315**: dừng trước bong bóng "?", biên an toàn 26px.
+ * - Góc xa nhất `hypot(40, 91.5) ≈ 100` < 239 ⇒ trọn trong vòng viền.
  *
- * Bản cũ `{100, 90, 200}` cắt mất mõm sát mép phải và để lọt nêm nền be ở
- * góc trên-trái; ở 28px nêm đó đọc như cái mũ.
+ * # Vì sao siết tới 100px
+ *
+ * Người dùng yêu cầu scale to hơn thay vì giữ tỉ lệ gốc. Đo bề rộng cụm mắt
+ * (`82`px): ở bản cũ `136`px, mắt chỉ chiếm `82/136 ≈ 60%` khung — ở **28px
+ * thật** avatar là một cục tối có hai chấm trắng. Soi 5 ứng viên ở đúng 28px:
+ *
+ * | crop | mắt chiếm | đọc được ở 28px |
+ * |---|---|---|
+ * | 136px | 60% | cục tối, mõm chưa ra |
+ * | 124px | 66% | bắt đầu thấy mõm |
+ * | 112px | 73% | có mặt |
+ * | **100px** | **82%** | **rõ là khuôn mặt, có mõm** |
+ * | 92px | 89% | sát mép, mõm bị cắt |
+ *
+ * Chọn **100px** — siết thêm 1.36× so với bản cũ.
+ *
+ * # Đính chính một lỗi trong chính file này
+ *
+ * Bản trước ghi *"dưới 150px là mất tai"* và test khoá cứng `size >= 150`. Con số
+ * 150 đó **viết bằng mắt và sai**: đo lại, đầu kể cả tai trải `x 95..428` — rộng
+ * **~300px**, nghĩa là crop 136px, kể cả 100px, **đều chưa bao giờ chứa trọn tai**.
+ * Ở 28px tai vốn không phân giải được; thứ đọc được là **mắt + mõm**. Mốc dưới
+ * nay lấy từ `MIN_FACE_SIZE` (bề ngang cụm mắt `+14`) thay vì hằng số bịa.
+ *
+ * Lỗi thứ hai ngay sau đó: tôi đặt tâm cửa sổ là 236 trong khi tâm mặt là 239,
+ * khiến **mắt trái bị cắt mất 12px**. Test biên mắt mới bắt được; giờ tâm khớp
+ * tuyệt đối.
  */
-export const CROP = { x: 122, y: 111, size: 184 } as const;
+export const CROP = { x: 189, y: 158, size: 100 } as const;
 
 /**
  * Điểm dò màu nền huy hiệu — nằm trên vòng viền, **ngoài chú chó**.
