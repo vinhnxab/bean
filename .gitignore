@@ -33,3 +33,6 @@ auth.toml
 
 # Ảnh chụp tự phê bình giao diện (sinh bằng `pnpm shot`)
 .screenshots/
+
+# Script đo tạm dùng khi chọn crop avatar (sinh tay, không thuộc build)
+web/*.mjs
