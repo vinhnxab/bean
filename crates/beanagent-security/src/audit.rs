@@ -52,6 +52,14 @@ pub struct AuditEntry {
     pub decided_by: String,
     /// Tóm tắt lỗi nếu có.
     pub error: Option<String>,
+    /// Tài nguyên sinh ra bởi tool, ở dạng **tham chiếu** chứ không phải nội dung.
+    ///
+    /// (M26) `browser_screenshot` trả ảnh; base64 của ảnh có thể dài hàng trăm KB
+    /// và sẽ làm phình `audit.jsonl` vô hạn. Trường này chỉ ghi
+    /// `image:<media_type>:<sha256>:<độ dài base64>` — đủ để đối chiếu với
+    /// `Message.image` trong SQLite mà không nhân bản payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<String>,
 }
 
 /// File JSONL append-only.
@@ -114,6 +122,10 @@ impl AuditLog {
         let mut safe = entry.clone();
         safe.args = redact_secrets(&safe.args);
         safe.error = safe.error.as_deref().map(redact_text_secrets);
+        // (M26) `artifact` cũng là chuỗi do tool dựng (hiện là
+        // `image:<mime>:<sha256>:<len>`), nên nó đi qua redact như `error` — không
+        // phải đợi tới khi ai đó đưa nội dung nhạy cảm vào đây mới xử lý.
+        safe.artifact = safe.artifact.as_deref().map(redact_text_secrets);
         let mut line =
             serde_json::to_string(&safe).map_err(|e| AuditError::Internal(e.to_string()))?;
         line.push('\n');
@@ -162,6 +174,7 @@ pub fn entry_now(session: i64, channel: &str, tool: &str, args: &serde_json::Val
         decision: "n/a",
         decided_by: "n/a".into(),
         error: None,
+        artifact: None,
     }
 }
 
@@ -257,6 +270,7 @@ mod tests {
             decision: "allow",
             decided_by: "cli:local".into(),
             error: None,
+            artifact: None,
         };
         log.record(&entry).unwrap();
         log.record(&entry).unwrap();

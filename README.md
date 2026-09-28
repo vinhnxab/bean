@@ -9,6 +9,14 @@ có trên máy chạy.
 Yêu cầu build: Rust toolchain trong `rust-toolchain.toml`, Node LTS + pnpm chỉ trong bước build web.
 Yêu cầu runtime: Linux, một thư mục dữ liệu riêng và Docker nếu dùng sandbox mặc định.
 
+**Bộ nhớ khi build: cần tối thiểu ~4 GB RAM khả dụng** nếu bật tool browser. Số đo
+trên máy dev (8 nhân): crate `chromiumoxide_cdp` sinh **111.222 dòng** kiểu CDP tự
+động và một mình nó chiếm **165,5 s** biên dịch (`chromiumoxide_pdl` 9,6 s,
+`chromiumoxide` 41,6 s); peak RSS của `cargo build` đo được **2,64 GB** — không tính
+phần build song song các crate khác. Nếu không dùng tool browser thì có thể xoá dòng
+`chromiumoxide` khỏi `[workspace.dependencies]` và `beanagent-browser` khỏi
+`[workspace].members` trước khi build.
+
 ```bash
 cp BeanAgent.example.toml BeanAgent.toml
 cp BeanAgent.example.toml /tmp/BeanAgent.toml.example
@@ -187,6 +195,76 @@ sau khi đã kiểm tra server. `env` chỉ truyền biến liên kết, không 
 Nếu server transport rớt, BeanAgent thử reconnect một lần với backoff; lỗi vẫn được trả về
 model dưới dạng tool error. Có thể bọc server không tin cậy bằng Docker, nhưng không mount
 Docker socket chỉ để chạy MCP.
+
+Hai trường cho server cần môi trường của tiến trình Bean hoặc chạy lâu:
+
+- `inherit_env = ["PATH", "HOME"]` — Bean spawn MCP server với `env_clear()` để server
+  không thấy secret của host, nhưng `env_clear()` cũng xoá `PATH` và server cần `PATH` để
+  chạy sẽ chết ngay với status 127 (wrapper có shebang `#!/usr/bin/env <interpreter>`).
+  Trường này là danh sách trắng bật lại đúng những biến cần; `env` tường minh luôn thắng.
+  Tên biến chứa `key`/`token`/`secret`/`password` sẽ log cảnh báo.
+- `call_timeout_seconds = 300` — timeout cho một lần gọi tool (mặc định 60s). Cần cho
+  tool chạy lâu như truy vấn SIEM hay xuất báo cáo.
+
+MCP server phải được cài sẵn trên máy: Bean chỉ spawn executable, không tải gì lúc chạy.
+
+## Tool browser (Chrome DevTools Protocol)
+
+Bean nói thẳng **Chrome DevTools Protocol** bằng crate Rust `chromiumoxide` — không qua
+MCP, không qua npm, không cần Node ở bất kỳ đâu. Bật bằng `[browser]` **và** thêm
+`"browser"` vào `[tools] enabled`:
+
+```toml
+[browser]
+enabled = true
+# Rỗng => tự phát hiện Chrome đã cài: biến CHROME, rồi `which google-chrome`
+# / `chromium`, rồi /opt/google/chrome. Bean KHÔNG tải Chrome lúc chạy.
+executable_path = ""
+# Origin được phép chạy tool hành động ở mức Confirm (có "cho phép trong phiên").
+allowed_origins = ["http://localhost:3000", "https://*.dev.internal"]
+headless = true
+idle_timeout_seconds = 300   # idle quá hạn thì tự tắt Chrome
+```
+
+**Hai nhóm tool, phân quyền theo RBAC sẵn có:**
+
+| Nhóm | Tool | Tag | Mức rủi ro |
+|---|---|---|---|
+| Đọc | `browser_screenshot`, `browser_console_logs`, `browser_network`, `browser_performance_trace` | `dev-read` **hoặc** `test-run` | `Safe` |
+| Hành động | `browser_navigate`, `browser_click`, `browser_fill`, `browser_press_key` | `test-run` (**chỉ QA**) | `Confirm` nếu origin trong whitelist, `Dangerous` nếu ngoài |
+| Hành động | `browser_evaluate_script` | `test-run` | **luôn** `Dangerous` |
+
+Role `developer` **không thấy và không gọi được** bất kỳ tool hành động nào — nguyên tắc
+four-eyes y hệt `run_shell`/`write_file`. Mọi tool trong nhóm này bọc kết quả trong
+`<untrusted_content>` và bật cờ untrusted, nên sau khi đọc trang, mọi hành động `Confirm`
+trở lên trong lượt đó đều hỏi lại (mất tuỳ chọn "cho phép trong phiên").
+
+**`allowed_origins` khớp theo ranh giới label, không theo hậu tố chuỗi.** `*.dev.internal`
+khớp `api.dev.internal` nhưng **không** khớp `dev.internal.attacker.com` — domain đó kết
+thúc bằng chuỗi giống hệt và thuộc quyền kiểm soát của kẻ tấn công. Scheme và port phải
+khớp tuyệt đối (không bao giờ hạ `https` xuống `http`; không ghi port nghĩa là chỉ port mặc
+định của scheme). **Danh sách rỗng không có nghĩa "cho phép tất cả"** — mọi origin ngoài
+whitelist vẫn là `Dangerous`.
+
+**Ngoại lệ loopback.** `http://localhost:3000` là môi trường test nên vẫn phải mở được,
+dù lớp chống SSRF của toàn hệ thống chặn loopback. Vì vậy tool browser dùng **lớp kiểm
+riêng** và chỉ mở loopback **khi origin nằm trong `allowed_origins`**; mọi dải nội bộ khác
+(`10/8`, `172.16/12`, `192.168/16`, `169.254.169.254`, `fc00::/7`…) vẫn bị chặn cứng.
+Xem `docs/known-issues.md` về khoảng hở DNS rebinding còn sót lại.
+
+**Vòng đời tiến trình Chrome.** Một tiến trình dùng chung cho cả phiên Bean (khởi động
+mất 1–3 giây, và chết giữa chuỗi lệnh sẽ mất sạch cookie/localStorage của phiên test).
+Dọn tiến trình con qua 4 lớp: tắt khi Bean dừng; tự tắt khi idle; dọn tiến trình mồ côi
+của lần chạy trước (đọc `DevToolsActivePort`, chỉ kill khi `/proc/<pid>/cmdline` chứa đúng
+`--user-data-dir` của Bean nên không nhầm PID); `Browser::launch` tự kill con khi lỗi.
+Profile nằm ở `data.dir/browser/profile` — cô lập, **không bao giờ** dùng
+`~/.config/google-chrome` của bạn.
+
+**Ảnh.** `browser_screenshot` là tool **duy nhất** trả ảnh; nó dùng kiểu nội dung riêng
+mà **không** phải đổi chữ ký của 25+ tool cũ. Ảnh có định phí token **cố định**
+(`IMAGE_BUDGET_TOKENS`), không dùng công thức `chars/4` — tính theo ký tự, một ảnh 200 KB
+sẽ thành ~67.500 token và tự loại sạch lịch sử của lượt đó. `audit.jsonl` **không** bao
+giờ ghi base64, chỉ ghi tham chiếu `image:<media_type>:<sha256>:<độ dài>`.
 
 
 ## Docker

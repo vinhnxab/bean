@@ -13,7 +13,7 @@ use beanagent_memory::{
 use beanagent_security::audit::{AuditEntry, AuditLog, entry_now};
 use beanagent_security::policy::{Policy, PolicyDecision, SessionPolicy, deny_list_reason};
 use beanagent_security::untrusted::contains_untrusted_block;
-use beanagent_tools::{AlertSink, ToolCtx, ToolError};
+use beanagent_tools::{AlertSink, ToolCtx, ToolError, ToolOutput};
 use beanagent_types::{
     Config, LlmDelta, LlmResponse, Message, Risk, RolePermissions, StopReason, ToolCall, ToolSpec,
     Usage,
@@ -560,8 +560,10 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             // ghi tool result "[bị người dùng huỷ]" để lịch sử giữ cặp tool_use/tool_result
             // hợp lệ rồi kết thúc run. Ghi DB diễn ra SAU khi select hoàn tất nên không
             // bị cắt giữa lúc ghi (cancel-safety của `select!`, mục 22.10).
+            // (M26) `call_rich` cho phép tool trả ảnh; `call` cũ vẫn chạy qua default
+            // implementation nên **mọi tool cũ hành xử y hệt**.
             enum ExecOutcome {
-                Done(Result<String, ToolError>),
+                Done(Result<ToolOutput, ToolError>),
                 Timeout,
                 Cancelled,
             }
@@ -578,23 +580,41 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
                 },
             };
 
-            let (ok, output, cancelled) = match outcome {
-                ExecOutcome::Done(Ok(out)) => (true, out, false),
-                ExecOutcome::Done(Err(e)) => {
-                    (false, format!("Lỗi tool `{}`: {}", call.name, e), false)
+            let (ok, output, image_block, cancelled) = match outcome {
+                ExecOutcome::Done(Ok(ToolOutput::Image { caption, image })) => {
+                    (true, caption, Some(image), false)
                 }
+                ExecOutcome::Done(Ok(ToolOutput::Text(text))) => (true, text, None, false),
+                ExecOutcome::Done(Err(e)) => (
+                    false,
+                    format!("Lỗi tool `{}`: {}", call.name, e),
+                    None,
+                    false,
+                ),
                 ExecOutcome::Timeout => (
                     false,
                     format!(
                         "Tool `{}` hết thời gian cho phép ({} giây).",
                         call.name, config.security.tool_timeout_seconds
                     ),
+                    None,
                     false,
                 ),
-                ExecOutcome::Cancelled => (false, CANCELLED_MSG.to_string(), true),
+                ExecOutcome::Cancelled => (false, CANCELLED_MSG.to_string(), None, true),
             };
 
+            // Ảnh KHÔNG đi qua `truncate_output`: cắt theo ký tự một chuỗi base64 sẽ
+            // sinh PNG hỏng. Trần byte đã do tool áp (`[browser].max_image_bytes`).
             let output = truncate_output(&output);
+            // Audit **không** bao giờ ghi base64 (mục 15.8): chỉ ghi tham chiếu.
+            if let Some(image) = image_block.as_ref() {
+                audit.artifact = Some(format!(
+                    "image:{}:{}:{} bytes",
+                    image.media_type,
+                    image.sha256,
+                    image.data.len()
+                ));
+            }
             // (M4, mục 15.4) Bật cờ untrusted cho cả lượt khi tool trả nội dung ngoài lõi:
             // mọi confirm Confirm/Dangerous SAU đây sẽ hỏi lại, không "trong phiên".
             //
@@ -632,10 +652,14 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
             } else {
                 output
             };
-            let result_message = if ok {
-                Message::tool(call.id.clone(), output.clone())
-            } else {
-                Message::tool_error(call.id.clone(), output.clone())
+            // (M26) Tool trả **ảnh** dùng `Message::tool_with_image`: caption vẫn
+            // đi qua đường cắt ký tự như mọi tool, còn ảnh đi kèm nguyên vẹn.
+            let result_message = match (ok, image_block) {
+                (true, Some(image)) => {
+                    Message::tool_with_image(call.id.clone(), output.clone(), image)
+                }
+                (true, None) => Message::tool(call.id.clone(), output.clone()),
+                (false, _) => Message::tool_error(call.id.clone(), output.clone()),
             };
             append_run_message(store, session, &mut transcript, result_message).await?;
             if ok
@@ -730,11 +754,12 @@ async fn execute_tool(
     registry: &beanagent_tools::ToolRegistry,
     ctx: &ToolCtx,
     call: &ToolCall,
-) -> Result<String, ToolError> {
+) -> Result<ToolOutput, ToolError> {
     let tool = registry
         .get(&call.name)
         .ok_or_else(|| ToolError::NotFound(call.name.clone()))?;
-    tool.call(ctx, call.args.clone()).await
+    // (M26) `call_rich` mặc định gọi `call`, nên tool cũ không đổi hành vi.
+    tool.call_rich(ctx, call.args.clone()).await
 }
 
 fn truncate_output(output: &str) -> String {

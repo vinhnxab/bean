@@ -382,6 +382,13 @@ pub fn build_request_body(req: &ChatRequest<'_>, model: &str) -> Result<Value, L
                     "tool_call_id": id,
                     "content": message.text.as_deref().unwrap_or_default(),
                 }));
+                // (M26) Message `role=tool` của Chat Completions **bắt buộc** có
+                // `content` là chuỗi, nên ảnh không thể nằm trong đó. Thay vào đó ta
+                // thêm một message `user` kế tiếp chứa content dạng mảng — đúng cách
+                // mà các client OpenAI-compat truyền ảnh sinh ra từ tool.
+                if let Some(image) = &message.image {
+                    messages.push(image_user_message(image));
+                }
             }
         }
     }
@@ -530,6 +537,27 @@ fn parse_arguments(index: usize, raw: Option<&Value>) -> Result<Value, LlmError>
     }
 }
 
+/// `ImageBlock` → message `user` chứa ảnh, theo định dạng Chat Completions (M26).
+///
+/// `content` là **mảng part**: `{"type":"image_url","image_url":{"url":"data:…"}}`.
+///
+/// `media_type` được kiểm lại ở đây: lịch sử đọc từ DB có thể do phiên bản cũ ghi,
+/// và một media type lạ sẽ khiến API trả 400 — hỏng cả lượt chat chứ không chỉ tool ảnh.
+fn image_user_message(image: &beanagent_types::ImageBlock) -> Value {
+    let media_type =
+        if beanagent_types::ALLOWED_IMAGE_MEDIA_TYPES.contains(&image.media_type.as_str()) {
+            image.media_type.as_str()
+        } else {
+            "image/png"
+        };
+    json!({
+        "role": "user",
+        "content": [{
+            "type": "image_url",
+            "image_url": { "url": format!("data:{media_type};base64,{}", image.data) }
+        }]
+    })
+}
 fn map_finish_reason(raw: Option<&str>) -> StopReason {
     match raw {
         Some("stop") => StopReason::EndTurn,

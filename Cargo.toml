@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/BeanAgent",
   "crates/beanagent-billing",
+  "crates/beanagent-browser",
   "crates/beanagent-channels",
   "crates/beanagent-core",
   "crates/beanagent-llm",
@@ -45,6 +46,7 @@ todo = "deny"
 # --- crate nội bộ ---
 beanagent-types = { path = "crates/beanagent-types" }
 beanagent-billing = { path = "crates/beanagent-billing" }
+beanagent-browser = { path = "crates/beanagent-browser" }
 beanagent-llm = { path = "crates/beanagent-llm" }
 beanagent-marketing = { path = "crates/beanagent-marketing" }
 beanagent-scan = { path = "crates/beanagent-scan" }
@@ -127,6 +129,18 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 croner = "4.0.0"
 # IANA timezone database để parse cron theo agent.timezone.
 chrono-tz = "0.10.4"
+
+# --- Tool browser nội bộ: nói thẳng Chrome DevTools Protocol (M26) ---
+# Ghim đúng một phiên bản, KHÔNG dải mở: CDP sinh code từ `protocol.json` nên một
+# bản minor mới có thể đổi shape type (xem `docs/known-issues.md`).
+#
+# `default-features = false` **tắt `fetcher`** — crate `chromiumoxide_fetcher` (tải
+# Chrome về) không bao giờ vào dependency graph ⇒ binary không có đường tải Chrome
+# lúc chạy. Nguyên tắc "cài trước, không tải lúc chạy" được bảo đảm ở **tầng build**
+# chứ không phải lời hứa lúc chạy. Test `no_fetcher_in_lock` chống hồi quy.
+chromiumoxide = { version = "=0.9.1", default-features = false, features = ["bytes"] }
+# Base64 cho block ảnh (Anthropic `source.data`, OpenAI `image_url.url`).
+base64 = "0.22.1"
 
 # --- M4: security (phiên bản đã xác nhận qua index.crates.io 2026-09-22) ---
 # Path jail (mục 15.1): cap-std dùng openat2 RESOLVE_BENEATH trên Linux (fallback đi từng

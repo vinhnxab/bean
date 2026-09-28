@@ -33,7 +33,46 @@ api_key_env = "ANTHROPIC_API_KEY"
 max_tokens = 4096
 
 [tools]
-enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing"]
+# Nhóm `browser` chỉ có tác dụng khi `[browser].enabled = true` (mặc định tắt).
+enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing", "browser"]
+
+# ---------------------------------------------------------------------------
+# M26 — Tool browser nội bộ: nói thẳng Chrome DevTools Protocol qua crate Rust
+# `chromiumoxide`. KHÔNG qua MCP, KHÔNG qua npm, không cần Node ở đâu cả.
+# ---------------------------------------------------------------------------
+
+[browser]
+enabled = false
+
+# Chrome/Chromium PHẢI CÀI SẴN. Bean không bao giờ tải Chrome lúc chạy.
+# Rỗng => tự phát hiện theo thứ tự: biến môi trường `CHROME` -> tên binary trong PATH
+# (`google-chrome`, `chromium`, ...) -> đường dẫn cố định `/opt/google/chrome`.
+# Không tìm thấy thì tool báo lỗi rõ ràng, không tải thay.
+# executable_path = "/usr/bin/google-chrome"
+
+# Origin được phép chạy tool HÀNH ĐỘNG ở mức `Confirm` (có "cho phép trong phiên").
+# Origin NGOÀI danh sách này luôn là `Dangerous` — không có tuỳ chọn "trong phiên".
+#
+# Wildcard khớp THEO RANH GIỚI LABEL, không theo hậu tố chuỗi:
+#   `https://*.dev.internal`  khớp  `api.dev.internal`   ✓
+#   `https://*.dev.internal`  khớp  `dev.internal.attacker.com`  ✗ (domain giả dạng)
+# Scheme và port phải khớp tuyệt đối: không bao giờ hạ https xuống http, và không ghi
+# port nghĩa là CHỈ khớp port mặc định của scheme (80/443), không phải "mọi port".
+#
+# Rỗng KHÔNG có nghĩa "cho phép tất cả" — mọi origin ngoài whitelist vẫn `Dangerous`.
+# allowed_origins = ["http://localhost:3000", "https://*.dev.internal"]
+
+headless = true
+# Idle quá hạn thì tự tắt Chrome để giải phóng vài trăm MB RAM. 0 = không tự tắt.
+idle_timeout_seconds = 300
+launch_timeout_seconds = 30
+# Trần kích thước một lần chụp (byte). Ảnh vượt ngưỡng bị từ chối kèm thông điệp rõ
+# ràng, thay vì âm thầm làm lịch sử phình.
+max_image_bytes = 4194304
+
+# Phân quyền: nhóm ĐỌC cần tag `dev-read` HOẶC `test-run` (Developer lẫn QA);
+# nhóm HÀNH ĐỘNG cần tag `test-run` — CHỈ role QA. `browser_evaluate_script` luôn
+# `Dangerous` kể cả origin trong whitelist (chạy JS tuỳ ý ≈ thực thi mã).
 
 [learning]
 enabled = true
@@ -238,6 +277,24 @@ trust = false                           # false => Confirm; true chỉ sau khi a
 # cấp quyền đều thấy, giữ hành vi cũ. Đặt ["infra-read"] cho server SIEM/CVE để chỉ
 # role `monitor` / `it-security` thấy tool đó.
 tool_tags = []
+
+# call_timeout_seconds: timeout cho MỘT lần gọi tool của server này. Bỏ trỐng => 60s.
+#   Cần cho tool chạy lâu thực sự (truy vấn SIEM, xuất báo cáo, quét hạ tầng): bị cắt ở
+#   60s sẽ thành tool error *giả*, khiến model tưởng server hỏng rồi thử lại vô ích.
+#   Khoảng 1..=3600.
+# call_timeout_seconds = 300
+
+# inherit_env: biến môi trường của tiến trình Bean được phép kế thừa cho server này.
+#   Mặc định rỗng, và đó là hành vi an toàn (mục 15.6): Bean spawn MCP server với
+#   `env_clear()` nên server KHÔNG thấy secret của host. Nhưng `env_clear()` xoá luôn
+#   `PATH`, nên server cần `PATH` để chạy sẽ chết ngay — ví dụ wrapper có shebang
+#   `#!/usr/bin/env <interpreter>`, thiếu `PATH` thì `env` không tìm thấy trình thông
+#   dịch và tiến trình con thoát với status 127 (Bean chỉ log: "không spawn được").
+#   Trường này là cách bật lại ĐÚNG những biến cần, thay vì bỏ `env_clear()`. Danh sách
+#   trắng; `env` tường minh luôn thắng. Tên có `key`/`token`/`secret`/`password`/
+#   `authorization`/`credential` sẽ log cảnh báo (không chặn) để bạn thấy mình đang
+#   đưa secret ra ngoài.
+inherit_env = []
 
 # M22 — ví dụ server SIEM/CVE chỉ đọc. `command` có thể là `docker run …` để bọc
 # server không tin cậy trong container (khuyến nghị cho MCP server công khai).

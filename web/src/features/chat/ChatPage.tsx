@@ -322,6 +322,7 @@ function HistoryMessage({
         outputPreview={textFromDto(result.result)}
         status={parsed.isError ? "error" : "ok"}
         messageId={dto.id}
+        image={parsed.image}
       />
     ) : null;
   }

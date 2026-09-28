@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { api } from "@/api/client";
+import type { StoredImage } from "@/features/chat/messages";
 import { useI18n } from "@/i18n";
 
 export type ToolCardStatus = "running" | "ok" | "error";
@@ -12,6 +13,7 @@ export function ToolCard({
   outputPreview,
   status,
   messageId,
+  image,
 }: {
   name: string;
   summary: string;
@@ -19,6 +21,8 @@ export function ToolCard({
   outputPreview: string;
   status: ToolCardStatus;
   messageId?: number;
+  /** Ảnh chụp từ trang (M26 — `browser_screenshot`); `null` với tool khác. */
+  image?: StoredImage | null;
 }) {
   const { t } = useI18n();
   const [full, setFull] = useState<string | null>(null);
@@ -76,7 +80,21 @@ export function ToolCard({
       </details>
       <div className="mt-3">
         <p className="mb-1 text-sm font-medium">{t("tool.output")}</p>
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100">
+        {image ? (
+          // Ảnh chụp từ trang do model kiểm soát, nên nó là nội dung KHÔNG TIN
+          // CẬY. Vẫn hiển thị bằng thẻ `<img>` — nhưng `src` chỉ có thể là
+          // `data:` URI (đã kiệm ở `parseImage`), không bao giờ là URL ngoài; đây là
+          // điều CSP `img-src 'self' data:` chốt lại thành lớp thứ hai. Không
+          // dùng `dangerouslySetInnerHTML` ở đây.
+          <img
+            src={`data:${image.mediaType};base64,${image.data}`}
+            alt={outputPreview || name}
+            className="max-h-96 w-full rounded-lg border border-slate-200 object-contain dark:border-slate-700"
+          />
+        ) : null}
+        <pre
+          className={`max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100 ${image ? "mt-2" : ""}`}
+        >
           {outputPreview || t("tool.noOutput")}
         </pre>
       </div>

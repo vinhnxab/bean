@@ -6,6 +6,61 @@ use beanagent_types::{Risk, ToolSpec};
 use crate::ctx::ToolCtx;
 use crate::error::ToolError;
 
+/// Nội dung một tool trả về: **văn bản** (mặc định) hoặc **ảnh** (M26).
+///
+/// # Vì sao có enum này mà không đổi chữ ký `Tool::call`
+///
+/// `Tool::call` trả `Result<String, ToolError>`. Đổi nó thành `Result<ToolOutput, _>`
+/// sẽ chạm vào **mọi** impl `Tool` (25+ tool built-in, `TypedTool`, wrapper MCP),
+/// mọi adapter kênh và hàng chục test — trong khi nhu cầu thật chỉ có **một** tool
+/// (`browser_screenshot`) cần trả ảnh.
+///
+/// Vì vậy [`Tool::call_rich`] được thêm với **default implementation** gọi lại
+/// `call`; chỉ tool trả ảnh mới override. Phạm vi thay đổi thu hẹp còn **một impl**.
+///
+/// # Ràng buộc bất biến
+///
+/// * `Text` đi qua đúng đường cũ: `untrusted::wrap_bounded` + `agent::truncate_output`.
+/// * `Image` **không** bị cắt theo ký tự (cắt byte ảnh là vô nghĩa) và **không** tính
+///   vào ngân sách token bằng công thức `chars/4` — xem `context::image_output_tokens`.
+/// * `media_type` phải nằm trong tập được phép; `ImageBlock::new` chặn ở đây chứ không
+///   để chuỗi lạ tới tận provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolOutput {
+    /// Văn bản thuần (đa số tool).
+    Text(String),
+    /// Một khối ảnh kèm caption ngắn cho model.
+    Image {
+        /// Caption một dòng (URL, kích thước, kích thước file) đi kèm ảnh.
+        caption: String,
+        /// Khối ảnh đã mã hoá base64.
+        image: beanagent_types::ImageBlock,
+    },
+}
+
+impl ToolOutput {
+    /// Văn bản thuần — tiện cho code chỉ cần text.
+    #[must_use]
+    pub fn as_text(&self) -> &str {
+        match self {
+            Self::Text(text) => text,
+            Self::Image { caption, .. } => caption,
+        }
+    }
+
+    /// Có ảnh hay không (agent loop dùng để chọn cách ghi audit).
+    #[must_use]
+    pub const fn is_image(&self) -> bool {
+        matches!(self, Self::Image { .. })
+    }
+}
+
+impl From<String> for ToolOutput {
+    fn from(text: String) -> Self {
+        Self::Text(text)
+    }
+}
+
 /// Một công cụ mà model gọi được.
 ///
 /// Bất biến:
@@ -90,4 +145,25 @@ pub trait Tool: Send + Sync {
     /// # Errors
     /// Bất kỳ lỗi nào (tham số sai, file thiếu, timeout…) — được trả về thay vì panic.
     async fn call(&self, ctx: &ToolCtx, args: serde_json::Value) -> Result<String, ToolError>;
+
+    /// Thực thi tool, cho phép trả **ảnh** (M26).
+    ///
+    /// Default implementation gọi lại [`Tool::call`] rồi bọc thành
+    /// [`ToolOutput::Text`] — nên **tool cũ không cần đổi một dòng nào** và hành vi
+    /// của chúng giữ nguyên tuyệt đối. Chỉ tool trả ảnh (`browser_screenshot`) override
+    /// hàm này.
+    ///
+    /// Agent loop gọi `call_rich` (không phải `call`) nên không cần biết tool nào trả
+    /// ảnh: quyết định nằm ở dữ liệu trả về, không nằm ở tên tool — đổi tên tool sau
+    /// này không làm hỏng đường ảnh.
+    ///
+    /// # Errors
+    /// Như [`Tool::call`].
+    async fn call_rich(
+        &self,
+        ctx: &ToolCtx,
+        args: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
+        self.call(ctx, args).await.map(ToolOutput::Text)
+    }
 }

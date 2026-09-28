@@ -205,7 +205,8 @@ fn load_or_default_works_without_file() {
 // ---------------------------------------------------------------------------
 
 use beanagent_types::config::{
-    ScanSandboxConfig, ScanScopeEntry, ScanTargetKind, SecurityScanConfig,
+    BROWSER_TOOL_GROUP, KNOWN_TOOL_GROUPS, ScanSandboxConfig, ScanScopeEntry, ScanTargetKind,
+    SecurityScanConfig,
 };
 
 fn scope_entry(kind: ScanTargetKind, value: &str) -> ScanScopeEntry {
@@ -551,4 +552,175 @@ fn mcp_rate_limit_defaults_and_overrides() {
     let config = Config::load(&path).unwrap();
     assert_eq!(config.mcp_server.rate_limit_per_minute, 300);
     assert_eq!(config.mcp_server.rate_limit_ip_multiplier, 2);
+}
+
+// ---------------------------------------------------------------------------
+// `[[mcp_servers]]` — `call_timeout_seconds` + `inherit_env` (client side)
+// ---------------------------------------------------------------------------
+
+/// Cấu hình hợp lệ có đúng một `[[mcp_servers]]` với phần bổ sung do tham số truyền vào.
+fn mcp_client_server(extra: &str) -> String {
+    format!(
+        r#"
+[[mcp_servers]]
+name = "example"
+command = "/usr/local/bin/some-mcp-server"
+{extra}
+"#
+    )
+}
+
+#[test]
+fn mcp_server_inherits_defaults_for_new_fields() {
+    // Cấu hình cũ (không có trường mới) phải nạp được: `None`/`rỗng` là hành vi
+    // `env_clear()` nguyên bản, tức không hồi quy về "kế thừa toàn bộ host env".
+    let (_dir, path) = write_config(&mcp_client_server(""));
+    let config = Config::load(&path).expect("cấu hình cũ không cần trường mới");
+    assert_eq!(config.mcp_servers.len(), 1);
+    assert_eq!(config.mcp_servers[0].call_timeout_seconds, None);
+    assert!(config.mcp_servers[0].inherit_env.is_empty());
+}
+
+#[test]
+fn mcp_server_accepts_timeout_and_inherit_env() {
+    let (_dir, path) = write_config(&mcp_client_server(
+        "call_timeout_seconds = 300\ninherit_env = [\"PATH\", \"HOME\", \"DISPLAY\"]\n",
+    ));
+    let config = Config::load(&path).expect("giá trị hợp lệ phải nạp được");
+    assert_eq!(config.mcp_servers[0].call_timeout_seconds, Some(300));
+    assert_eq!(
+        config.mcp_servers[0].inherit_env,
+        vec!["PATH", "HOME", "DISPLAY"]
+    );
+}
+
+#[test]
+fn mcp_server_call_timeout_of_zero_is_rejected() {
+    // 0 ⇒ `Duration::ZERO` ⇒ mọi tool call treo tức thì và trả lỗi. Model sẽ tưởng
+    // server hỏng rồi thử lại, nên phải chết lúc nạp chứ không phải lúc chạy.
+    let (_dir, path) = write_config(&mcp_client_server("call_timeout_seconds = 0\n"));
+    let error = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&error, ConfigError::Invalid(message) if message.contains("call_timeout_seconds")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn mcp_server_call_timeout_above_ceiling_is_rejected() {
+    let (_dir, path) = write_config(&mcp_client_server("call_timeout_seconds = 86400\n"));
+    let error = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&error, ConfigError::Invalid(message) if message.contains("call_timeout_seconds")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn mcp_server_inherit_env_rejects_names_that_would_panic_command_env() {
+    // `Command::env` panic khi tên rỗng / chứa '=' / NUL — phải thành ConfigError.
+    for bad in [
+        "\"\"",
+        "\"A=B\"",
+        "\"WITH NUL\\u0000\"",
+        "\"HAS-DASH\"",
+        "\"9LEAD\"",
+    ] {
+        let (_dir, path) = write_config(&mcp_client_server(&format!("inherit_env = [{bad}]\n")));
+        let error = Config::load(&path).unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::Invalid(message) if message.contains("inherit_env")),
+            "inherit_env = [{bad}] phải bị chặn, nhận: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn mcp_server_duplicate_names_are_rejected() {
+    // Tên server đi thẳng vào `mcp__<name>__<tool>`: trùng tên ⇒ tool bị đè âm thầm.
+    // Kiểm tra này đã có sẵn ở `validate_web_and_channels`; giữ ở đây để chốt hành vi
+    // sau khi thêm hai trường mới (rủi ro hồi quy: thêm field mà làm mất validate cũ).
+    let (_dir, path) = write_config(&format!(
+        "{}{}",
+        mcp_client_server(""),
+        "\n[[mcp_servers]]\nname = \"example\"\ncommand = \"/usr/local/bin/other\"\n"
+    ));
+    let error = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&error, ConfigError::Invalid(message) if message.contains("trùng")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn mcp_server_empty_command_is_rejected() {
+    let (_dir, path) = write_config("\n[[mcp_servers]]\nname = \"broken\"\ncommand = \"  \"\n");
+    let error = Config::load(&path).unwrap_err();
+    assert!(
+        matches!(&error, ConfigError::Invalid(message) if message.contains("command")),
+        "{error:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// M26 — `[browser]`
+// ---------------------------------------------------------------------------
+
+/// Nhóm `browser` là nhóm hợp lệ (nếu không, file mẫu không nạp được).
+#[test]
+fn browser_tool_group_is_known() {
+    assert!(KNOWN_TOOL_GROUPS.contains(&BROWSER_TOOL_GROUP));
+}
+
+/// `[browser].enabled = false` thì KHÔNG validate whitelist — người dùng có thể
+/// để sẵn mẫu đang viết rồi bật sau.
+#[test]
+fn disabled_browser_does_not_validate_origins() {
+    let (_dir, path) = write_config("[browser]\nenabled = false\n");
+    Config::load(&path).expect("browser tắt thì mẫu sai cũng không chặn");
+}
+
+/// Mẫu origin sai khi **bật** browser phải chặn ở tầng config.
+#[test]
+fn enabled_browser_rejects_malformed_origins() {
+    for bad in [
+        "dev.internal",             // thiếu scheme
+        "https://dev.internal/x",   // có đường dẫn
+        "https://u:p@dev.internal", // credential
+        "https://*",                // quá rộng
+        "https://dev.*.internal",   // wildcard sai vị trí
+        "https://dev.internal:abc", // port không phải số
+    ] {
+        let (_dir, path) = write_config(&format!(
+            "[browser]\nenabled = true\nallowed_origins = [\"{bad}\"]\n"
+        ));
+        let error = Config::load(&path).expect_err("phải chặn mẫu sai");
+        assert!(
+            matches!(&error, ConfigError::Invalid(m) if m.contains("allowed_origins")),
+            "{bad}: {error:?}"
+        );
+    }
+}
+
+/// `max_image_bytes = 0` khiến mọi lần chụp thất bại ⇒ chặn.
+#[test]
+fn browser_rejects_zero_image_budget() {
+    let (_dir, path) = write_config("[browser]\nenabled = true\nmax_image_bytes = 0\n");
+    let error = Config::load(&path).expect_err("phải chặn");
+    assert!(
+        matches!(&error, ConfigError::Invalid(m) if m.contains("max_image_bytes")),
+        "{error:?}"
+    );
+}
+
+/// Mẫu origin hợp lệ phải nạp được.
+#[test]
+fn enabled_browser_accepts_valid_origins() {
+    let (_dir, path) = write_config(
+        "[browser]\nenabled = true\nexecutable_path = \"/usr/bin/google-chrome\"\n\
+         allowed_origins = [\"http://localhost:3000\", \"https://*.dev.internal\"]\n",
+    );
+    let config = Config::load(&path).expect("cấu hình hợp lệ phải nạp được");
+    assert!(config.browser.enabled);
+    assert_eq!(config.browser.allowed_origins.len(), 2);
 }

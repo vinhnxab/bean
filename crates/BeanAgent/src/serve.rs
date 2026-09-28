@@ -93,6 +93,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let built =
         chat::build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
     let mcp = built.mcp;
+    let browser_session = built.browser.clone();
     let workspace = built.registry.workspace_opt();
     let registry = Arc::new(built.registry);
     let audit = chat::build_audit(&config);
@@ -234,6 +235,16 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         .is_err()
     {
         tracing::warn!("MCP chưa đóng trong 5s; tiến trình sẽ reap child khi drop");
+    }
+    // (M26) Tắt Chrome con — lớp dọn số 1/4. Có trần 5 giây vì `kill` chờ tiến trình
+    // kết thúc; quá trỉ thì chỉ log, còn lớp `reap_orphans` ở lần khởi động kế tiếp
+    // sẽ dọn phần còn sót.
+    if let Some(session) = &browser_session
+        && tokio::time::timeout(Duration::from_secs(5), session.shutdown())
+            .await
+            .is_err()
+    {
+        tracing::warn!("Chrome chưa tắt trong 5s; sẽ được dọn ở lần khởi động kế tiếp");
     }
     result
 }

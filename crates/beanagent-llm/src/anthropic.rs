@@ -411,10 +411,19 @@ pub fn build_request_body(req: &ChatRequest<'_>, model: &str) -> Result<Value, L
                             .to_string(),
                     ));
                 };
+                // (M26) Ảnh đi nằm **trong** block `tool_result` dưới dạng content
+                // dạng mảng — đúng định dạng Messages API, không cần message phụ.
+                // `is_error` chỉ có ý nghĩa khi content là chuỗi; với mảng block,
+                // Anthropic dùng block `is_error` riêng nên ta đặt ở đây cho khớp
+                // spec (tool_result hỗ trợ `is_error` kèm content).
+                let content = match &message.image {
+                    Some(image) => json!([image_to_wire(image)]),
+                    None => json!(message.text.as_deref().unwrap_or_default()),
+                };
                 pending_tool_results.push(json!({
                     "type": "tool_result",
                     "tool_use_id": id,
-                    "content": message.text.as_deref().unwrap_or_default(),
+                    "content": content,
                     "is_error": message.is_error,
                 }));
             }
@@ -446,6 +455,30 @@ fn flush_tool_results(messages: &mut Vec<Value>, pending: &mut Vec<Value>) {
         messages.push(json!({ "role": "user", "content": pending }));
         pending.clear();
     }
+}
+
+/// `ImageBlock` → block ảnh của Anthropic Messages API (M26).
+///
+/// Định dạng: `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}`.
+///
+/// `media_type` đã bị chặn ở [`beanagent_types::ImageBlock::new`], nhưng lịch sử đọc
+/// từ DB có thể do phiên bản cũ ghi ⇒ hàm này **vẫn** kiểm tra lại và không gửi
+/// media type lạ đi, vì gửi sai thì API trả 400 và hỏng cả lượt chat.
+fn image_to_wire(image: &beanagent_types::ImageBlock) -> Value {
+    let media_type =
+        if beanagent_types::ALLOWED_IMAGE_MEDIA_TYPES.contains(&image.media_type.as_str()) {
+            image.media_type.as_str()
+        } else {
+            "image/png"
+        };
+    json!({
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": image.data,
+        }
+    })
 }
 
 /// `ToolSpec` → `{"name", "description", "input_schema"}` với schema đã chuẩn hoá.

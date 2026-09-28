@@ -15,7 +15,7 @@ pub mod tool;
 pub use config::{Config, ConfigError, ResolvedSecrets};
 pub use ids::{ConfirmId, RunId, SessionId};
 pub use llm::{LlmDelta, LlmResponse, LlmToolCallDelta, StopReason, Usage};
-pub use message::{Message, Role, ToolCall};
+pub use message::{ALLOWED_IMAGE_MEDIA_TYPES, ImageBlock, Message, Role, ToolCall};
 pub use rbac::{ALL_TAGS, NO_ACCESS_ROLE, RolePermissions, WILDCARD_TAG};
 pub use router::{
     AgentRelation, AgentReport, AgentStatus, Alert, AlertSeverity, ConfirmOutcome, Outbound,

@@ -105,6 +105,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     };
     let built = build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
     let mcp = built.mcp;
+    let built_browser = built.browser.clone();
     let registry = Arc::new(built.registry);
     // (S2) Gom danh sách tool trả nội dung ngoài lõi **trước** khi registry đi vào Router,
     // để CLI lọc escape khi in output. Nguồn duy nhất là `marks_untrusted()` (D9.1).
@@ -143,6 +144,11 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     let run_result = channel.run(router.clone(), CancellationToken::new()).await;
     router.shutdown();
     mcp.close().await;
+    // (M26) Tắt Chrome con TRƯỚC khi trả về: đây là lớp dọn số 1/4. Thiếu bước này
+    // thì `Ctrl-C` sẽ để lại tiến trình Chrome mồ côi chạy nền.
+    if let Some(session) = &built_browser {
+        session.shutdown().await;
+    }
     run_result.context("CLI channel dừng lỗi")
 }
 
@@ -168,12 +174,17 @@ pub(crate) fn build_provider(
     Ok((provider, web_search_api_key))
 }
 
-/// Registry tool và các kết nối MCP cần shutdown cùng tiến trình.
+/// Registry tool và các kết nối cần shutdown cùng tiến trình.
 pub(crate) struct BuiltRegistry {
     /// Registry dùng bởi Router.
     pub(crate) registry: ToolRegistry,
     /// Connection MCP để đóng tường minh khi `chat`/`serve` kết thúc.
     pub(crate) mcp: McpRuntime,
+    /// Quản lý tiến trình Chrome (M26) — `None` khi `[browser].enabled = false`.
+    ///
+    /// Giữ `Arc` để `chat`/`serve` gọi [`SessionManager::shutdown`] khi thoát, đảm
+    /// bảo không bỏ quên tiến trình Chrome con.
+    pub(crate) browser: Option<Arc<beanagent_browser::SessionManager>>,
 }
 
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
@@ -338,8 +349,38 @@ pub(crate) async fn build_registry(
             .register(marketing_draft())
             .context("đăng ký tool marketing_draft thất bại")?;
     }
+    // (M26) Domain browser nội bộ — nói thẳng CDP, không qua MCP/npm. Chỉ đăng ký
+    // khi BẬT `browser.enabled` **và** nhóm tool `browser` bật; Chrome không được
+    // khởi động lúc build registry, chỉ lúc tool đầu tiên thật sự được gọi.
+    let mut browser_session = None;
+    if config.browser.enabled {
+        if config
+            .tools
+            .enabled
+            .iter()
+            .any(|group| group == beanagent_types::config::BROWSER_TOOL_GROUP)
+        {
+            let data_dir = expand_tilde(&config.data.dir);
+            let (tools, session) = beanagent_browser::build_tools(&config.browser, &data_dir);
+            for tool in tools {
+                registry
+                    .register(tool)
+                    .context("đăng ký tool browser thất bại")?;
+            }
+            browser_session = Some(session);
+        } else {
+            tracing::warn!(
+                "[browser].enabled = true nhưng [tools].enabled chưa có \"browser\" — \
+                 không đăng ký tool browser"
+            );
+        }
+    }
     let mcp = McpRuntime::load(&config.mcp_servers, &mut registry).await;
-    Ok(BuiltRegistry { registry, mcp })
+    Ok(BuiltRegistry {
+        registry,
+        mcp,
+        browser: browser_session,
+    })
 }
 
 /// Hàng đợi stdin cho chế độ pipe; confirm và lượt user dùng chung một nguồn.

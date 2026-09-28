@@ -22,6 +22,7 @@ ui = ["beanagent-web/ui"]
 
 [dependencies]
 beanagent-billing.workspace = true
+beanagent-browser.workspace = true
 beanagent-marketing.workspace = true
 beanagent-scan.workspace = true
 beanagent-llm.workspace = true

@@ -118,6 +118,88 @@ impl McpError {
     }
 }
 
+/// Một phần tên biến khiến tên đó trông như mang secret.
+///
+/// Cùng ý niệm với `SENSITIVE_KEY_PARTS` ở `beanagent-security/src/audit.rs`; crate này
+/// **không** phụ thuộc `beanagent-security` (chiều phụ thuộc là ngược lại) nên khai báo
+/// riêng thay vì tạo phụ thuộc vòng.
+const SENSITIVE_NAME_PARTS: &[&str] = &[
+    "key",
+    "token",
+    "secret",
+    "password",
+    "authorization",
+    "credential",
+];
+
+fn looks_sensitive(name: &str) -> bool {
+    let lowered = name.to_ascii_lowercase();
+    SENSITIVE_NAME_PARTS
+        .iter()
+        .any(|part| lowered.contains(part))
+}
+
+/// Cặp `(tên, giá trị)` kế thừa từ môi trường tiến trình Bean cho một MCP server.
+///
+/// Tách thành hàm thuần để **quy tắc chọn biến** test được mà không cần spawn: phần
+/// đọc giá trị thì phụ thuộc môi trường, nhưng quyết định *có truyền biến nào* thì không.
+///
+/// Vì sao cần: [`connect_service`] gọi `env_clear()` để MCP server không thấy secret
+/// của host (mục 15.6), và `env_clear()` xoá luôn `PATH`. Server nào cần `PATH` để
+/// chạy (wrapper có shebang `#!/usr/bin/env <interpreter>`) sẽ chết vì vậy — không có
+/// `PATH` thì `env` không tìm thấy trình thông dịch và tiến trình con thoát ngay với
+/// status 127. `inherit_env` là cách bật lại *đúng những biến cần*, thay vì bỏ
+/// `env_clear()`.
+fn inherited_env(server: &ServerConfig) -> Vec<(String, String)> {
+    let mut resolved = Vec::new();
+    for variable in &server.inherit_env {
+        let name = variable.trim();
+        // `env` tường minh thắng: nó là giá trị người dùng chủ động đặt, không nên bị
+        // môi trường của tiến trình âm thầm ghi đè.
+        if name.is_empty() || server.env.contains_key(name) {
+            continue;
+        }
+        match std::env::var(name) {
+            Ok(value) => {
+                if looks_sensitive(name) {
+                    // Cảnh báo chứ không chặn: truyền `GITHUB_TOKEN` cho một MCP server
+                    // GitHub là việc hợp lệ và có chủ ý. Chặn sẽ cấm hẳn trường hợp đó,
+                    // nên thay vào đó làm cho việc đó **thấy được** trong log.
+                    tracing::warn!(
+                        server = %server.name,
+                        variable = %name,
+                        "kế thừa biến có tên nhạy cảm cho MCP server; \
+                         nếu đây là secret, cân nhắc khai báo qua `env` để kiểm soát rõ ràng"
+                    );
+                }
+                resolved.push((name.to_string(), value));
+            }
+            Err(_) => {
+                // Im lặng thì người dùng không hiểu vì sao server không lên. Đây là
+                // nguyên nhân hợp lệ (Bean chạy dưới systemd, `DISPLAY` không tồn tại).
+                tracing::warn!(
+                    server = %server.name,
+                    variable = %name,
+                    "inherit_env khai báo biến không tồn tại trong môi trường tiến trình; bỏ qua"
+                );
+            }
+        }
+    }
+    resolved
+}
+
+/// Timeout gọi tool sau khi áp `[[mcp_servers]].call_timeout_seconds`.
+///
+/// `0` được coi như **không đặt** (giữ mặc định) thay vì thành `Duration::ZERO`, để một
+/// `McpServerConfig` dựng tay trong test không vô tình treo mọi tool call. `Config::validate`
+/// đã chặn `0` khi đọc từ file; lớp phòng thủ này giữ bất biến ở tầng API công khai.
+fn effective_call_timeout(server: &ServerConfig, default: Duration) -> Duration {
+    server
+        .call_timeout_seconds
+        .filter(|seconds| *seconds > 0)
+        .map_or(default, |seconds| Duration::from_secs(u64::from(seconds)))
+}
+
 /// Kiểm tra dữ liệu spawn từ config trước khi `Command` có thể panic với NUL/`=` sai.
 fn validate_spawn_config(server: &ServerConfig) -> Result<(), McpError> {
     if server.command.trim().is_empty() || server.command.contains('\0') {
@@ -137,6 +219,19 @@ fn validate_spawn_config(server: &ServerConfig) -> Result<(), McpError> {
             ));
         }
     }
+    // Lưới an toàn cuối cho `inherit_env`: `Config::validate` đã chặn tên biến sai
+    // khi đọc từ file, nhưng `McpServerConfig` cũng có thể dựng tay trong test, và
+    // `Command::env` **panic** với tên rỗng — không có cơ hội trả lỗi cho người dùng.
+    if server
+        .inherit_env
+        .iter()
+        .any(|name| name.trim().is_empty() || name.contains('=') || name.contains('\0'))
+    {
+        return Err(McpError::server(
+            &server.name,
+            "inherit_env có tên biến rỗng hoặc chứa '=' / NUL",
+        ));
+    }
     Ok(())
 }
 
@@ -147,7 +242,12 @@ async fn connect_service(
     validate_spawn_config(server)?;
     let mut command = Command::new(&server.command);
     command.args(&server.args).env_clear().kill_on_drop(true);
-    // Không kế thừa toàn bộ host env (có thể chứa secret); chỉ truyền env khai báo.
+    // Không kế thừa toàn bộ host env (có thể chứa secret); chỉ truyền `inherit_env`
+    // (biến người dùng liệt kê) rồi tới `env` tường minh. Thứ tự này cũng đảm bảo
+    // `env` thắng: xem [`inherited_env`].
+    for (name, value) in inherited_env(server) {
+        command.env(name, value);
+    }
     for (key, value) in &server.env {
         command.env(key, value);
     }
@@ -331,6 +431,13 @@ impl McpRuntime {
         registry: &mut ToolRegistry,
         timeouts: McpTimeouts,
     ) -> Result<usize, McpError> {
+        // `call_timeout_seconds` ghi đè timeout gọi tool **cho riêng server này**: một
+        // server có tool chạy vài chục giây không nên kéo dài timeout của các server
+        // khác, và ngược lại server nhanh không cần chờ trace dài.
+        let timeouts = McpTimeouts {
+            call: effective_call_timeout(server, timeouts.call),
+            ..timeouts
+        };
         let connection = Arc::new(McpConnection::connect(server, timeouts).await?);
         let definitions = match connection.discover().await {
             Ok(definitions) => definitions,
@@ -548,11 +655,120 @@ impl Tool for McpTool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
     fn risk_is_confirm_unless_server_is_trusted() {
         assert_eq!(risk_for_trust(false), Risk::Confirm);
         assert_eq!(risk_for_trust(true), Risk::Safe);
+    }
+
+    fn fixture() -> ServerConfig {
+        ServerConfig {
+            name: "fixture".to_string(),
+            command: "/bin/true".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            trust: false,
+            tool_tags: Vec::new(),
+            call_timeout_seconds: None,
+            inherit_env: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn call_timeout_defaults_unless_configured() {
+        let mut server = fixture();
+        let default = Duration::from_secs(60);
+        assert_eq!(effective_call_timeout(&server, default), default);
+
+        server.call_timeout_seconds = Some(300);
+        assert_eq!(
+            effective_call_timeout(&server, default),
+            Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn zero_call_timeout_falls_back_instead_of_failing_every_call() {
+        // `Config::validate` chặn 0, nhưng struct dựng tay thì không: `Duration::ZERO`
+        // sẽ khiến mọi tool call treo tức thì, nên phải rơi về mặc định.
+        let mut server = fixture();
+        server.call_timeout_seconds = Some(0);
+        let default = Duration::from_secs(60);
+        assert_eq!(effective_call_timeout(&server, default), default);
+    }
+
+    #[test]
+    fn inherit_env_skips_names_shadowed_by_explicit_env() {
+        // `env` tường minh phải thắng — kiểm tra ở mức hàm thuần, không cần spawn.
+        let mut server = fixture();
+        server
+            .env
+            .insert("PATH".to_string(), "tu-config".to_string());
+        server.inherit_env = vec!["PATH".to_string()];
+        assert!(
+            inherited_env(&server).is_empty(),
+            "biến có trong `env` không được kế thừa lần nữa"
+        );
+    }
+
+    #[test]
+    fn inherit_env_ignores_blank_and_missing_variables() {
+        let mut server = fixture();
+        server.inherit_env = vec![
+            "  ".to_string(),
+            "BEANAGENT_BIEN_KHONG_TON_TAI_XYZ".to_string(),
+        ];
+        assert!(inherited_env(&server).is_empty());
+    }
+
+    #[test]
+    fn inherit_env_returns_existing_variable_value() {
+        // `PATH` gần như luôn tồn tại; đây là biến mà `env_clear()` xoá đi.
+        let mut server = fixture();
+        server.inherit_env = vec!["PATH".to_string()];
+        let Some(expected) = std::env::var("PATH").ok() else {
+            return;
+        };
+        let resolved = inherited_env(&server);
+        assert_eq!(resolved.len(), 1, "{resolved:?}");
+        assert_eq!(resolved[0], ("PATH".to_string(), expected));
+    }
+
+    #[test]
+    fn sensitive_names_are_flagged_for_the_operator() {
+        // Cảnh báo, không chặn: truyền GITHUB_TOKEN cho MCP server GitHub là hợp lệ.
+        for name in [
+            "GITHUB_TOKEN",
+            "OPENAI_API_KEY",
+            "my_password",
+            "AWS_SECRET_ACCESS_KEY",
+            "DB_CREDENTIAL",
+            "auth_authorization",
+        ] {
+            assert!(looks_sensitive(name), "{name} phải bị cảnh báo");
+        }
+        for name in ["PATH", "HOME", "DISPLAY", "LANG", "USER", "XDG_RUNTIME_DIR"] {
+            assert!(!looks_sensitive(name), "{name} không phải secret");
+        }
+    }
+
+    #[test]
+    fn invalid_inherit_env_names_are_rejected_before_spawn() {
+        // Lưới an toàn cuối: chặn ở đây thay vì để `Command::env` panic.
+        for bad in ["", "  ", "A=B", "HAS\0NUL"] {
+            let mut server = fixture();
+            server.inherit_env = vec![bad.to_string()];
+            // Chỉ dùng `assert!`: workspace cấm cả `panic!` lẫn `unwrap_used` trong
+            // unit test nằm trong `src/` (khác với test tích hợp trong `tests/`).
+            let rejected = match validate_spawn_config(&server) {
+                Err(error) => error.to_string().contains("inherit_env"),
+                Ok(()) => false,
+            };
+            assert!(rejected, "inherit_env = {bad:?} phải bị chặn");
+        }
     }
 }

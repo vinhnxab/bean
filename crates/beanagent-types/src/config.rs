@@ -28,6 +28,9 @@ pub const DEFAULT_CONFIG_FILE: &str = "BeanAgent.toml";
 /// của workspace là `types ← tools ← core ← web`.
 pub const DEFAULT_WEB_USER: &str = "web:admin";
 
+/// Tên nhóm tool browser trong `[tools] enabled` (M26).
+pub const BROWSER_TOOL_GROUP: &str = "browser";
+
 /// Nhóm tool hợp lệ cho `[tools] enabled` (agents.md mục 7.3).
 pub const KNOWN_TOOL_GROUPS: &[&str] = &[
     "files",
@@ -36,6 +39,9 @@ pub const KNOWN_TOOL_GROUPS: &[&str] = &[
     "memory",
     "skills",
     "schedule",
+    // Nhóm tool browser nội bộ (M26) — nói thẳng CDP, không qua MCP/npm. Vẫn cần
+    // `[browser].enabled = true` mới thực sự đăng ký (xem `validate_browser`).
+    BROWSER_TOOL_GROUP,
     BILLING_TOOL_GROUP,
 ];
 
@@ -755,6 +761,13 @@ impl Default for TelegramConfig {
     }
 }
 
+/// Trần cho [`McpServerConfig::call_timeout_seconds`] (giây).
+///
+/// Một giờ là trần có chủ đích: tool chạy lâu thực sự (truy vấn SIEM, xuất báo cáo, quét
+/// hạ tầng…) cần hơn 60 giây, nhưng một MCP server treo vô hạn sẽ giữ cả slot của agent
+/// loop (`max_steps`) — lỗi thật sự nằm ở chỗ không có trần.
+pub const MAX_MCP_CALL_TIMEOUT_SECONDS: u32 = 3600;
+
 /// Một mục `[[mcp_servers]]` (agents.md mục 16).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -772,6 +785,27 @@ pub struct McpServerConfig {
     /// `true` ⇒ tool của server hạ xuống `Safe`; mặc định `false` ⇒ `Confirm`.
     #[serde(default)]
     pub trust: bool,
+    /// Timeout cho **một lần gọi tool** của server này (giây).
+    ///
+    /// `None` ⇒ dùng mặc định 60 giây của [`McpTimeouts`](https://docs.rs/beanagent-tools).
+    /// Cần cho tool chạy lâu thực sự (truy vấn SIEM, xuất báo cáo…), vì bị cắt ở 60s sẽ
+    /// thành tool error *giả* khiến model tưởng server hỏng rồi thử lại vô ích.
+    ///
+    /// Giá trị phải nằm trong `1..=`[`MAX_MCP_CALL_TIMEOUT_SECONDS`].
+    #[serde(default)]
+    pub call_timeout_seconds: Option<u32>,
+    /// Biến môi trường của tiến trình Bean được phép **kế thừa** cho server này.
+    ///
+    /// Mặc định rỗng, và đó là hành vi đúng: `connect_service` dùng `env_clear()` để
+    /// server không thấy secret của host (mục 15.6). Nhưng `env_clear()` xoá luôn
+    /// `PATH`, nên **MCP server cần `PATH` để chạy sẽ chết ngay** — ví dụ wrapper có
+    /// shebang `#!/usr/bin/env <interpreter>`, thiếu `PATH` thì `env` không tìm thấy
+    /// trình thông dịch và tiến trình con thoát với status 127.
+    ///
+    /// Trường này là cách thay đổi *có kiểm soát* thay vì bỏ `env_clear()`: chỉ những
+    /// biến được liệt kê mới được truyền, và `env` tường minh luôn thắng.
+    #[serde(default)]
+    pub inherit_env: Vec<String>,
     /// Tag RBAC mà role phải giữ để thấy/cọp tool của server này (M22).
     ///
     /// Rỗng (mặc định) ⇒ mọi role đã được cấp quyền đều thấy, giữ hành vi cũ. Đặt
@@ -853,6 +887,62 @@ impl Default for McpServerConfigSettings {
     }
 }
 
+/// Cấu hình `[browser]` — tool browser nội bộ nói thẳng CDP (M26).
+///
+/// **Mặc định tắt hoàn toàn** (`enabled = false`): bản cài không có Chrome thì vẫn
+/// chạy bình thường, và tool browser không xuất hiện trong payload gửi model.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BrowserConfig {
+    /// Bật nhóm tool browser.
+    pub enabled: bool,
+    /// Đường dẫn tới Chrome/Chromium **đã cài sẵn**.
+    ///
+    /// Rỗng ⇒ tự phát hiện theo thứ tự: biến môi trường `CHROME` → tên binary trong
+    /// `PATH` (`google-chrome`, `chromium`…) → đường dẫn cố định kiểu
+    /// `/opt/google/chrome`. Không tìm thấy thì tool báo lỗi rõ ràng.
+    ///
+    /// **Không bao giờ tải Chrome lúc chạy** — crate `chromiumoxide` được bật với
+    /// `default-features = false` nên `chromiumoxide_fetcher` không tồn tại trong
+    /// binary (nguyên tắc "cài trước, không tải lúc chạy", xem `docs/decisions.md` D26.2).
+    pub executable_path: String,
+    /// Origin được phép chạy tool **hành động** ở mức `Confirm` (có "cho phép trong
+    /// phiên"). Origin ngoài danh sách này luôn là `Dangerous`.
+    ///
+    /// Chấp nhận `scheme://host[:port]` và `scheme://*.host[:port]`. Wildcard khớp
+    /// **theo ranh giới label**: `*.dev.internal` khớp `api.dev.internal` nhưng
+    /// **không** khớp `dev.internal.attacker.com`.
+    ///
+    /// **Rỗng ⇒ mọi origin ngoài whitelist đều `Dangerous`**; danh sách rỗng không
+    /// bao giờ có nghĩa "cho phép tất cả". Đây cũng là nơi duy nhất mở ngoại lệ
+    /// loopback (xem `beanagent-browser::guard`).
+    pub allowed_origins: Vec<String>,
+    /// Chạy Chrome không có cửa sổ (mặc định `true`).
+    pub headless: bool,
+    /// Idle bao lâu thì tự tắt Chrome để giải phóng bộ nhớ (giây). `0` ⇒ không tự
+    /// tắt, chỉ tắt khi Bean dừng.
+    pub idle_timeout_seconds: u32,
+    /// Số giây chờ tối đa cho một lần khởi động Chrome.
+    pub launch_timeout_seconds: u64,
+    /// Kích thước ảnh tối đa cho một lần chụp (byte). Ảnh vượt ngưỡng bị từ chối
+    /// kèm thông điệp rõ ràng thay vì âm thầm làm lịch sử phình.
+    pub max_image_bytes: usize,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            executable_path: String::new(),
+            allowed_origins: Vec::new(),
+            headless: true,
+            idle_timeout_seconds: 300,
+            launch_timeout_seconds: 30,
+            max_image_bytes: 4 * 1024 * 1024,
+        }
+    }
+}
+
 /// Cấu hình gốc của BeanAgent (`BeanAgent.toml`).
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -876,6 +966,8 @@ pub struct Config {
     pub infra_scope: Vec<ScanScopeEntry>,
     /// `[security_scan]` — domain quét bảo mật (M23).
     pub security_scan: SecurityScanConfig,
+    /// `[browser]` — tool browser nội bộ, nói thẳng CDP (M26).
+    pub browser: BrowserConfig,
     /// `[marketing]` — domain marketing (M24).
     pub marketing: MarketingConfig,
     /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
@@ -989,6 +1081,9 @@ impl Config {
         self.validate_infra_scope()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
+        self.validate_browser()?;
+        self.validate_mcp_servers()?;
+        self.validate_mcp_servers()?;
         self.validate_mcp_server()?;
         self.validate_paths()
     }
@@ -1169,6 +1264,38 @@ impl Config {
         Ok(())
     }
 
+    /// Kiểm tra hai trường mới của `[[mcp_servers]]` — phía Bean là MCP **client**
+    /// (mục 16): `call_timeout_seconds` và `inherit_env`.
+    ///
+    /// Không lặp lại kiểm tra `name`/`command` — [`Self::validate_web_and_channels`]
+    /// đã làm việc đó (và với thông điệp riêng). Ở đây chỉ những gì **chỉ** trường mới
+    /// mới làm hỏng được.
+    ///
+    /// Chặn ở **tầng config** (nguyên tắc đã dùng cho `forbid_tags` M21.6) vì cả hai
+    /// lỗi dưới đây đều im lặng nếu để tới tầng spawn:
+    ///
+    /// * `call_timeout_seconds = 0` ⇒ `Duration::ZERO` ⇒ **mọi** tool call bị treo tức
+    ///   thì và trả về lỗi, model sẽ tưởng server hỏng rồi thử lại vô tận;
+    /// * tên biến sai trong `inherit_env` ⇒ `Command::env` **panic** — tệ hơn lỗi
+    ///   (`unwrap` trên dữ liệu bên ngoài, mục 22.11).
+    fn validate_mcp_servers(&self) -> Result<(), ConfigError> {
+        for server in &self.mcp_servers {
+            if let Some(seconds) = server.call_timeout_seconds
+                && !(1..=MAX_MCP_CALL_TIMEOUT_SECONDS).contains(&seconds)
+            {
+                return Err(invalid(format!(
+                    "[[mcp_servers]].call_timeout_seconds của `{}` = {seconds} nằm ngoài 1..={MAX_MCP_CALL_TIMEOUT_SECONDS}; \
+                     0 sẽ khiến mọi tool call bị treo tức thì",
+                    server.name
+                )));
+            }
+            for variable in &server.inherit_env {
+                validate_inherited_env_name(&server.name, variable)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Kiểm tra `[[mcp_clients]]` + `[mcp_server]` (M25).
     ///
     /// Chặn ở **tầng config** những cấu hình làm MCP server vô nghĩa hoặc không an toàn, để
@@ -1296,6 +1423,52 @@ impl Config {
                     "[billing].api_key_env không được trùng với {field} (`{env}`): credential đọc billing phải RIÊNG, quyền tối thiểu chỉ đọc billing"
                 )));
             }
+        }
+        Ok(())
+    }
+
+    /// Kiểm tra `[browser]` (M26).
+    ///
+    /// Chặn ở **tầng config** (cùng nguyên tắc `forbid_tags` M21.6) vì ba lỗi dưới
+    /// đây đều **im lặng** hoặc nguy hiểm nếu để tới tầng chạy:
+    ///
+    /// * mẫu origin sai cú pháp ⇒ bị bỏ qua lúc parse ⇒ người dùng tưởng đã mở
+    ///   whitelist mà thật ra mọi origin vẫn `Dangerous` (lỗi "thắt chặt", ít nguy
+    ///   hiểm hơn, nhưng im lặng thì không ai biết phải sửa);
+    /// * wildcard ở label không đầu tiên (`https://dev.*.internal`) ⇒ **không** có
+    ///   nghĩa an toàn nào, và dễ khiến người dùng tưởng nó hoạt động;
+    /// * `max_image_bytes` bằng 0 ⇒ **mọi** lần chụp đều thất bại, model không hiểu
+    ///   vì sao.
+    fn validate_browser(&self) -> Result<(), ConfigError> {
+        let browser = &self.browser;
+        if !browser.enabled {
+            // Tắt thì không cần validate whitelist: người dùng có thể để sẵn mẫu
+            // đang viết rồi bật sau. Việc sửa đường dẫn Chrome cũng vậy.
+            return Ok(());
+        }
+        for pattern in &browser.allowed_origins {
+            if let Err(reason) = validate_origin_pattern(pattern) {
+                return Err(invalid(format!(
+                    "[browser].allowed_origins chứa mẫu không hợp lệ `{pattern}`: {reason}"
+                )));
+            }
+        }
+        if browser.executable_path.chars().count() > 4_096 {
+            return Err(invalid(
+                "[browser].executable_path quá dài; đây là đường dẫn, không phải nội dung",
+            ));
+        }
+        if browser.max_image_bytes == 0 {
+            return Err(invalid(
+                "[browser].max_image_bytes = 0 khiến mọi lần chụp đều thất bại; \
+                 đặt trần thực tế (mặc định 4 MiB)",
+            ));
+        }
+        if browser.launch_timeout_seconds == 0 {
+            return Err(invalid(
+                "[browser].launch_timeout_seconds = 0 khiến Chrome không có thời gian \
+                 khởi động",
+            ));
         }
         Ok(())
     }
@@ -1836,6 +2009,110 @@ pub fn validate_scope_value(kind: ScanTargetKind, value: &str) -> Result<(), &'s
 /// Tạo lỗi cấu hình sai.
 fn invalid(message: impl Into<String>) -> ConfigError {
     ConfigError::Invalid(message.into())
+}
+
+/// Kiểm tra một mẫu trong `[browser].allowed_origins` (M26).
+///
+/// Cùng luật với [`beanagent-browser`](crate::config) nhưng **viết lại ở đây**,
+/// không import từ crate browser: chiều phụ thuộc phải là `types` → `browser`, không
+/// bao giờ ngược lại (nếu không, mọi thứ dùng `Config` cũng phải kéo `chromiumoxide`
+/// vào). Hai bản phải giữ cùng quy tắc — test ở `beanagent-browser` chốt hành vi thật.
+fn validate_origin_pattern(raw: &str) -> Result<(), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("mẫu rỗng".into());
+    }
+    let Some((scheme, rest)) = trimmed.split_once("://") else {
+        return Err("thiếu scheme, phải có dạng `scheme://host[:port]`".into());
+    };
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return Err(format!("scheme `{scheme}` không được phép"));
+    }
+    if rest.contains('/') {
+        return Err("origin không được chứa đường dẫn".into());
+    }
+    if rest.contains('@') {
+        return Err("origin không được chứa credential".into());
+    }
+    let (host, port) = match rest.rsplit_once(':') {
+        Some((host, port)) => {
+            let parsed: u16 = port
+                .parse()
+                .map_err(|_| format!("port `{port}` không phải số"))?;
+            if parsed == 0 {
+                return Err("port 0 không hợp lệ".into());
+            }
+            (host, parsed)
+        }
+        None => (rest, 0),
+    };
+    let host = host.to_ascii_lowercase();
+    if host.is_empty() {
+        return Err("thiếu host".into());
+    }
+    if host.starts_with('*') && !host.starts_with("*.") {
+        return Err("wildcard chỉ được dùng dạng `*.host`".into());
+    }
+    if host.contains('*') && !host.starts_with("*.") {
+        return Err(format!(
+            "wildcard chỉ được dùng ở label đầu tiên, không phải `{host}`"
+        ));
+    }
+    if host.matches('*').count() > 1 {
+        return Err("chỉ nhận tối đa một wildcard".into());
+    }
+    if host.trim_start_matches("*.").is_empty() {
+        return Err("mẫu wildcard `*` trần quá rộng; hãy ghi domain cụ thể".into());
+    }
+    let _ = port;
+    if !host.starts_with('*') {
+        let bare = host.trim_matches(|c| c == '[' || c == ']');
+        let looks_like_ip = bare.parse::<std::net::IpAddr>().is_ok();
+        if !looks_like_ip
+            && !bare.split('.').all(|label| {
+                !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            })
+        {
+            return Err(format!("host `{host}` không phải tên miền hợp lệ"));
+        }
+    }
+    Ok(())
+}
+
+/// Kiểm tra một tên biến trong `[[mcp_servers]].inherit_env`.
+///
+/// `Command::env` **panic** khi tên rỗng hoặc chứa `=`/NUL, và im lặng bỏ qua tên có
+/// ký tự lạ trên một số nền tảng. Vì đây là dữ liệu từ file cấu hình của người dùng,
+/// phải chết sớm ở tầng config với thông điệp chỉ đường thay vì sập tiến trình.
+///
+/// Chỉ chấp nhận `[A-Za-z_][A-Za-z0-9_]*` — đúng POSIX, và là tập con của những gì
+/// mọi hệ điều hành Bean chạy trên chấp nhận cho tên biến.
+fn validate_inherited_env_name(server: &str, variable: &str) -> Result<(), ConfigError> {
+    let name = variable.trim();
+    if name.is_empty() {
+        return Err(invalid(format!(
+            "[[mcp_servers]].inherit_env của `{server}` có tên biến rỗng"
+        )));
+    }
+    if name.contains('=') || name.contains('\0') {
+        return Err(invalid(format!(
+            "[[mcp_servers]].inherit_env của `{server}` có tên `{name}` chứa '=' hoặc NUL — không phải tên biến hợp lệ"
+        )));
+    }
+    if !name
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err(invalid(format!(
+            "[[mcp_servers]].inherit_env của `{server}` có tên `{name}` chứa ký tự ngoài [A-Za-z0-9_]"
+        )));
+    }
+    if name.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        return Err(invalid(format!(
+            "[[mcp_servers]].inherit_env của `{server}` có tên `{name}` bắt đầu bằng chữ số"
+        )));
+    }
+    Ok(())
 }
 
 /// Kiểm tra URL `http(s)` ở mức tối thiểu (M1 chưa cần crate `url`).

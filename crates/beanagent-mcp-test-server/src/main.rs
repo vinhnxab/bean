@@ -97,6 +97,16 @@ async fn handle_message(message: Value) -> Result<Option<Value>, Box<dyn Error>>
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
+                    "name": "env_echo",
+                    "description": "Trả về giá trị biến môi trường được yêu cầu (kiểm tra inherit_env)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"],
+                        "additionalProperties": false
+                    }
+                },
+                {
                     "name": "query_logs",
                     "description": "Mô phỏng truy vấn log của SIEM (chỉ đọc)",
                     "inputSchema": {
@@ -173,6 +183,19 @@ async fn call_tool(params: &Value) -> Result<Value, Box<dyn Error>> {
             true,
         ),
         "slow" => ("slow đã trả lời".to_string(), false),
+        // Tool kiểm tra `inherit_env`: đọc env **của tiến trình con** sau `env_clear()`
+        // nên chính là bằng chứng biến có thật sự tới nơi hay không.
+        "env_echo" => {
+            let name = params
+                .get("arguments")
+                .and_then(|arguments| arguments.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            (
+                std::env::var(name).unwrap_or_else(|_| "UNSET".to_string()),
+                false,
+            )
+        }
         // M22: hai tool chỉ đọc mô phỏng SIEM/CVE. Nội dung cố chứa chuỗi giống
         // chỉ dẫn injection để test chứng minh kết quả MCP luôn được bọc untrusted.
         "query_logs" => {

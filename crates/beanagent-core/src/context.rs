@@ -24,6 +24,33 @@ use crate::store::{Store, StoreError};
 pub const MAX_MEMORY_FILE_CHARS: usize = 4_000;
 /// Ước lượng token khi provider không có API đếm: `chars / 4` (mục 8.2).
 const CHARS_PER_TOKEN: usize = 4;
+
+/// Định phí token cố định cho **một khối ảnh** (M26).
+///
+/// # Vì sao KHÔNG dùng `chars / 4` cho ảnh
+///
+/// Công thức `chars/4` ước lượng **văn bản**. Base64 không phải văn bản: một ảnh
+/// PNG 200 KB thành ~270.000 ký tự base64, và `chars/4` sẽ cho ~67.500 token — gấp
+/// hơn 40 lần chi phí thật (model vision tính theo số patch ảnh, không theo byte).
+/// Dùng công thức đó thì một lần chụp màn hình sẽ tự ý loại hết lịch sử của lượt đó.
+///
+/// Vì vậy ảnh có **định phí riêng, cố định**: không phụ thuộc kích thước ảnh, không
+/// phụ thuộc base64 dài bao nhiêu, và không cần biết model nào đang chạy. Con số
+/// 1.600 token là ước lượng cho ảnh viewport ở mức chi tiết tiêu chuẩn.
+///
+/// Hệ quả có chủ đích: ảnh **rẻ hơn** văn bản cùng dung lượng, nên `trim_history`
+/// loại ảnh cũ trước khi loại lời thoại — đúng thứ tự ưu tiên khi ngân sách kẹt.
+pub const IMAGE_BUDGET_TOKENS: u32 = 1_600;
+
+/// Token mà một message chiếm trong ngân sách context (M26: có tính cả ảnh).
+#[must_use]
+pub fn message_token_cost(message: &Message) -> usize {
+    let text_tokens = message.text_for_search().chars().count() / CHARS_PER_TOKEN;
+    let image_tokens = message.image.as_ref().map_or(0, |_| {
+        usize::try_from(IMAGE_BUDGET_TOKENS).unwrap_or(usize::MAX)
+    });
+    text_tokens.saturating_add(image_tokens)
+}
 /// Tên file bộ nhớ do agent/người dùng sửa (mục 8.1, 8.4).
 pub const MEMORY_FILE: &str = "MEMORY.md";
 /// File mô tả người dùng.
@@ -164,30 +191,31 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
-/// Ước lượng độ dài (ký tự) mà một message chiếm trong context.
-fn message_cost(message: &Message) -> usize {
-    message.text_for_search().chars().count()
-}
-
 /// Chọn các message gần nhất vừa ngân sách token (mục 8.2 điểm 3).
+///
+/// `pub` để test tích hợp (`tests/image_budget.rs`) chứng minh ảnh không bị tính
+/// theo `chars/4` — hành vi này không thể kiểm chứng từ unit test bên trong crate.
 ///
 /// * Message **mới nhất luôn được giữ**, kể cả khi một mình nó đã vượt ngân sách.
 /// * Điểm cắt lùi thêm nếu cần để không tách cặp `assistant(tool_calls)`/`tool`
 ///   ([`extend_start_backwards`]) — có thể vượt ngân sách chút ít, an toàn hơn là hỏng
 ///   cặp tool và bị provider trả 400.
-fn trim_history(history: &[Message], budget_tokens: u32) -> Vec<Message> {
+///
+/// M26: ngân sách tính bằng **token** qua [`message_token_cost`] thay vì số ký tự
+/// thô, để ảnh dùng định phí riêng thay vì bị tính theo `chars/4` của base64.
+pub fn trim_history(history: &[Message], budget_tokens: u32) -> Vec<Message> {
     if history.is_empty() {
         return Vec::new();
     }
-    let budget_chars = (budget_tokens as usize).saturating_mul(CHARS_PER_TOKEN);
+    let budget = usize::try_from(budget_tokens).unwrap_or(usize::MAX);
     let mut used = 0usize;
     let mut keep = 0usize;
     for message in history.iter().rev() {
-        let cost = message_cost(message);
-        if keep > 0 && used + cost > budget_chars {
+        let cost = message_token_cost(message);
+        if keep > 0 && used.saturating_add(cost) > budget {
             break;
         }
-        used += cost;
+        used = used.saturating_add(cost);
         keep += 1;
     }
     let start = extend_start_backwards(history, keep);

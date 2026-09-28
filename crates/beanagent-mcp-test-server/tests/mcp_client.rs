@@ -44,6 +44,8 @@ fn server_config_with_tags(
         env: BTreeMap::new(),
         trust,
         tool_tags: tool_tags.iter().map(|tag| (*tag).to_string()).collect(),
+        call_timeout_seconds: None,
+        inherit_env: Vec::new(),
     }
 }
 
@@ -128,8 +130,9 @@ async fn agent_discovers_calls_and_wraps_real_stdio_mcp_tool() {
         .register_server(&server_config(&[], false), &mut registry, test_timeouts())
         .await
         .unwrap();
-    // 5 tool: echo, report_error, slow (M14) + query_logs, cve_lookup (M22).
-    assert_eq!(count, 5);
+    // 6 tool: echo, report_error, slow (M14) + query_logs, cve_lookup (M22) + env_echo
+    // (kiểm tra `inherit_env`).
+    assert_eq!(count, 6);
 
     let tool = registry.get("mcp__fixture__echo").unwrap();
     let spec = tool.spec();
@@ -351,6 +354,156 @@ async fn invalid_process_env_is_rejected_without_panicking() {
     runtime.close().await;
 }
 
+/// Đọc một biến chắc chắn tồn tại trong môi trường test.
+///
+/// Dùng biến **đã có sẵn** (`HOME`/`PATH`) thay vì `env::set_var` vì crate này
+/// `forbid(unsafe_code)`, còn `std::env::set_var` là `unsafe` từ Rust 2024. Cách này
+/// cũng sát thực tế hơn: `inherit_env` sinh ra để truyền đúng những biến này.
+fn existing_env_var() -> Option<(String, String)> {
+    ["HOME", "PATH", "USER", "LANG"].iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .map(|value| ((*name).to_string(), value))
+    })
+}
+
+/// [`ToolCtx`] tiện dụng cho các test chỉ cần gọi tool, không cần `io`.
+fn test_ctx(registry: &ToolRegistry, session: i64) -> ToolCtx {
+    ToolCtx::for_project(
+        registry.workspace().unwrap(),
+        SessionId::new(session),
+        CancellationToken::new(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+}
+
+#[tokio::test]
+async fn inherit_env_passes_listed_variable_and_keeps_others_hidden() {
+    let Some((name, value)) = existing_env_var() else {
+        // Môi trường test không có biến nào để kế thừa — không có gì để chứng minh.
+        return;
+    };
+    let (_dir, workspace) = workspace();
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    let mut config = server_config(&[], false);
+    config.inherit_env = vec![name.clone()];
+    let mut runtime = McpRuntime::default();
+    runtime
+        .register_server(&config, &mut registry, test_timeouts())
+        .await
+        .unwrap();
+
+    let ctx = test_ctx(&registry, 11);
+    let tool = registry.get("mcp__fixture__env_echo").unwrap();
+    let output = tool
+        .call(&ctx, serde_json::json!({ "name": name }))
+        .await
+        .unwrap();
+    assert!(
+        output.contains(&value),
+        "kế thừa `{name}` phải thấy giá trị thật; nhận: {output}"
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn env_is_still_cleared_for_variables_not_listed() {
+    // Bổ sung cho test trên: `inherit_env` phải là **allowlist**, không phải cờ bật
+    // `env_clear`. Đây là bất biến an toàn của mục 15.6.
+    let Some((name, value)) = existing_env_var() else {
+        return;
+    };
+    let (_dir, workspace) = workspace();
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    // Không khai báo `inherit_env` ⇒ phải không thấy biến nào của host.
+    let config = server_config(&[], false);
+    let mut runtime = McpRuntime::default();
+    runtime
+        .register_server(&config, &mut registry, test_timeouts())
+        .await
+        .unwrap();
+
+    let ctx = test_ctx(&registry, 12);
+    let tool = registry.get("mcp__fixture__env_echo").unwrap();
+    let output = tool
+        .call(&ctx, serde_json::json!({ "name": name }))
+        .await
+        .unwrap();
+    assert!(
+        !output.contains(&value) && output.contains("UNSET"),
+        "không khai báo inherit_env thì `{name}` phải bị che; nhận: {output}"
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn explicit_env_wins_over_inherited_value() {
+    // `env` là giá trị chủ động đặt trong file cấu hình; môi trường tiến trình không được
+    // âm thầm ghi đè nó.
+    let Some((name, _)) = existing_env_var() else {
+        return;
+    };
+    let (_dir, workspace) = workspace();
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    let mut config = server_config(&[], false);
+    config.inherit_env = vec![name.clone()];
+    config
+        .env
+        .insert(name.clone(), "gia-tri-tu-config".to_string());
+    let mut runtime = McpRuntime::default();
+    runtime
+        .register_server(&config, &mut registry, test_timeouts())
+        .await
+        .unwrap();
+
+    let ctx = test_ctx(&registry, 13);
+    let tool = registry.get("mcp__fixture__env_echo").unwrap();
+    let output = tool
+        .call(&ctx, serde_json::json!({ "name": name }))
+        .await
+        .unwrap();
+    assert!(
+        output.contains("gia-tri-tu-config"),
+        "env tường minh phải thắng inherit_env; nhận: {output}"
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn per_server_call_timeout_overrides_the_shared_default() {
+    // Tool `slow` của fixture ngủ 30s. Timeout dùng chung trong test là 200ms; server
+    // này khai báo 1s ⇒ phải chờ ~1s chứ không phải fail ngay, chứng minh ghi đè có
+    // hiệu lực chứ không phải vô tình dùng nhầm giá trị nào đó.
+    let (_dir, workspace) = workspace();
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    let mut config = server_config(&[], false);
+    config.call_timeout_seconds = Some(1);
+    let mut runtime = McpRuntime::default();
+    runtime
+        .register_server(&config, &mut registry, test_timeouts())
+        .await
+        .unwrap();
+
+    let ctx = test_ctx(&registry, 14);
+    let tool = registry.get("mcp__fixture__slow").unwrap();
+    let started = std::time::Instant::now();
+    let error = tool
+        .call(&ctx, serde_json::json!({}))
+        .await
+        .expect_err("tool slow 30s phải bị timeout");
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(900),
+        "phải chờ theo call_timeout_seconds=1s, mới chỉ {elapsed:?}"
+    );
+    assert!(elapsed < Duration::from_secs(5), "chờ quá lâu: {elapsed:?}");
+    assert!(
+        error.to_string().contains("1000 ms"),
+        "thông điệp lỗi phải nêu timeout đã áp dụng: {error}"
+    );
+    runtime.close().await;
+}
+
 // ---------------------------------------------------------------------------
 // M22 — Monitor agent (tag `infra-read`) qua cơ chế MCP sẵn có
 // ---------------------------------------------------------------------------
@@ -400,7 +553,10 @@ async fn mcp_server_tags_gate_tools_per_role() {
         )
         .await
         .unwrap();
-    assert_eq!(count, 5, "echo/report_error/slow/query_logs/cve_lookup");
+    assert_eq!(
+        count, 6,
+        "echo/report_error/slow/query_logs/cve_lookup/env_echo"
+    );
 
     let config = monitor_config();
     let monitor = config.permissions_for("cli:monitor");

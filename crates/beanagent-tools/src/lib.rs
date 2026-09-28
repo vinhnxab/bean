@@ -10,6 +10,8 @@
 //!   Tool `run_shell` + sandbox + policy/audit cũng nằm ở `beanagent-security`.
 //! * **M7**: `web_fetch`, `web_search` (chống SSRF, bọc `<untrusted_content>`).
 //! * **M14**: `mcp__<server>__<tool>` qua `rmcp`.
+//! * **M26**: [`ToolOutput`] + [`Tool::call_rich`] — tool trả **ảnh** (`browser_screenshot`)
+//!   mà **không** phải đổi chữ ký `call` của 25+ tool cũ (xem `docs/decisions.md` D26.1).
 //!
 //! Quy ước chung:
 //! * `Risk` được định nghĩa ở `beanagent-types` (D5.9) và re-export ở đây để mọi crate dùng
@@ -30,12 +32,12 @@ pub mod typed;
 pub mod untrusted;
 pub mod workspace;
 
-pub use beanagent_types::{Risk, ToolSpec};
+pub use beanagent_types::{ImageBlock, Risk, ToolSpec};
 pub use ctx::{AlertSink, ToolCtx};
 pub use error::ToolError;
 pub use registry::ToolRegistry;
 pub use text::{compile_regex, strip_terminal_escapes, truncate_chars};
-pub use tool::Tool;
+pub use tool::{Tool, ToolOutput};
 pub use typed::{TypedTool, deserialize_params, typed_spec};
 pub use untrusted::{
     CLOSE_TAG as UNTRUSTED_CLOSE_TAG, MAX_WRAPPED_OUTPUT_CHARS, OPEN_TAG as UNTRUSTED_OPEN_TAG,

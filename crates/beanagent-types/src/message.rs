@@ -56,6 +56,60 @@ impl ToolCall {
     }
 }
 
+/// Một khối **ảnh** đi kèm message (M26 — tool `browser_screenshot`).
+///
+/// Base64 **chỉ** tồn tại ở hai chỗ: trong `content_json` của SQLite (để phát lại lịch
+/// sử cho model ở lượt sau) và trong response REST tới UI. Nó **không** bao giờ đi vào
+/// `audit.jsonl` — audit chỉ ghi [`Self::sha256`] (mục 15.8, `docs/known-issues.md`).
+///
+/// `media_type` là MIME do **Chromium trả về** (`Page.captureScreenshot.format`), không
+/// phải chuỗi tự do của model: hàm dựng bị chặn ở tập MIME được phép.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ImageBlock {
+    /// MIME của ảnh, ví dụ `image/png`.
+    pub media_type: String,
+    /// Ảnh đã mã hoá base64 (không có padding `=` trong JSON — xem `base64` crate).
+    pub data: String,
+    /// SHA-256 (hex) của **byte ảnh gốc**, dùng làm tham chiếu trong audit.
+    pub sha256: String,
+}
+
+/// MIME ảnh được phép đưa tới provider.
+///
+/// **Fail-closed**: chỉ những gì `Page.captureScreenshot` thật sự trả về. Một
+/// `media_type` lạ (SVG, HTML) sẽ bị provider từ chối, hoặc tệ hơn là bị diễn giải
+/// sai — nên chặn ngay ở tầng dựng khối thay vì để lọt xuống tầng HTTP.
+pub const ALLOWED_IMAGE_MEDIA_TYPES: &[&str] = &["image/png", "image/jpeg", "image/webp"];
+
+impl ImageBlock {
+    /// Dựng khối ảnh, **từ chối** `media_type` nằm ngoài [`ALLOWED_IMAGE_MEDIA_TYPES`].
+    ///
+    /// `data` phải là base64 đã mã hoá và `sha256` là hex của **byte gốc** (không phải
+    /// của chuỗi base64) — như vậy hai lần chụp cùng một trang cho cùng một tham chiếu
+    /// trong audit, và việc kiểm chứng lại không cần giải mã.
+    ///
+    /// # Errors
+    /// `Err` với lý do nếu `media_type` không được phép.
+    pub fn new(
+        media_type: impl Into<String>,
+        data: impl Into<String>,
+        sha256: impl Into<String>,
+    ) -> Result<Self, String> {
+        let media_type = media_type.into();
+        if !ALLOWED_IMAGE_MEDIA_TYPES.contains(&media_type.as_str()) {
+            return Err(format!(
+                "media_type `{media_type}` không được phép; chỉ nhận: {}",
+                ALLOWED_IMAGE_MEDIA_TYPES.join(", ")
+            ));
+        }
+        Ok(Self {
+            media_type,
+            data: data.into(),
+            sha256: sha256.into(),
+        })
+    }
+}
+
 /// Một message trong hội thoại.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Message {
@@ -69,6 +123,13 @@ pub struct Message {
     /// Chỉ có ý nghĩa với `Tool`: đây là lỗi (để model đọc và tự sửa, agents.md mục 6).
     #[serde(default)]
     pub is_error: bool,
+    /// Ảnh đi kèm, chỉ có ở kết quả tool trả ảnh (M26).
+    ///
+    /// `skip_serializing_if` giữ cho **mọi message cũ không có trường này** serialize
+    /// y hệt trước đây — lịch sử đã ghi vẫn đọc được và `git diff` kiểu TS không
+    /// đổi. `#[serde(default)]` là chiều ngược: message không có ảnh vẫn deserialize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<ImageBlock>,
 }
 
 impl Message {
@@ -81,6 +142,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             is_error: false,
+            image: None,
         }
     }
 
@@ -93,6 +155,7 @@ impl Message {
             tool_calls,
             tool_call_id: None,
             is_error: false,
+            image: None,
         }
     }
 
@@ -105,6 +168,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
             is_error: false,
+            image: None,
         }
     }
 
@@ -114,6 +178,23 @@ impl Message {
         Self {
             is_error: true,
             ..Self::tool(tool_call_id, text)
+        }
+    }
+
+    /// Kết quả tool **có kèm ảnh** (M26 — `browser_screenshot`).
+    ///
+    /// `caption` là dòng mô tả ngắn đi cùng ảnh: provider nào cũng cần ít nhất một
+    /// block text để model biết đang nhìn cái gì, và nó là thứ được tính vào ngân sách
+    /// token theo công thức `chars/4` sẵn có (ảnh thì dùng định phí riêng).
+    #[must_use]
+    pub fn tool_with_image(
+        tool_call_id: impl Into<String>,
+        caption: impl Into<String>,
+        image: ImageBlock,
+    ) -> Self {
+        Self {
+            image: Some(image),
+            ..Self::tool(tool_call_id, caption)
         }
     }
 
