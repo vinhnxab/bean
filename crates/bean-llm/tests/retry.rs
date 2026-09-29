@@ -249,6 +249,7 @@ fn debug_never_contains_api_key() {
         "m",
         Some(SecretString::from("KEY-OPENAI-BI-MAT-1234abcd")),
         None,
+        "OPENAI_API_KEY",
     )
     .unwrap();
     let rendered = format!("{provider:?}");

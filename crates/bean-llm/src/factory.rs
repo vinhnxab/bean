@@ -20,6 +20,19 @@ use crate::openai_compat::OpenAiCompatProvider;
 /// * `openai_compat`: key tuỳ chọn khi `base_url` được đặt (Ollama/vLLM tự host);
 ///   thiếu key mà không có `base_url` là lỗi (mặc định trỏ tới OpenAI chính thức).
 ///
+/// # Vì sao `openai_compat` không kiểm tra key lúc dựng
+/// Heuristic "có `base_url` thì key là tuỳ chọn" là cách duy nhất phân biệt server
+/// tự host với server đám mây mà **không** thêm trường cấu hình mới — nhưng nó
+/// không phân biệt được: Ollama cũng có `base_url` (`http://localhost:11434/v1`).
+/// Nếu siết thành "luôn cần key", người dùng Ollama mất đường vào mà không có
+/// cách nào tắt.
+///
+/// Nên thay vì đoán lúc khởi động, ta kiểm tra lúc **có bằng chứng**: request đi ra
+/// mà không kèm `Authorization` và nhận 401/403 thì chắc chắn là thiếu key, và lúc
+/// đó báo đúng tên biến cần đặt. Ngược lại (đã gửi key mà vẫn 401) thì giữ
+/// nguyên lỗi của hãng, vì khi đó là key sai/hết hạn — bảo người dùng export lại
+/// một key vốn đã có chỉ là dẫn họ đi sai.
+///
 /// # Errors
 /// [`LlmError::Config`] khi provider lạ, thiếu key, hoặc không dựng được HTTP client.
 pub fn build_provider(
@@ -41,8 +54,12 @@ pub fn build_provider(
             Ok(Arc::new(provider))
         }
         LlmProviderKind::OpenAiCompat => {
-            let provider =
-                OpenAiCompatProvider::new(config.model.clone(), key, config.base_url.as_deref())?;
+            let provider = OpenAiCompatProvider::new(
+                config.model.clone(),
+                key,
+                config.base_url.as_deref(),
+                &config.api_key_env,
+            )?;
             Ok(Arc::new(provider))
         }
     }

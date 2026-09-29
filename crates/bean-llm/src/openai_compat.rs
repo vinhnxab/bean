@@ -36,6 +36,11 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub struct OpenAiCompatProvider {
     endpoint: String,
     api_key: Option<SecretString>,
+    /// **Tên** biến môi trường khai báo key (giá trị `llm.api_key_env`), KHÔNG
+    /// phải key. Giữ lại để khi provider trả 401/403 mà ta vốn không gửi header
+    /// `Authorization`, lỗi có thể chỉ đúng thứ cần làm thay vì lặp lại thông
+    /// báo mập mờ của hãng.
+    api_key_env: String,
     model: String,
     client: reqwest::Client,
 }
@@ -56,12 +61,16 @@ impl OpenAiCompatProvider {
     /// * `api_key` rỗng được coi như không có key.
     /// * Không key mà cũng không `base_url` → mặc định là OpenAI chính thức → lỗi.
     ///
+    /// * `api_key_env` là **tên** biến môi trường, chỉ dùng để báo lỗi cho dễ
+    ///   hiểu; không phải giá trị key.
+    ///
     /// # Errors
     /// [`LlmError::Config`] khi thiếu key cho endpoint chính thức hoặc client dựng thất bại.
     pub fn new(
         model: impl Into<String>,
         api_key: Option<SecretString>,
         base_url: Option<&str>,
+        api_key_env: &str,
     ) -> Result<Self, LlmError> {
         let key = api_key.filter(|k| !k.expose_secret().is_empty());
         if key.is_none() && base_url.is_none() {
@@ -74,6 +83,7 @@ impl OpenAiCompatProvider {
         Ok(Self {
             endpoint: endpoint_url(base_url),
             api_key: key,
+            api_key_env: api_key_env.to_string(),
             model: model.into(),
             client: http::build_client(http::DEFAULT_TIMEOUT)?,
         })
@@ -83,10 +93,12 @@ impl OpenAiCompatProvider {
         let endpoint = self.endpoint.clone();
         let client = self.client.clone();
         let api_key = self.api_key.clone();
+        let api_key_env = self.api_key_env.clone();
         retry::retry_with_backoff(retry::BASE_DELAY, retry::MAX_RETRIES, move || {
             let body = body.clone();
             let api_key = api_key.clone();
             let endpoint = endpoint.clone();
+            let api_key_env = api_key_env.clone();
             let client = client.clone();
             async move {
                 let mut request = client.post(&endpoint);
@@ -108,16 +120,54 @@ impl OpenAiCompatProvider {
                         .text()
                         .await
                         .map_err(|error| LlmError::Transport(error.to_string()))?;
-                    return Err(LlmError::HttpStatus {
-                        status: status.as_u16(),
-                        body: error_body(&text),
-                    });
+                    return Err(status_error(
+                        &endpoint,
+                        api_key.is_none(),
+                        &api_key_env,
+                        status.as_u16(),
+                        error_body(&text),
+                    ));
                 }
                 Ok(response)
             }
         })
         .await
     }
+}
+
+/// Dựng lỗi từ một response không thành công, ưu tiên thông báo **có thể hành
+/// động** khi chắc chắn là do thiếu key.
+///
+/// # Vì sao cần
+/// `openai_compat` cố ý cho phép không key — Ollama/vLLM tự host không xác thực.
+/// Nhưng nó không phân biệt được endpoint đám mây với endpoint tự host, vì **cả
+/// hai đều có `base_url`**. Hệ quả thật: quên `export` key thì hãng cung cấp trả
+/// câu mập mờ kiểu *"No cookie auth credentials found"*, và người dùng phải tự
+/// dịch từng chữ mới biết thiếu gì. Ở đây ta biết chính xác ta **không gửi**
+/// header `Authorization`, nên nói thẳng biến nào cần đặt.
+///
+/// # Vì sao chỉ đoán khi CHƯA có key
+/// Nếu đã gửi key mà vẫn 401 thì nguyên nhân là key sai/hết hạn — hoàn toàn khác,
+/// và khi đó giữ nguyên body của hãng là đúng. Đoán bừa "thiếu key" sẽ dẫn người
+/// dùng đi sai hướng lúc đáng lẽ họ chỉ cần tạo key mới.
+fn status_error(
+    endpoint: &str,
+    key_absent: bool,
+    api_key_env: &str,
+    status: u16,
+    body: String,
+) -> LlmError {
+    if key_absent && (status == 401 || status == 403) {
+        return LlmError::Config(format!(
+            "{endpoint} từ chối (HTTP {status}) và Bean KHÔNG gửi header `Authorization` vì \
+             biến môi trường `{env}` đang rỗng hoặc chưa được đặt. Hãy `export {env}=...` \
+             rồi khởi động lại Bean (tên biến lấy từ `llm.api_key_env` trong bean.toml). \
+             Nếu {endpoint} là server tự host không cần key thì bỏ qua thông báo này. \
+             Phản hồi của server: {body}",
+            env = api_key_env,
+        ));
+    }
+    LlmError::HttpStatus { status, body }
 }
 
 /// `{base}` + `/chat/completions`; nếu `base_url` đã trỏ thẳng tới `…/chat/completions`
@@ -150,11 +200,13 @@ impl LlmProvider for OpenAiCompatProvider {
         let endpoint = self.endpoint.clone();
         let client = self.client.clone();
         let api_key = self.api_key.clone();
+        let api_key_env = self.api_key_env.clone();
 
         retry::retry_with_backoff(retry::BASE_DELAY, retry::MAX_RETRIES, move || {
             let body = body.clone();
             let api_key = api_key.clone();
             let endpoint = endpoint.clone();
+            let api_key_env = api_key_env.clone();
             let client = client.clone();
             async move {
                 let mut request = client.post(&endpoint);
@@ -178,10 +230,13 @@ impl LlmProvider for OpenAiCompatProvider {
                     return Err(LlmError::RateLimited { retry_after });
                 }
                 if !status.is_success() {
-                    return Err(LlmError::HttpStatus {
-                        status: status.as_u16(),
-                        body: error_body(&text),
-                    });
+                    return Err(status_error(
+                        &endpoint,
+                        api_key.is_none(),
+                        &api_key_env,
+                        status.as_u16(),
+                        error_body(&text),
+                    ));
                 }
                 parse_response(&text)
             }

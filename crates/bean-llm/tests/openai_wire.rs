@@ -24,6 +24,7 @@ fn provider_for(server: &MockServer) -> OpenAiCompatProvider {
         "mo-hinh-test",
         Some(SecretString::from(API_KEY)),
         Some(&format!("{}/v1", server.uri())),
+        "OPENAI_API_KEY",
     )
     .unwrap()
 }
@@ -300,11 +301,95 @@ async fn http_error_extracts_error_message() {
 
 #[tokio::test]
 async fn no_api_key_and_no_base_url_is_config_error() {
-    let err = OpenAiCompatProvider::new("m", None, None).unwrap_err();
+    let err = OpenAiCompatProvider::new("m", None, None, "OPENAI_API_KEY").unwrap_err();
     assert!(matches!(err, LlmError::Config(_)), "{err:?}");
     // Key rỗng coi như không có key.
-    let err = OpenAiCompatProvider::new("m", Some(SecretString::from("")), None).unwrap_err();
+    let err = OpenAiCompatProvider::new("m", Some(SecretString::from("")), None, "OPENAI_API_KEY")
+        .unwrap_err();
     assert!(matches!(err, LlmError::Config(_)), "{err:?}");
+}
+
+/// Lỗi 401 khi Bean **không gửi** header `Authorization` phải nói thẳng tên biến
+/// cần đặt. Trước đây người dùng chỉ thấy câu mập mờ của hãng
+/// (*"No cookie auth credentials found"*) và phải tự dịch từng chữ.
+#[tokio::test]
+async fn unauthorized_without_key_names_the_env_var_to_set() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": { "message": "No cookie auth credentials found" }
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = OpenAiCompatProvider::new(
+        "m",
+        None,
+        Some(&format!("{}/v1", server.uri())),
+        "OPENROUTER_API_KEY",
+    )
+    .unwrap();
+    let messages = [Message::user("x")];
+
+    let err = provider.chat(request(&messages, &[])).await.unwrap_err();
+    let text = err.to_string();
+    assert!(matches!(err, LlmError::Config(_)), "{err:?}");
+    assert!(
+        text.contains("OPENROUTER_API_KEY"),
+        "phải nêu đúng tên biến cần đặt, nhận được: {text}"
+    );
+    // Giữ luôn phản hồi gốc của hãng: nó có thể là manh mối khi nguyên nhân
+    // không phải key.
+    assert!(text.contains("No cookie auth credentials"), "{text}");
+}
+
+/// Ngược lại: **đã gửi key** mà vẫn 401 thì nguyên nhân là key sai/hết hạn, KHÔNG
+/// phải thiếu key. Nếu ở đây cũng quy về "thiếu biến môi trường" thì Bean sẽ
+/// dẫn người dùng đi sai hướng — họ sẽ export lại một key vốn đã có.
+#[tokio::test]
+async fn unauthorized_with_key_keeps_vendor_error_instead_of_blaming_missing_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": { "message": "Key is expired" }
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = provider_for(&server);
+    let messages = [Message::user("x")];
+
+    let err = provider.chat(request(&messages, &[])).await.unwrap_err();
+    assert!(
+        matches!(err, LlmError::HttpStatus { status: 401, .. }),
+        "phải giữ dạng HttpStatus, nhận: {err:?}"
+    );
+    assert!(!err.to_string().contains("chưa được đặt"), "{err}");
+}
+
+/// 403 với cùng lý do: nhiều hãng trả 403 thay vì 401 khi thiếu xác thực.
+#[tokio::test]
+async fn forbidden_without_key_also_names_the_env_var() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({ "error": {} })))
+        .mount(&server)
+        .await;
+
+    let provider = OpenAiCompatProvider::new(
+        "m",
+        None,
+        Some(&format!("{}/v1", server.uri())),
+        "OPENROUTER_API_KEY",
+    )
+    .unwrap();
+    let messages = [Message::user("x")];
+
+    let err = provider.chat(request(&messages, &[])).await.unwrap_err();
+    assert!(err.to_string().contains("OPENROUTER_API_KEY"), "{err}");
 }
 
 #[tokio::test]
@@ -318,8 +403,13 @@ async fn no_api_key_with_base_url_sends_no_authorization() {
         .mount(&server)
         .await;
 
-    let provider =
-        OpenAiCompatProvider::new("m", None, Some(&format!("{}/v1", server.uri()))).unwrap();
+    let provider = OpenAiCompatProvider::new(
+        "m",
+        None,
+        Some(&format!("{}/v1", server.uri())),
+        "OPENAI_API_KEY",
+    )
+    .unwrap();
     let messages = [Message::user("x")];
     let resp = provider.chat(request(&messages, &[])).await.unwrap();
     assert_eq!(resp.text.as_deref(), Some("ok"));

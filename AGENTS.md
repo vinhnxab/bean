@@ -501,7 +501,13 @@ Quy tắc:
 8. **Audit**: bảng chỉ đọc, phân trang.
 9. **Trạng thái**: phiên bản, model, ngân sách token đã dùng, kênh đang chạy.
 
-Yêu cầu chung: giao diện tối/sáng theo hệ thống, **responsive** (dùng được trên điện thoại), truy cập bàn phím và `aria` cơ bản, hai ngôn ngữ `vi` (mặc định) và `en`, thời gian hiển thị theo múi giờ trình duyệt.
+Yêu cầu chung: giao diện **mặc định là tối** (đen + nâu đỏ), người dùng đổi sang sáng được bằng nút chuyển chủ đề — **KHÔNG** phụ thuộc cài đặt hệ thống. **responsive** (dùng được trên điện thoại), truy cập bàn phím và `aria` cơ bản, hai ngôn ngữ `vi` (mặc định) và `en`, thời gian hiển thị theo múi giờ trình duyệt.
+
+**Hệ màu và chủ đề (Token):**
+- Nền tối nằm ở `:root`, chủ đề sáng bật bằng class `.light` trên `<html>` (xem `web/src/index.css`).
+- Màu chủ đạo: **đen** (nền) + **nâu đỏ** (`--brand`). Phân biệt rõ: **hành động** (nút bấm, dòng đang chọn) dùng `--brand`; **trạng thái** (`--live` đang chạy, `--need` chờ duyệt, `--alert` nguy hiểm) dùng màu riêng, tách sắc khỏi thương hiệu.
+- Token phải khai báo trong **`@theme inline`**; đặt `--color-*` trong `:root` sẽ khiến Tailwind v4 **không sinh utility nào**, class có trong JSX mà không tồn tại trong CSS — lỗi này im lặng, TypeScript vẫn xanh.
+- Không viết màu Tailwind thô (`bg-slate-950`, `text-rose-600`) trong component: mọi màu phải đi qua token, nếu không đổi bảng màu sẽ là sửa tay hàng trăm chỗ.
 
 ### 12.2 Kiến trúc client
 
