@@ -3,13 +3,45 @@
 // - KHÔNG bật `dangerouslySetInnerHTML` hay tài nguyên ngoài trong test (mục 0.9).
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll } from "vitest";
+import { afterAll, afterEach, beforeAll, vi } from "vitest";
 
 import { testServer } from "@/test/server";
 
-beforeAll(() => testServer.listen({ onUnhandledRequest: "error" }));
+/**
+ * jsdom không có `navigator.clipboard`, mà component sao chép gọi
+ * `navigator.clipboard?.writeText(...)`. Nếu không mock, lệnh đó rơi vào
+ * `undefined` và test không phân biệt được "đã sao chép" với "hỏng".
+ *
+ * Dùng `stubGlobal` + khôi phục bằng `unstubAllGlobals` để không rò sang test
+ * khác trong cùng file.
+ */
+beforeAll(() => {
+  vi.stubGlobal("navigator", {
+    ...navigator,
+    clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
+});
+
+/**
+ * Radix (dropdown, dialog) khi đóng một lớp phủ sẽ đặt
+ * `document.body { pointer-events: none }` rồi **chỉ gỡ khi lớp phủ mở lại**.
+ * Nếu test kết thúc đúng lúc menu đang đóng, thuộc tính này còn sót lại trên
+ * `body` của jsdom — và mọi `user.click` ở test kế tiếp trong cùng file sẽ bị
+ * chặn. Triệu chứng rất đáng ngờ: test chạy đơn lẻ thì xanh, chạy cả file thì
+ * fail, và lỗi là "không tìm thấy phần tử" chứ không phải "bị chặn con trỏ".
+ *
+ * Dọn nó ở mọi test: đây là trạng thái do thư viện để lại, không phải trạng
+ * thái mà test nào cố ý dựng, nên xoá là đúng.
+ */
 afterEach(() => {
   cleanup();
+  document.body.style.removeProperty("pointer-events");
   testServer.resetHandlers();
 });
-afterAll(() => testServer.close());
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+  testServer.close();
+});
+
+beforeAll(() => testServer.listen({ onUnhandledRequest: "error" }));

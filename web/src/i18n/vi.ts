@@ -37,6 +37,9 @@ export const vi = {
   "common.error": "Đã xảy ra lỗi.",
   "common.save": "Lưu",
   "common.delete": "Xoá",
+  // --- Chủ đề giao diện -----------------------------------------------------
+  "theme.toLight": "Chuyển sang giao diện sáng",
+  "theme.toDark": "Chuyển sang giao diện tối",
   "auth.checking": "Đang kiểm tra phiên…",
   "login.title": "Đăng nhập Bean",
   "login.subtitle": "AI cá nhân của bạn, trên máy của bạn.",
@@ -74,6 +77,21 @@ export const vi = {
   "chat.sendError": "Không gửi được tin nhắn. Kiểm tra kết nối rồi thử lại.",
   "chat.enterHint": "Enter để gửi · Shift+Enter xuống dòng",
   "chat.invalidSession": "Phiên hội thoại không hợp lệ.",
+  // --- Màn hình chat: lời chào, gợi ý, thao tác khi rê chuột -----------------
+  // Bố cục rút từ Open WebUI: tin nhắn trải hết chiều ngang, thanh thao tác
+  // chỉ hiện khi rê (hoặc khi dùng bàn phím) — xem `components/chat/MessageRow`.
+  "chat.greeting": "Chào bạn",
+  "chat.emptyHint": "Mình có thể giúp gì hôm nay?",
+  "chat.suggestion.plan": "Hôm nay mình nên làm gì?",
+  "chat.suggestion.explore": "Khám phá thư mục workspace và giải thích cấu trúc",
+  "chat.suggestion.memory": "Bạn nhớ những gì về tôi?",
+  "chat.suggestion.summarize": "Tóm tắt những gì đã diễn ra trong hội thoại này",
+  "chat.suggestionsLabel": "Gợi ý câu lệnh",
+  "message.you": "Bạn",
+  "message.copy": "Sao chép tin nhắn",
+  "message.copied": "Đã sao chép nội dung",
+  "chat.scrollToBottom": "Cuộn xuống cuối",
+  "chat.newMessages": "Có tin nhắn mới",
   "chat.logout": "Đăng xuất",
   "sessions.archived": "Hội thoại đã lưu trữ",
   "sessions.showArchived": "Xem đã lưu",
@@ -83,6 +101,18 @@ export const vi = {
   "sessions.rename": "Đổi tên",
   "sessions.archive": "Lưu trữ",
   "sessions.unarchive": "Bỏ lưu trữ",
+  // Gom hội thoại theo mốc thời gian, giống Open WebUI: đọc danh sách dài
+  // bằng mốc quen thuộc ("Hôm nay") nhanh hơn đọc ngày tháng ở từng dòng.
+  "sessions.group.today": "Hôm nay",
+  "sessions.group.yesterday": "Hôm qua",
+  "sessions.group.week": "7 ngày trước",
+  "sessions.group.month": "30 ngày trước",
+  "sessions.group.older": "Tháng trước",
+  "sessions.group.archived": "Đã lưu trữ",
+  "sessions.moreActions": "Thao tác khác",
+  "sessions.openInSidebar": "Mở danh sách hội thoại",
+  "sessions.closeSidebar": "Đóng danh sách hội thoại",
+  "common.rename": "Đổi tên",
   "sessions.deleteTitle": "Xoá hội thoại?",
   "sessions.deleteMessage": "Thao tác này không thể hoàn tác.",
   "memory.title": "Bộ nhớ",
@@ -196,6 +226,10 @@ export const vi = {
   "markdown.remoteImageWarning": "Ảnh không được tải từ xa; nhấn vào liên kết để mở nếu cần.",
   "markdown.unsafeLink": "Liên kết không được phép đã bị vô hiệu hóa.",
   "markdown.copyCode": "Sao chép mã",
+  "markdown.collapseCode": "Thu gọn khối mã",
+  "markdown.expandCode": "Mở rộng khối mã",
+  "markdown.plainText": "văn bản thuần",
+  "markdown.hiddenLines": "{count} dòng ẩn",
 } as const;
 
 export type MessageKey = keyof typeof vi;

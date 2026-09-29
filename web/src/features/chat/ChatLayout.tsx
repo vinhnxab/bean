@@ -1,9 +1,18 @@
-import { useState } from "react";
+import { ArchiveIcon, ArchiveRestoreIcon, MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import type { SessionDto } from "@/api/bindings";
 
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useLogout } from "@/features/auth/queries";
+import { groupLabelKey, groupSessions } from "@/features/chat/sessionGroups";
 import {
   useCreateSession,
   useDeleteSession,
@@ -26,6 +35,13 @@ export function ChatLayout() {
   const createSession = useCreateSession();
   const logout = useLogout();
   const [actionError, setActionError] = useState(false);
+  // Gom nhóm theo mốc thời gian. `useMemo` vì `Date.now()` trả về mỗi lần
+  // render — nếu không, danh sách bị dựng lại liên tục và nhảy nhóm khi
+  // người dùng đang đọc (tin chủ động hay về giữa lúc họ xem danh sách).
+  const groups = useMemo(
+    () => groupSessions(sessions.data?.sessions ?? [], new Date()),
+    [sessions.data?.sessions],
+  );
 
   async function newSession() {
     if (createSession.isPending) return;
@@ -50,10 +66,10 @@ export function ChatLayout() {
   }
 
   return (
-    <div className="flex min-h-svh bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex min-h-svh bg-background text-foreground">
       <button
         type="button"
-        className="fixed left-3 top-3 z-30 rounded-lg border border-slate-300 bg-white p-2 shadow-sm md:hidden dark:border-slate-700 dark:bg-slate-900"
+        className="fixed left-3 top-3 z-30 rounded-lg border border-border bg-card p-2 shadow-sm md:hidden"
         onClick={() => setMobileOpen((open) => !open)}
         aria-label={t("common.menu")}
         aria-expanded={mobileOpen}
@@ -64,18 +80,18 @@ export function ChatLayout() {
         <button
           type="button"
           aria-label={t("common.close")}
-          className="fixed inset-0 z-20 bg-slate-950/40 md:hidden"
+          className="fixed inset-0 z-20 bg-black/60 md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       ) : null}
       <aside
-        className={`fixed inset-y-0 left-0 z-20 flex w-72 -translate-x-full flex-col border-r border-slate-200 bg-white transition-transform md:static md:translate-x-0 dark:border-slate-800 dark:bg-slate-900 ${mobileOpen ? "translate-x-0" : ""}`}
+        className={`fixed inset-y-0 left-0 z-20 flex w-72 -translate-x-full flex-col border-r border-border bg-card transition-transform md:static md:translate-x-0 ${mobileOpen ? "translate-x-0" : ""}`}
         aria-label={t("app.title")}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
+        <div className="flex items-center justify-between border-b border-border p-4">
           <div>
             <p className="text-lg font-bold">Bean</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">{t("app.tagline")}</p>
+            <p className="text-xs text-muted-foreground">{t("app.tagline")}</p>
           </div>
           <button
             type="button"
@@ -86,10 +102,7 @@ export function ChatLayout() {
             ×
           </button>
         </div>
-        <nav
-          className="space-y-1 border-b border-slate-200 p-3 dark:border-slate-800"
-          aria-label={t("nav.main")}
-        >
+        <nav className="space-y-1 border-b border-border p-3" aria-label={t("nav.main")}>
           {/* HUB là mục đầu tiên vì `/` (trang chủ) giờ hiện trạng thái cả hệ agent;
               "Trò chuyện" phải trỏ `/chat` vì `/` đã thuộc về HUB. */}
           <NavItem to="/" end label={t("nav.hub")} icon="◈" onNavigate={() => setMobileOpen(false)} />
@@ -102,27 +115,27 @@ export function ChatLayout() {
         </nav>
         {showSessions ? (
           <>
-            <div className="border-b border-slate-200 p-3 dark:border-slate-800">
+            <div className="border-b border-border p-3">
               <button
                 type="button"
                 onClick={() => void newSession()}
                 disabled={createSession.isPending}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50"
               >
                 <span aria-hidden="true">＋</span>
                 {createSession.isPending ? t("common.loading") : t("chat.newChat")}
               </button>
               {actionError ? (
-                <p className="mt-2 text-xs text-rose-600" role="alert">
+                <p className="mt-2 text-xs text-destructive" role="alert">
                   {t("chat.newError")}
                 </p>
               ) : null}
             </div>
             <div className="flex items-center justify-between px-3 pt-3">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
                 {archived ? t("sessions.archived") : t("chat.sessions")}
               </h2>
-              <label className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={archived}
@@ -141,43 +154,53 @@ export function ChatLayout() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t("sessions.searchPlaceholder")}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                className="w-full rounded-lg border border-border bg-card px-2 py-2 text-sm outline-none focus:border-live"
               />
             </div>
-            <nav className="flex-1 overflow-y-auto px-2" aria-label={t("chat.sessions")}>
+            <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label={t("chat.sessions")}>
               {sessions.isPending ? (
-                <p className="px-3 py-2 text-sm text-slate-500">{t("chat.loading")}</p>
+                <p className="px-3 py-2 text-sm text-muted-foreground">{t("chat.loading")}</p>
               ) : null}
               {sessions.isError ? (
-                <p className="px-3 py-2 text-sm text-rose-600" role="alert">
+                <p className="px-3 py-2 text-sm text-alert" role="alert">
                   {t("chat.historyError")}
                 </p>
               ) : null}
               {!sessions.isPending && !sessions.isError && sessions.data?.sessions.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-slate-500">
+                <p className="px-3 py-2 text-sm text-muted-foreground">
                   {search ? t("sessions.noResults") : t("chat.noSessions")}
                 </p>
               ) : null}
-              <ul className="space-y-1">
-                {sessions.data?.sessions.map((session) => (
-                  <SessionRow
-                    key={session.id}
-                    session={session}
-                    onDeleted={() => deleted(session.id)}
-                    onNavigate={() => setMobileOpen(false)}
-                  />
-                ))}
-              </ul>
+              {groups.map((group) => (
+                <div key={group.key} className="mb-1">
+                  {/* Nhãn nhóm: nhỏ, đậm, chữ thường (không IN HOA — `uppercase`
+                      làm tiếng Việt có dấu nhảy dấu và khó đọc hơn). */}
+                  <h3 className="px-3 pb-1 pt-3 text-xs font-semibold text-muted-foreground">
+                    {t(groupLabelKey(group.key))}
+                  </h3>
+                  <ul className="space-y-0.5">
+                    {group.sessions.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        onDeleted={() => deleted(session.id)}
+                        onNavigate={() => setMobileOpen(false)}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </nav>
           </>
         ) : null}
-        <div className="space-y-2 border-t border-slate-200 p-3 dark:border-slate-800">
+        <div className="space-y-2 border-t border-border p-3">
           <LanguageSelect />
+          <ThemeToggle className="w-full justify-start gap-2 px-2" />
           <button
             type="button"
             onClick={() => void signOut()}
             disabled={logout.isPending}
-            className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+            className="w-full rounded-lg px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
           >
             {logout.isPending ? t("common.loading") : t("chat.logout")}
           </button>
@@ -209,7 +232,7 @@ function NavItem({
       end={end}
       onClick={onNavigate}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${isActive ? "bg-slate-100 font-semibold dark:bg-slate-800" : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"}`
+        `flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${isActive ? "bg-accent font-semibold" : "text-muted-foreground hover:bg-background"}`
       }
     >
       <span aria-hidden="true" className="w-5 text-center">
@@ -220,7 +243,15 @@ function NavItem({
   );
 }
 
-function SessionRow({
+/**
+ * Một dòng hội thoại trong sidebar.
+ *
+ * Export ra ngoài để test bám đúng component thật: test cần bấm menu Radix,
+ * mà trong `ChatLayout` đầy đủ thì các request/portal khác của trang xen vào
+ * làm test chập chờn (test chạy đơn lẻ xanh, chạy cả file thì fail ở menu
+ * thứ hai). Render riêng `SessionRow` loại bỏ hẳn nhiễu đó.
+ */
+export function SessionRow({
   session,
   onDeleted,
   onNavigate,
@@ -271,11 +302,11 @@ function SessionRow({
   }
 
   return (
-    <li className="rounded-lg border border-transparent hover:border-slate-200 dark:hover:border-slate-700">
+    <li className="group/session relative">
       {editing ? (
         <div className="flex gap-1 p-1">
           <label className="sr-only" htmlFor={`rename-${session.id}`}>
-            {t("sessions.rename")}
+            {t("common.rename")}
           </label>
           <input
             id={`rename-${session.id}`}
@@ -284,54 +315,66 @@ function SessionRow({
             onKeyDown={(event) => {
               if (event.key === "Enter") void saveTitle();
             }}
-            className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950"
+            aria-label={t("sessions.rename")}
+            className="min-w-0 flex-1 rounded-md border border-border bg-surface-raised px-2 py-1.5 text-sm outline-none focus-visible:border-brand"
           />
           <button
             type="button"
             onClick={() => void saveTitle()}
-            className="rounded-md bg-emerald-600 px-2 text-xs text-white"
+            className="rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-ink hover:bg-brand-strong"
           >
             {t("common.save")}
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1 p-1">
+        <div className="flex items-center">
           <NavLink
             to={`/sessions/${session.id}`}
             onClick={onNavigate}
             className={({ isActive }) =>
-              `min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-emerald-100 font-semibold text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200" : ""}`
+              `min-w-0 flex-1 truncate rounded-md py-2 pl-3 pr-2 text-sm transition-colors ${isActive ? "brand-wash font-semibold text-brand" : "text-ink-muted hover:bg-surface-hover hover:text-ink"}`
             }
           >
             {session.title || t("chat.untitled")}
           </NavLink>
-          <button
-            type="button"
-            onClick={() => {
-              setTitle(session.title);
-              setEditing(true);
-            }}
-            aria-label={`${t("sessions.rename")} ${session.title || t("chat.untitled")}`}
-            className="rounded-md px-1.5 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            ✎
-          </button>
-          <button
-            type="button"
-            onClick={() => void toggleArchive()}
-            aria-label={session.archived ? t("sessions.unarchive") : t("sessions.archive")}
-            className="rounded-md px-1.5 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            {session.archived ? "↥" : "▱"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDeleteOpen(true)}
-            aria-label={`${t("common.delete")} ${session.title || t("chat.untitled")}`}
-            className="rounded-md px-1.5 py-1 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950"
-          >
-            ×
-          </button>
+          {/* Một nút menu thay cho ba nút luôn hiện. Lý do: ở bản cũ mỗi dòng
+              chiếm ~60px cho ✎ ▱ ×, gần bằng cả tiêu đề, và ba nút sáng suốt
+              khiến danh sách trông như bảng điều khiển thay vì danh sách đọc.
+              Menu ẩn khi không rê, hiện khi rê hoặc khi focus (bàn phím). */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("sessions.moreActions")}
+                className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-ink focus-visible:opacity-100 group-hover/session:opacity-100"
+              >
+                <MoreHorizontalIcon className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() => {
+                  setTitle(session.title);
+                  setEditing(true);
+                }}
+              >
+                <PencilIcon className="size-3.5" />
+                {t("sessions.rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void toggleArchive()}>
+                {session.archived ? (
+                  <ArchiveRestoreIcon className="size-3.5" />
+                ) : (
+                  <ArchiveIcon className="size-3.5" />
+                )}
+                {session.archived ? t("sessions.unarchive") : t("sessions.archive")}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-alert focus:text-alert" onSelect={() => setDeleteOpen(true)}>
+                <Trash2Icon className="size-3.5" />
+                {t("common.delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
       <ConfirmDialog
@@ -352,12 +395,12 @@ function SessionRow({
 function LanguageSelect() {
   const { t, lang, setLang } = useI18n();
   return (
-    <label className="block text-xs font-medium text-slate-500 dark:text-slate-400">
+    <label className="block text-xs font-medium text-muted-foreground">
       <span className="sr-only">{t("common.language")}</span>
       <select
         value={lang}
         onChange={(event) => setLang(event.target.value as "vi" | "en")}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+        className="mt-1 w-full rounded-lg border border-border bg-card px-2 py-2 text-sm"
       >
         <option value="vi">Tiếng Việt</option>
         <option value="en">English</option>

@@ -1,9 +1,11 @@
 import hljs from "highlight.js/lib/common";
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, CopyIcon } from "lucide-react";
 
 import { isValidElement, type ReactNode, useState } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 function safeUrl(value: string): string | null {
   try {
@@ -42,13 +44,36 @@ function highlightedNodes(code: string, language: string | undefined): ReactNode
   return [...document.body.childNodes].map((node, index) => renderNode(node, index));
 }
 
+const COLLAPSE_LINES = 12;
+
+/**
+ * Khối code có header riêng: tên ngôn ngữ, nút sao chép, nút thu gọn.
+ *
+ * # Vì sao có header thay vì nút sao chép trôi ở góc
+ *
+ * Ở bản cũ nút sao chép nằm `absolute` trong khối code, phủ lên dòng code đầu
+ * tiên và không có nhãn ngôn ngữ. Hai hậu quả: (1) người đọc không biết đoạn
+ * này là Python hay Rust trước khi đọc; (2) ở khối dài, nút trôi theo khi
+ * cuộn nên chỉ dùng được khi đang ở đúng đoạn đó. Header cố định ở trên giải
+ * quyết cả hai, và là chỗ tự nhiên để thêm nút thu gọn.
+ *
+ * # Vì sao thu gọn mặc định
+ *
+ * Log dài 400 dòng chiếm hết màn hình và đẩy lời cuội xuống dưới tầm nhìn.
+ * Trên `COLLAPSE_LINES` dòng thì gập lại, hiện số dòng bị ẩn để người đọc
+ * biết còn gì bên trong thay vì tưởng hết.
+ */
 function CodeBlock({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const code = textOf(children).replace(/\n$/, "");
   const language = isValidElement<{ className?: string }>(children)
     ? children.props.className?.match(/language-([\w-]+)/)?.[1]
     : undefined;
+  const lineCount = code.split("\n").length;
+  const collapsible = lineCount > COLLAPSE_LINES;
+  const collapsed = collapsible && !expanded;
 
   async function copy() {
     try {
@@ -61,20 +86,56 @@ function CodeBlock({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="group relative my-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-950 dark:border-slate-800">
-      <button
-        type="button"
-        onClick={copy}
-        className="absolute right-2 top-2 z-10 rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700"
-        aria-label={t("markdown.copyCode")}
+    <div className="code-block group/code my-3 overflow-hidden rounded-lg border border-rule bg-surface-raised">
+      <div className="flex items-center justify-between gap-2 border-b border-rule bg-surface-hover/60 px-3 py-1.5">
+        {/* Tên ngôn ngữ: chữ nhỏ, chữ đơn, `--ink-muted` — thông tin phụ, không
+            được phải giành chỗ với nội dung code. */}
+        <span className="truncate font-mono text-xs uppercase tracking-wide text-muted-foreground">
+          {language ?? t("markdown.plainText")}
+        </span>
+        <div className="flex shrink-0 items-center gap-1">
+          {collapsible ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              aria-expanded={expanded}
+              aria-label={expanded ? t("markdown.collapseCode") : t("markdown.expandCode")}
+              title={expanded ? t("markdown.collapseCode") : t("markdown.expandCode")}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-ink"
+            >
+              {expanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+              <span className="hub-num">{lineCount}</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-ink"
+            aria-label={t("markdown.copyCode")}
+            title={copied ? t("common.copied") : t("markdown.copyCode")}
+          >
+            {copied ? <CheckIcon className="size-3.5 text-live" /> : <CopyIcon className="size-3.5" />}
+            <span>{copied ? t("common.copied") : t("common.copy")}</span>
+          </button>
+        </div>
+      </div>
+      <pre
+        className={cn(
+          "overflow-x-auto p-4 text-sm leading-6 text-ink",
+          !collapsed && "max-h-[32rem] overflow-y-auto",
+        )}
       >
-        {copied ? t("common.copied") : t("common.copy")}
-      </button>
-      <pre className="overflow-x-auto p-4 pr-20 text-sm leading-6 text-slate-100">
         <code className={language ? `language-${language}` : undefined}>
-          {highlightedNodes(code, language)}
+          {collapsed
+            ? `${code.split("\n").slice(0, COLLAPSE_LINES).join("\n")}\n…`
+            : highlightedNodes(code, language)}
         </code>
       </pre>
+      {collapsed ? (
+        <p className="border-t border-rule px-4 py-2 text-xs italic text-muted-foreground">
+          {t("markdown.hiddenLines", { count: lineCount - COLLAPSE_LINES })}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -104,7 +165,7 @@ export function SafeMarkdown({ children }: { children: string }) {
     img: ({ src, alt }) => {
       const safeHref = safeUrl(src ?? "");
       return (
-        <span className="my-2 block rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+        <span className="my-2 block rounded-lg border border-need bg-need/10 px-3 py-2 text-sm text-need">
           <strong>{t("markdown.remoteImage")}: </strong>
           {safeHref ? (
             <a href={safeHref} target="_blank" rel="noopener noreferrer">
