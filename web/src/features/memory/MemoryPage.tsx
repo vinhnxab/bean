@@ -66,12 +66,9 @@ function MemoryFileEditor({ name }: { name: MemoryFileName }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-semibold">{title}</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{name}.md</p>
+          <p className="text-xs text-muted-foreground">{name}.md</p>
         </div>
-        <span
-          className={`text-xs font-semibold ${dirty ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
-          role="status"
-        >
+        <span className={`text-xs font-semibold ${dirty ? "text-need" : "text-live"}`} role="status">
           {dirty ? t("memory.unsaved") : t("memory.saved")}
         </span>
       </div>
@@ -88,14 +85,14 @@ function MemoryFileEditor({ name }: { name: MemoryFileName }) {
             onChange={(event) => setDraft(event.target.value)}
             rows={12}
             spellCheck={false}
-            className="w-full resize-y rounded-xl border border-slate-300 bg-slate-50 p-3 font-mono text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950"
+            className="w-full resize-y rounded-lg border border-border bg-background p-3 font-mono text-sm outline-none focus:border-live focus:ring-2 focus:ring-live/30"
           />
           <div className="mt-3 flex justify-end">
             <button
               type="button"
               disabled={!dirty || save.isPending}
               onClick={() => setConfirmOpen(true)}
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50"
             >
               {save.isPending ? t("common.loading") : t("memory.save")}
             </button>
@@ -103,7 +100,7 @@ function MemoryFileEditor({ name }: { name: MemoryFileName }) {
         </>
       ) : null}
       {save.isError ? (
-        <p className="mt-2 text-sm text-rose-600" role="alert">
+        <p className="mt-2 text-sm text-destructive" role="alert">
           {t("memory.saveError")}
         </p>
       ) : null}
@@ -143,7 +140,7 @@ function MemoryList() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold">{t("memory.listTitle")}</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{t("memory.listDescription")}</p>
+          <p className="text-xs text-muted-foreground">{t("memory.listDescription")}</p>
         </div>
       </div>
       <label className="sr-only" htmlFor="memory-search">
@@ -155,7 +152,7 @@ function MemoryList() {
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         placeholder={t("memory.searchPlaceholder")}
-        className="mb-4 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+        className="mb-4 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-live"
       />
       {memories.isPending ? <LoadingState label={t("common.loading")} /> : null}
       {memories.isError ? <ErrorState onRetry={() => void memories.refetch()} /> : null}
@@ -164,18 +161,18 @@ function MemoryList() {
       ) : null}
       <ul className="space-y-3">
         {memories.data?.memories.map((memory) => (
-          <li key={memory.id} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+          <li key={memory.id} className="rounded-lg border border-border p-3">
             <div className="flex items-start justify-between gap-3">
               <p className="whitespace-pre-wrap break-words text-sm">{memory.text}</p>
               <button
                 type="button"
                 onClick={() => setTarget(memory)}
-                className="shrink-0 text-xs font-semibold text-rose-600 hover:underline dark:text-rose-400"
+                className="shrink-0 text-xs font-semibold text-destructive hover:underline"
               >
                 {t("common.delete")}
               </button>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
               {memory.tags ? <span>#{memory.tags}</span> : null}
               <time dateTime={memory.created_at}>{formatDateTime(memory.created_at)}</time>
             </div>

@@ -19,7 +19,7 @@ export function ProtectedRoute() {
     return () => setUnauthorizedHandler(null);
   }, [navigate, next]);
 
-  if (isPending) return <div className="p-6 text-sm text-slate-500">{t("auth.checking")}</div>;
+  if (isPending) return <div className="p-6 text-sm text-muted-foreground">{t("auth.checking")}</div>;
   if (isError || !data) return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
   return <Outlet />;
 }

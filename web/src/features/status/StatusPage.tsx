@@ -26,25 +26,21 @@ export function StatusPage() {
           <Panel className="sm:col-span-2 xl:col-span-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                  {t("status.tokenUsage")}
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">{t("status.tokenUsage")}</p>
                 <p className="mt-1 text-2xl font-bold">
                   {data.tokens_used.toLocaleString()} / {data.daily_token_budget.toLocaleString()}
                 </p>
               </div>
               <span
                 className={
-                  overBudget
-                    ? "text-sm font-semibold text-rose-600"
-                    : "text-sm text-slate-500 dark:text-slate-400"
+                  overBudget ? "text-sm font-semibold text-destructive" : "text-sm text-muted-foreground"
                 }
               >
                 {overBudget ? t("status.budgetExceeded") : `${percent}%`}
               </span>
             </div>
             <div
-              className="mt-3 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+              className="mt-3 h-3 overflow-hidden rounded-full bg-accent"
               role="progressbar"
               aria-valuenow={percent}
               aria-valuemin={0}
@@ -52,9 +48,7 @@ export function StatusPage() {
               aria-label={t("status.tokenUsage")}
             >
               <div
-                className={
-                  overBudget ? "h-full rounded-full bg-rose-600" : "h-full rounded-full bg-emerald-600"
-                }
+                className={overBudget ? "h-full rounded-full bg-destructive" : "h-full rounded-full bg-live"}
                 style={{ width: `${percent}%` }}
               />
             </div>
@@ -66,14 +60,14 @@ export function StatusPage() {
                 {data.channels.map((channel) => (
                   <li
                     key={channel}
-                    className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                    className="rounded-full bg-live/10 px-3 py-1 text-sm font-medium text-live"
                   >
                     {channel}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="mt-2 text-sm text-slate-500">{t("status.noChannels")}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{t("status.noChannels")}</p>
             )}
           </Panel>
         </div>
@@ -85,7 +79,7 @@ export function StatusPage() {
 function StatusCard({ label, value }: { label: string; value: string }) {
   return (
     <Panel>
-      <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-2 break-words text-xl font-bold">{value}</p>
     </Panel>
   );

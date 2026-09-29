@@ -84,7 +84,7 @@ export function TasksPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
         <Panel>
           <h2 className="text-lg font-semibold">{t("tasks.createTitle")}</h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("tasks.createDescription")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("tasks.createDescription")}</p>
           <form className="mt-5 space-y-4" onSubmit={submit}>
             <Field label={t("tasks.cron")} id="task-cron" help={t("tasks.cronHelp")}>
               <input
@@ -143,14 +143,14 @@ export function TasksPage() {
               {t("tasks.enabled")}
             </label>
             {formError ? (
-              <p className="text-sm text-rose-600" role="alert">
+              <p className="text-sm text-destructive" role="alert">
                 {t("tasks.validation")}
               </p>
             ) : null}
             <button
               type="submit"
               disabled={create.isPending}
-              className="w-full rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+              className="w-full rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50"
             >
               {create.isPending ? t("common.loading") : t("tasks.create")}
             </button>
@@ -160,7 +160,7 @@ export function TasksPage() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold">{t("tasks.listTitle")}</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{t("tasks.runtimeNote")}</p>
+              <p className="text-sm text-muted-foreground">{t("tasks.runtimeNote")}</p>
             </div>
           </div>
           {tasks.isPending ? <LoadingState label={t("common.loading")} /> : null}
@@ -170,19 +170,19 @@ export function TasksPage() {
           ) : null}
           <ul className="space-y-3">
             {tasks.data?.tasks.map((task) => (
-              <li key={task.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+              <li key={task.id} className="rounded-lg border border-border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-mono text-sm font-semibold">{task.cron}</p>
                     <p className="mt-1 whitespace-pre-wrap break-words text-sm">{task.prompt}</p>
                   </div>
                   <span
-                    className={`rounded-full px-2 py-1 text-xs font-semibold ${task.enabled ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"}`}
+                    className={`rounded-full px-2 py-1 text-xs font-semibold ${task.enabled ? "bg-live/10 text-live" : "bg-accent text-muted-foreground"}`}
                   >
                     {task.enabled ? t("tasks.enabled") : t("tasks.disabled")}
                   </span>
                 </div>
-                <dl className="mt-3 grid gap-1 text-xs text-slate-500 sm:grid-cols-2 dark:text-slate-400">
+                <dl className="mt-3 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
                   <div>
                     <dt className="inline font-medium">{t("tasks.nextRun")}: </dt>
                     <dd className="inline">{formatDateTime(task.next_run)}</dd>
@@ -195,7 +195,7 @@ export function TasksPage() {
                   </div>
                 </dl>
                 {task.allowed_tools.length > 0 ? (
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-2 text-xs text-muted-foreground">
                     {t("tasks.allowedTools")}: {task.allowed_tools.join(", ")}
                   </p>
                 ) : null}
@@ -204,14 +204,14 @@ export function TasksPage() {
                     type="button"
                     disabled={update.isPending}
                     onClick={() => void toggle(task)}
-                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800"
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm font-semibold hover:bg-accent disabled:opacity-50"
                   >
                     {task.enabled ? t("tasks.disable") : t("tasks.enable")}
                   </button>
                   <button
                     type="button"
                     onClick={() => setTarget(task)}
-                    className="rounded-lg border border-rose-300 px-3 py-1.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400"
+                    className="rounded-lg border border-destructive/40 px-3 py-1.5 text-sm font-semibold text-destructive hover:bg-destructive/20"
                   >
                     {t("common.delete")}
                   </button>
@@ -253,7 +253,7 @@ function Field({
         {label}
       </label>
       {children}
-      {help ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{help}</p> : null}
+      {help ? <p className="mt-1 text-xs text-muted-foreground">{help}</p> : null}
     </div>
   );
 }

@@ -53,9 +53,7 @@ export function ConfirmCard({
             : t("confirm.expired")
         : `${t("confirm.expires")} ${formatSeconds(remaining)}`;
   const riskClass =
-    confirm.risk === "dangerous"
-      ? "border-rose-400 bg-rose-50 dark:border-rose-800 dark:bg-rose-950"
-      : "border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950";
+    confirm.risk === "dangerous" ? "border-destructive/40 bg-destructive/10" : "border-need bg-need/10";
   const riskText = t(`confirm.risk.${confirm.risk}`);
 
   function decide(decision: DecisionDto) {
@@ -65,7 +63,7 @@ export function ConfirmCard({
 
   return (
     <section
-      className={`rounded-2xl border p-4 shadow-sm ${riskClass}`}
+      className={`rounded-lg border p-4 shadow-sm ${riskClass}`}
       role="alertdialog"
       aria-labelledby={`confirm-${confirm.confirm_id}`}
     >
@@ -73,12 +71,12 @@ export function ConfirmCard({
         <h2 id={`confirm-${confirm.confirm_id}`} className="font-semibold">
           {t("confirm.title")}
         </h2>
-        <span className="rounded-full bg-white/70 px-2 py-1 text-xs font-bold uppercase tracking-wide dark:bg-slate-900/70">
+        <span className="rounded-full bg-white/70 px-2 py-1 text-xs font-bold uppercase tracking-wide">
           {riskText}
         </span>
       </div>
       <p className="mb-1 text-xs font-medium opacity-70">{t("confirm.action")}</p>
-      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-white/70 p-3 font-mono text-sm dark:bg-slate-900/70">
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/70 p-3 font-mono text-sm">
         {confirm.prompt}
       </pre>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -91,7 +89,7 @@ export function ConfirmCard({
               type="button"
               onClick={() => decide("allow")}
               disabled={confirm.resolution === "submitting" || remaining === 0}
-              className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+              className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50"
             >
               {t("confirm.allow")}
             </button>
@@ -100,7 +98,7 @@ export function ConfirmCard({
                 type="button"
                 onClick={() => decide("allow_in_session")}
                 disabled={confirm.resolution === "submitting" || remaining === 0}
-                className="rounded-lg border border-emerald-700 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-200 dark:hover:bg-emerald-950"
+                className="rounded-lg border border-brand px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-wash disabled:opacity-50"
               >
                 {t("confirm.allowSession")}
               </button>
@@ -109,7 +107,7 @@ export function ConfirmCard({
               type="button"
               onClick={() => decide("deny")}
               disabled={confirm.resolution === "submitting" || remaining === 0}
-              className="rounded-lg border border-slate-400 px-3 py-2 text-sm font-semibold hover:bg-white/60 disabled:opacity-50 dark:border-slate-500"
+              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-white/60 disabled:opacity-50"
             >
               {t("confirm.deny")}
             </button>

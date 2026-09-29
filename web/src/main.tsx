@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import App from "@/App";
 import "@/index.css";
 import { I18nProvider } from "@/i18n";
+import { ThemeProvider } from "@/lib/theme";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,11 +22,16 @@ const container = document.getElementById("root");
 if (container) {
   createRoot(container).render(
     <StrictMode>
-      <I18nProvider>
-        <QueryClientProvider client={queryClient}>
-          <App />
-        </QueryClientProvider>
-      </I18nProvider>
+      {/* ThemeProvider bọc ngoài I18nProvider: cả màn đăng nhập lẫn các trang
+          sau đăng nhập đều dùng chủ đề, và trang đăng nhập là nơi người dùng
+          thường đổi chủ đề lần đầu. */}
+      <ThemeProvider>
+        <I18nProvider>
+          <QueryClientProvider client={queryClient}>
+            <App />
+          </QueryClientProvider>
+        </I18nProvider>
+      </ThemeProvider>
     </StrictMode>,
   );
 } else {

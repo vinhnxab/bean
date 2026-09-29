@@ -19,7 +19,7 @@ const buttonVariants = cva(
         outline: "border border-border bg-transparent hover:bg-accent",
         ghost: "hover:bg-accent",
         /** Hành động cần người dùng chủ động (Duyệt) — dùng `--need`. */
-        attention: "border border-need text-need hover:bg-need hover:text-surface",
+        attention: "border border-need text-need hover:bg-need-strong hover:text-surface",
         /** Hành động nguy hiểm — dùng `--alert`. */
         danger: "bg-destructive text-destructive-foreground hover:opacity-90",
         link: "text-ink underline underline-offset-4 hover:opacity-80",

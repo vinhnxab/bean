@@ -13,85 +13,160 @@
 }
 
 /* ==========================================================================
-   Token HUB — "Bảng vẽ kỹ thuật trên bàn thép"
+   Token gốc — "Mực đen trên giấy nâu"
    --------------------------------------------------------------------------
-   Mặt thép lạnh (cool graphite-blue), đường kẻ mảnh 1px, bo góc nhỏ, KHÔNG
-   shadow. Ba màu trạng thái là NGỮ NGHĨA, mỗi màu đúng một việc:
-     --live  = đang chạy
-     --need  = đang chờ bạn duyệt
-     --alert = nguy hiểm / bị chặn
+   Màu chủ đạo: ĐEN (nền) + NÂU ĐỎ (thương hiệu). Nền TỐI là mặc định (xem
+   `lib/theme.tsx`), sáng là lựa chọn của người dùng.
+
+   Ba màu trạng thái là NGỮ NGHĨA, mỗi màu đúng một việc, và **tách sắc** khỏi
+   màu thương hiệu để không nhầm "nâu đỏ của thương hiệu" với "nguy hiểm":
+     --live  = đang chạy          (xanh lam ngọc)
+     --need  = đang chờ bạn duyệt (hổ phách)
+     --alert = nguy hiểm / bị chặn (đỏ bão hoà cao — khác hẳn nâu đỏ nhạt)
    Không dùng màu để trang trí.
    ========================================================================== */
+
+/* --- TỐI: mặc định, nằm ở `:root` (không cần class để có) --- */
 :root {
-  /* 4 token cấu trúc (trung tính) */
-  --surface: #edf1f3; /* mặt bàn */
-  --surface-raised: #f6f9fa; /* khối nổi 1 bậc: sơ đồ, hàng chờ duyệt */
-  --ink: #111a1f; /* chữ chính */
-  --ink-muted: #4e5c63; /* chữ phụ — 5.7:1 trên --surface, đạt WCAG AA */
-  --rule: #c9d4d9; /* đường kẻ 1px, thay cho shadow */
+  color-scheme: dark;
 
-  /* 3 token trạng thái (màu) */
-  --live: #0e7c86;
-  --need: #a05a00; /* 4.6:1 trên --surface */
-  --alert: #a32b2b; /* 4.8:1 trên --surface */
+  /* token cấu trúc (trung tính) */
+  --surface: #0b0a09; /* mặt bàn — đen ấm, KHÔNG phải #000 tuyệt đối */
+  --surface-raised: #151110; /* khối nổi 1 bậc: thẻ, hộp thoại */
+  --surface-hover: #201a18; /* trạng thái hover/active */
+  --ink: #f3efec; /* chữ chính */
+  --ink-muted: #9d938c; /* chữ phụ — 7.0:1 trên --surface */
+  --rule: #2a2220; /* đường kẻ 1px */
 
-  /* Biến chuẩn hoá mà shadcn/ui đọc. Gán từ token HUB để primitive của
-     shadcn (button/badge/dialog/...) tự động đúng hệ màu này — không phải
-     mỗi chỗ tự chọn lại. */
-  --background: var(--surface);
-  --foreground: var(--ink);
-  --card: var(--surface-raised);
-  --card-foreground: var(--ink);
-  --popover: var(--surface-raised);
-  --popover-foreground: var(--ink);
-  --primary: var(--ink);
-  --primary-foreground: var(--surface);
-  --secondary: var(--surface-raised);
-  --secondary-foreground: var(--ink);
-  --muted: var(--surface);
-  --muted-foreground: var(--ink-muted);
-  --accent: var(--surface-raised);
-  --accent-foreground: var(--ink);
-  --destructive: var(--alert);
-  --destructive-foreground: #f6f9fa;
-  --border: var(--rule);
-  --input: var(--rule);
-  --ring: var(--live);
+  /* màu thương hiệu: NÂU ĐỎ */
+  --brand: #b4654a; /* nút chính, liên kết nhấn */
+  --brand-strong: #cd7d5f; /* hover của brand */
+  --brand-ink: #170c08; /* chữ đặt trên nền brand */
+  --brand-wash: rgb(180 101 74 / 14%); /* nền nhạt kiểu brand (badge, dòng chọn) */
 
-  --radius: 5px; /* bo góc NHỎ — phép nhận diện bản vẽ kỹ thuật, khác thẻ SaaS */
+  /* token trạng thái (ngữ nghĩa, tách sắc khỏi brand) */
+  --live: #5aa88f;
+  --need: #c99440;
+  --alert: #e0503a;
+  /* Bản đậm hơn cho `:hover`. Không có token này thì nút ghi `bg-live
+     hover:bg-live` — nhìn giống hệt, người dùng không biết con trỏ có bấm
+     được không. Ở nền tối, hover phải TỐI ĐI chứ không sáng thêm, nếu không
+     nút sáng bị "cháy" mỗi lần rê chuột. */
+  --live-strong: #4d8f79;
+  --need-strong: #b07f34;
+  --alert-strong: #c7432f;
+  /* Chữ đặt TRÊN nền các màu trên. Mỗi màu có tương phản ngược ở từng chủ đề:
+     ở tối, live/need là mảng sáng nên chữ phải tối; ở sáng chúng tối đi nên
+     chữ phải sáng. Dùng chung một giá trị sẽ hỏng ở một trong hai chủ đề. */
+  --live-ink: #06120e;
+  --need-ink: #17100a;
+  --alert-ink: #1a0a07;
+}
 
-  /* Token trạng thái HUB, để utility class của Tailwind v4 sinh ra
-     `bg-live`, `text-need`, `border-need`… mà không cần cấu hình lần nữa. */
-  --color-live: var(--live);
-  --color-need: var(--need);
-  --color-alert: var(--alert);
+/* --- SÁNG: chỉ bật khi `<html class="light">` --- */
+.light {
+  color-scheme: light;
+
+  --surface: #faf6f4;
+  --surface-raised: #ffffff;
+  --surface-hover: #f0e5e0;
+  --ink: #17110f;
+  --ink-muted: #6d5d56; /* 5.9:1 trên --surface */
+  --rule: #e3d8d2;
+
+  /* Nâu đỏ đậm hơn ở nền sáng: màu tối trên nền sáng phải đậm hơn mới đạt
+     tương phản — giữ nguyên #b4654a thì chữ trên trắng chỉ ~3.4:1. */
+  --brand: #8c3f24;
+  --brand-strong: #a4502f;
+  --brand-ink: #fff8f4;
+  --brand-wash: rgb(140 63 36 / 10%);
+
+  --live: #2f7a63;
+  --need: #8a5f14;
+  --alert: #b32a1c;
+  /* Ở nền sáng thì ngược lại: hover SÁNG THÊM. */
+  --live-strong: #38997c;
+  --need-strong: #a6751b;
+  --alert-strong: #cc3624;
+  --live-ink: #fff;
+  --need-ink: #fff;
+  --alert-ink: #fff;
+}
+
+/* ==========================================================================
+   Nối token vào Tailwind — BẮT BUỘC dùng `@theme inline`, KHÔNG khai báo
+   `--color-*` trong `:root`.
+   --------------------------------------------------------------------------
+   SAI (bản cũ): đặt `--color-live: var(--live)` trong `:root` → biến có mặt
+   trong CSS nhưng Tailwind v4 **không sinh utility nào** từ đó, nên
+   `bg-live`/`text-need`/`border-alert` rơi vào vực lặng: class có trong JSX
+   nhưng không tồn tại trong CSS, phần tử hiện ra không màu.
+   `@theme inline` khai báo token đúng chỗ Tailwind đọc, và `inline` bảo nó
+   tham chiếu `var(...)` thay vì chép giá trị — nhờ vậy đổi theme đổi được
+   ngay mà không phải sinh lại CSS.
+   ========================================================================== */
+@theme inline {
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface-raised);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--brand);
+  --color-primary-foreground: var(--brand-ink);
+  --color-secondary: var(--surface-raised);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--surface-raised);
+  --color-muted-foreground: var(--ink-muted);
+  --color-accent: var(--surface-hover);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--alert);
+  --color-destructive-foreground: #fff;
+  --color-border: var(--rule);
+  --color-input: var(--rule);
+  --color-ring: var(--brand);
+
+  /* token HUB → utility `bg-surface`, `text-ink-muted`, `border-rule`… */
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
   --color-rule: var(--rule);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-ink: var(--brand-ink);
+  --color-live: var(--live);
+  --color-need: var(--need);
+  --color-alert: var(--alert);
+  --color-live-strong: var(--live-strong);
+  --color-need-strong: var(--need-strong);
+  --color-alert-strong: var(--alert-strong);
+  --color-live-ink: var(--live-ink);
+  --color-need-ink: var(--need-ink);
+  --color-alert-ink: var(--alert-ink);
+
+  /* Bo góc 8px — đủ mềm để đọc là shadcn, không tròn kiểu "thẻ SaaS". */
+  --radius: 8px;
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
 }
 
-.dark {
-  --surface: #0d1216; /* xanh đen có sắc, KHÔNG phải đen tuyệt đối */
-  --surface-raised: #141c22;
-  --ink: #e6edf1;
-  --ink-muted: #8fa3ad; /* 7.4:1 trên --surface */
-  --rule: #26333a;
+/* `dark`/`light` là class do `lib/theme.tsx` bơm vào `<html>`, KHÔNG suy ra từ
+   `prefers-color-scheme`: Bean chọn tối làm mặc định, người dùng đổi được
+   nhưng không phụ thuộc cài đặt hệ thống. Khai báo tường minh để một `dark:`
+   sót lại vẫn bám class thật chứ không rơi về mặc định của Tailwind
+   (prefers-color-scheme) và tự bật sai. */
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant light (&:where(.light, .light *));
 
-  /* Giảm bão hoà ở dark để không chói: bản neon trên nền tối gây mỏi mắt và
-     biến bảng thành "phòng điều hành" — đúng khuôn mẫu cần tránh. */
-  --live: #3fb6c0;
-  --need: #e0a24a;
-  --alert: #e0705a;
-}
-
-@custom-variant dark (&:is(.dark *));
-
-/* Giao diện tối/sáng theo hệ thống (agents.md mục 12.1). */
 @layer base {
   html {
-    color-scheme: light dark;
+    color-scheme: dark;
+  }
+  html.light {
+    color-scheme: light;
   }
   body {
     @apply antialiased;
@@ -116,7 +191,13 @@
     border-radius: var(--radius);
   }
   .field-input:focus-visible {
-    border-color: var(--live);
+    border-color: var(--brand);
+  }
+
+  /* Nền nhạt kiểu thương hiệu (dòng chọn, badge) — token riêng để không phải
+     nhân `bg-primary/10` ở mười chỗ. */
+  .brand-wash {
+    background-color: var(--brand-wash);
   }
 
   /* Số đo căn cột: dùng chữ số tabular của Inter thay vì nhảy sang font mono.

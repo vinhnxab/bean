@@ -5,15 +5,18 @@ import { describe, expect, it } from "vitest";
 
 import App from "@/App";
 import { I18nProvider } from "@/i18n";
+import { ThemeProvider } from "@/lib/theme";
 import { testServer } from "@/test/server";
 
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <App />
-      </I18nProvider>
+      <ThemeProvider>
+        <I18nProvider>
+          <App />
+        </I18nProvider>
+      </ThemeProvider>
     </QueryClientProvider>,
   );
 }

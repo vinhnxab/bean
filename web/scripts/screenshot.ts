@@ -157,11 +157,27 @@ async function shot(name: string, width: number, height: number, dark: boolean) 
       }
       (window as unknown as { WebSocket: unknown }).WebSocket = FakeSocket;
 
-      // Bật dark ngay khi `<html>` có mặt; nếu chưa thì chờ tới khi có.
-      const applyDark = () =>
-        document.documentElement?.classList.toggle("dark", darkMode);
-      if (document.documentElement) applyDark();
-      else new MutationObserver(applyDark).observe(document, { childList: true, subtree: true });
+      // Đặt chủ đề đúng cơ chế của app: `:root` là TỐI, chủ đề sáng bật bằng
+      // class `.light` trên `<html>` (xem `src/index.css` và `src/lib/theme.tsx`).
+      // Trước đây script chỉ toggle `.dark`, hợp với lúc mọi token tối nằm sau
+      // class `.dark`; với cơ chế mới, bỏ `.dark` mà không thêm `.light` thì vẫn
+      // ra nền tối — hai ảnh "light" và "dark" trùng nhau y hệt mà không có lỗi
+      // nào được báo ra. Ghi kèm `localStorage` để khớp đường lúc ứng dụng
+      // tự khởi tạo.
+      const applyTheme = () => {
+        const root = document.documentElement;
+        if (!root) return;
+        root.classList.remove("dark", "light");
+        root.classList.add(darkMode ? "dark" : "light");
+        root.style.colorScheme = darkMode ? "dark" : "light";
+        try {
+          window.localStorage.setItem("bean.theme", darkMode ? "dark" : "light");
+        } catch {
+          // storage bị chặn thì bỏ qua: class trên `<html>` đã đủ để CSS áp dụng.
+        }
+      };
+      if (document.documentElement) applyTheme();
+      else new MutationObserver(applyTheme).observe(document, { childList: true, subtree: true });
     },
     CONFIRMS,
     dark,

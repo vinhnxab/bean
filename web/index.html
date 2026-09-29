@@ -4,7 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Không nạp font/script từ CDN: font tự host qua @fontsource (agents.md mục 0.9, 3.2) -->
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Chống nháy: đặt class chủ đề lên <html> TRƯỚC lần vẽ đầu tiên.
+         Nếu chờ React mount mới set, người dùng đã chọn sáng sẽ thấy một nháy
+         tối. Script là file NGOÀI, không phải inline: CSP của server không khai
+         báo `script-src` nên kế thừa `default-src 'self'` và chặn inline
+         script (xem crates/bean-web/src/server.rs). Script thường trong <head>
+         chặn render, nên chắc chắn chạy xong trước lần vẽ đầu.
+         Hằng số phải khớp THEME_STORAGE_KEY / DEFAULT_THEME ở src/lib/theme.tsx. -->
+    <script src="/theme-init.js"></script>
     <!-- Favicon vector sinh từ `src/components/brand/markPaths.ts` (pnpm gen:favicon).
          Ở 16px ảnh bitmap thành vệt tối nên favicon vẫn dùng vector; phần còn lại
          của thương hiệu dùng ảnh thật trong `bean.png` (pnpm brand). -->

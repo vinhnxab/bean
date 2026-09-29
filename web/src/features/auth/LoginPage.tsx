@@ -3,6 +3,10 @@ import { useLocation, useNavigate } from "react-router";
 
 import { ApiRequestError } from "@/api/client";
 import { BeanAvatar } from "@/components/brand/BeanAvatar";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useLogin } from "@/features/auth/queries";
 import { useI18n } from "@/i18n";
 
@@ -28,50 +32,47 @@ export function LoginPage() {
 
   const error = login.error instanceof ApiRequestError ? login.error : null;
   return (
-    <main className="flex min-h-svh items-center justify-center bg-slate-50 p-4 dark:bg-slate-950">
-      <section
-        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-7 shadow-sm dark:border-slate-800 dark:bg-slate-900"
-        aria-labelledby="login-title"
-      >
-        <div className="mb-7">
+    <main className="relative flex min-h-svh items-center justify-center bg-background p-4">
+      {/* Nút chủ đề đặt ở góc màn hình: màn đăng nhập là nơi người dùng hay đổi
+          chủ đề lần đầu, không nên bắt họ đăng nhập mới đổi được. */}
+      <ThemeToggle className="absolute top-4 right-4" />
+      <Card className="w-full max-w-sm gap-7 py-7">
+        <CardHeader>
           <BeanAvatar size={56} className="mb-3" title={t("login.title")} />
-          <h1 id="login-title" className="text-2xl font-semibold tracking-tight">
-            {t("login.title")}
-          </h1>
-          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{t("login.subtitle")}</p>
-        </div>
-        <form onSubmit={submit} className="space-y-4">
-          <label className="block text-sm font-medium" htmlFor="password">
-            {t("login.password")}
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950"
-            required
-            disabled={login.isPending}
-          />
-          {error ? (
-            <p
-              className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950 dark:text-rose-300"
-              role="alert"
+          <CardTitle className="text-2xl tracking-tight">{t("login.title")}</CardTitle>
+          <CardDescription>{t("login.subtitle")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-4">
+            <label className="block text-sm font-medium" htmlFor="password">
+              {t("login.password")}
+            </label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="h-11"
+              required
+              disabled={login.isPending}
+            />
+            {error ? (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+                {error.code === "rate_limited" ? t("login.rateLimited") : t("login.invalid")}
+              </p>
+            ) : null}
+            <Button
+              type="submit"
+              disabled={login.isPending}
+              className="h-11 w-full bg-brand text-brand-ink hover:bg-brand-strong"
             >
-              {error.code === "rate_limited" ? t("login.rateLimited") : t("login.invalid")}
-            </p>
-          ) : null}
-          <button
-            type="submit"
-            disabled={login.isPending}
-            className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {login.isPending ? t("common.loading") : t("login.submit")}
-          </button>
-        </form>
-      </section>
+              {login.isPending ? t("common.loading") : t("login.submit")}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }
