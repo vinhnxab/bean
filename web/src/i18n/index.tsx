@@ -25,6 +25,13 @@ type I18nValue = {
   t: (key: MessageKey, values?: Record<string, string | number>) => string;
 };
 
+/**
+ * Kiểu của hàm `t`, xuất riêng để component con nhận `t` làm **prop** thay vì gọi
+ * `useI18n()` ở mỗi lớp. Nhận prop ép danh sách khoá dùng trong file hiển thị rõ
+ * ràng, và giữ component thuần tuý (dễ test, không cần provider khi render lẻ).
+ */
+export type Translate = I18nValue["t"];
+
 const I18nContext = createContext<I18nValue | null>(null);
 
 /** Thay `{tên}` bằng giá trị tương ứng; khoá thiếu thì để nguyên placeholder. */

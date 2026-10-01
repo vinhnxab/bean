@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BeanAvatar } from "@/components/brand/BeanAvatar";
@@ -7,7 +8,14 @@ import { BeanMark } from "@/components/brand/BeanMark";
 import { RealtimeProvider } from "@/features/chat/RealtimeProvider";
 import { HubPage } from "@/features/hub/HubPage";
 import { renderManagement } from "@/test/management";
-import { agentsHandler, FULL_AGENTS, testServer } from "@/test/server";
+import {
+  agentsHandler,
+  FULL_AGENTS,
+  MCP_FIXTURE,
+  TOOLS_FIXTURE,
+  testServer,
+  usageFixture,
+} from "@/test/server";
 
 /**
  * Test HUB ở tầng UI.
@@ -76,6 +84,84 @@ describe("HUB", () => {
     expect(within(review).queryByTestId("agent-node-developer")).not.toBeInTheDocument();
     const alerts = screen.getByTestId("hub-edge-alerts");
     expect(within(alerts).getByTestId("agent-node-security-scan")).toBeInTheDocument();
+  });
+
+  it("bảng chỉ đọc không khai một trạng thái nào có thể ghi", () => {
+    const { container } = renderHub();
+    // Mọi hàng trong bảng là `<dt>`/`<dd>`, không có nút, không có ô nhập: bảng tóm
+    // tắt thứ đang *là*, không phải chỗ để sửa. Test này để sau này ai thêm
+    // control vào đây thì phải dừng lại và nghĩ.
+    expect(container.querySelector("button, input, select")).toBeNull();
+  });
+
+  it("rút gọn hoạt động, không nhảy log thô vào bảng điều khiển", async () => {
+    // 30 dòng audit: widget chỉ được hiện 5 dòng (đã hỏi server `limit=5`).
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ts: new Date(Date.UTC(2026, 8, 29, 10, i)).toISOString(),
+      session: "web:admin",
+      tool: `tool_${i}`,
+      decision: "allow",
+      ok: true,
+      decided_by: "web:admin",
+    }));
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    testServer.use(http.get("/api/audit", () => HttpResponse.json({ entries: many })));
+    renderHub();
+
+    await screen.findByTestId("hub-topology");
+    const feed = await screen.findByTestId("hub-activity");
+    await waitFor(() => expect(within(feed).getAllByRole("listitem")).toHaveLength(5));
+    // Chỉ 5 dòng, và dòng đầu là mới nhất — thứ tự server đã trả.
+    expect(within(feed).getByText("tool_0")).toBeInTheDocument();
+    expect(within(feed).queryByText("tool_5")).not.toBeInTheDocument();
+    // Có lối sang màn Audit đầy đủ, vì widget cố tình không đủ dữ liệu.
+    expect(within(feed).getByRole("link", { name: /Xem toàn bộ/ })).toBeInTheDocument();
+  });
+
+  it("bảng hệ thống lấy số thật từ tools, MCP và usage", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    // `TOOLS_FIXTURE`: 3 tool hiện ra trong tổng số 5 ⇒ 2 tool bị RBAC ẩn.
+    testServer.use(http.get("/api/tools", () => HttpResponse.json(TOOLS_FIXTURE)));
+    testServer.use(http.get("/api/mcp", () => HttpResponse.json(MCP_FIXTURE)));
+    testServer.use(
+      http.get("/api/usage", () =>
+        HttpResponse.json(
+          usageFixture([
+            { day: "2026-09-27", total: 1000 },
+            { day: "2026-09-28", total: 2000 },
+            { day: "2026-09-29", total: 3000 },
+          ]),
+        ),
+      ),
+    );
+    renderHub();
+
+    await screen.findByTestId("hub-topology");
+    // "3 / 5" chứ không phải "3": người đọc phải biết registry còn tool bị ẩn.
+    await waitFor(() => expect(screen.getByTestId("hub-system-tools")).toHaveTextContent("3 / 5"));
+    // MCP: 1 trong 2 server đang nói chuyện được.
+    expect(screen.getByTestId("hub-system-mcp")).toHaveTextContent("1 / 2");
+    // Token 14 ngày = tổng của cửa sổ, không phải riêng hôm nay.
+    // `toLocaleString` không truyền locale ⇒ theo locale môi trường, giống hệt
+    // cách các màn khác in số (StatusPage, UsageBars).
+    expect(screen.getByTestId("hub-system-usage")).toHaveTextContent((1000 + 2000 + 3000).toLocaleString());
+  });
+
+  it("không bịa số liệu khi endpoint lỗi: hiện gạch ngang, không phải số 0", async () => {
+    testServer.use(agentsHandler([...FULL_AGENTS]));
+    testServer.use(http.get("/api/tools", () => new HttpResponse(null, { status: 500 })));
+    testServer.use(http.get("/api/mcp", () => new HttpResponse(null, { status: 500 })));
+    testServer.use(http.get("/api/usage", () => new HttpResponse(null, { status: 500 })));
+    renderHub();
+
+    await screen.findByTestId("hub-topology");
+    // React Query giữ `data === undefined` khi lỗi; "0" ở đây sẽ khẳng định sai
+    // rằng Bean không có tool nào — một lời nói dối lặp thành thói quen.
+    await waitFor(() => {
+      expect(screen.getByTestId("hub-system-tools")).toHaveTextContent("—");
+      expect(screen.getByTestId("hub-system-mcp")).toHaveTextContent("—");
+      expect(screen.getByTestId("hub-system-usage")).toHaveTextContent("—");
+    });
   });
 
   it("mascot hiện ở góc trên-trái của HUB", async () => {

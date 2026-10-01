@@ -1,6 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import { queryKeys } from "@/features/auth/queries";
+import { Link } from "react-router";
+import { AUDIT_FEED_SIZE, useAuditFeed } from "@/features/audit/queries";
+import { connectedCount, useMcpServers } from "@/features/mcp/queries";
+import { useStatus } from "@/features/status/queries";
+import { useTools } from "@/features/tools/queries";
+import { useUsage, windowTotal } from "@/features/usage/queries";
 import { useI18n } from "@/i18n";
 import { formatUptime } from "@/lib/format";
 
@@ -15,8 +18,24 @@ import { formatUptime } from "@/lib/format";
 export function ActivityFeed() {
   const { t } = useI18n();
   const status = useStatus();
-  const audit = useAudit();
-  const entries = (audit.data?.entries ?? []).slice(0, 5);
+  const tools = useTools();
+  const mcp = useMcpServers();
+  const usage = useUsage();
+  const audit = useAuditFeed();
+  // Cắt ở client **một lần nữa** dù đã hỏi `limit=5`: ràng buộc hiển thị là của
+  // widget, không nên đặt niềm tin vào việc server tôn trọng tham số. Rẻ hơn nhiều
+  // so với việc một thay đổi ở server làm vỡ bố cục bảng điều khiển.
+  const entries = (audit.data?.entries ?? []).slice(0, AUDIT_FEED_SIZE);
+
+  // Ba số dưới đây đều lấy từ endpoint **đã lọc RBAC ở server**: HUB hiện đúng
+  // những gì người đang xem được phép thấy, không tự lọc lần nữa. Vì vậy phần
+  // "ẩn theo role" là *thông tin* (còn tổng cộng bao nhiêu), không phải bí mật.
+  const toolTotal = tools.data?.total ?? 0;
+  const toolVisible = tools.data?.tools.length ?? 0;
+  const toolHidden = Math.max(0, toolTotal - toolVisible);
+  const mcpTotal = mcp.data?.servers.length ?? 0;
+  const mcpConnected = connectedCount(mcp.data?.servers ?? []);
+  const usageWindow = windowTotal(usage.data?.days ?? []);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -24,9 +43,16 @@ export function ActivityFeed() {
           của HUB xử lý khác nhau (sơ đồ có khối, hàng chờ có viền màu, hoạt
           động phẳng) là chủ ý chống "đồng bộ card". */}
       <section aria-labelledby="hub-activity-title" data-testid="hub-activity">
-        <h2 id="hub-activity-title" className="text-sm font-semibold">
-          {t("hub.activity.title")}
-        </h2>
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="hub-activity-title" className="text-sm font-semibold">
+            {t("hub.activity.title")}
+          </h2>
+          {entries.length > 0 ? (
+            <Link to="/audit" className="text-xs text-ink-muted underline underline-offset-2 hover:text-ink">
+              {t("hub.activity.viewAll")}
+            </Link>
+          ) : null}
+        </div>
         {audit.isPending ? (
           <p className="mt-2 text-xs text-ink-muted" role="status">
             {t("common.loading")}
@@ -77,6 +103,26 @@ export function ActivityFeed() {
             }
             numeric
           />
+          {/* Số tool hiện ra đã bị RBAC cắt: ghi cả tổng để người đọc biết có
+              đang bị ẩn, chứ không tưởng registry chỉ có mấy tool đó. */}
+          <Row
+            label={t("hub.system.tools")}
+            value={tools.isPending ? "—" : toolVisible + (toolHidden > 0 ? ` / ${toolTotal}` : "")}
+            numeric
+            testId="hub-system-tools"
+          />
+          <Row
+            label={t("hub.system.mcp")}
+            value={mcp.isPending ? "—" : `${mcpConnected} / ${mcpTotal}`}
+            numeric
+            testId="hub-system-mcp"
+          />
+          <Row
+            label={t("hub.system.usage")}
+            value={usage.isPending ? "—" : usageWindow.toLocaleString()}
+            numeric
+            testId="hub-system-usage"
+          />
         </dl>
       </section>
     </div>
@@ -88,6 +134,7 @@ function Row({
   value,
   mono,
   numeric,
+  testId,
 }: {
   label: string;
   value: string;
@@ -95,27 +142,14 @@ function Row({
   mono?: boolean;
   /** Số đo ⇒ `tnum` của Inter, KHÔNG mono. */
   numeric?: boolean;
+  testId?: string;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="text-ink-muted">{label}</dt>
-      <dd className={`truncate ${mono ? "font-mono" : ""} ${numeric ? "hub-num" : ""}`}>{value}</dd>
+      <dd data-testid={testId} className={`truncate ${mono ? "font-mono" : ""} ${numeric ? "hub-num" : ""}`}>
+        {value}
+      </dd>
     </div>
   );
-}
-
-function useStatus() {
-  return useQuery({
-    queryKey: queryKeys.status,
-    queryFn: ({ signal }) => api.status(signal),
-    refetchInterval: 30_000,
-  });
-}
-
-function useAudit() {
-  return useQuery({
-    queryKey: queryKeys.audit,
-    queryFn: ({ signal }) => api.listAudit(null, signal),
-    refetchInterval: 30_000,
-  });
 }

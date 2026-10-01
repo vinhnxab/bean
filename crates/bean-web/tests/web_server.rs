@@ -1,6 +1,7 @@
 //! Black-box tests M9: HTTP auth/security and WebSocket lifecycle.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
@@ -16,7 +17,8 @@ use bean_memory::{MemoryStore, SqliteStore, Store};
 use bean_security::{AuditLog, CapWorkspace};
 use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind};
 use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
-use bean_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec};
+use bean_types::config::{McpServerConfig, RoleConfig};
+use bean_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec, Usage};
 use bean_web::{
     AuthService, WebState, build_router, set_password, set_password_and_revoke_sessions,
 };
@@ -85,10 +87,24 @@ async fn make_state(
     store: Arc<dyn Store>,
     responses: Vec<LlmResponse>,
 ) -> (AxumRouter, WebState) {
+    make_state_with(config, store, responses, Vec::new()).await
+}
+
+/// Như [`make_state`] nhưng đăng ký thêm tool — cần cho các test đọc
+/// `GET /api/tools` / `/api/mcp`, nơi nội dung payload **là** nội dung registry.
+async fn make_state_with(
+    config: Config,
+    store: Arc<dyn Store>,
+    responses: Vec<LlmResponse>,
+    extra_tools: Vec<Arc<dyn Tool>>,
+) -> (AxumRouter, WebState) {
     set_password(&config.data.dir, PASSWORD).unwrap();
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
     let mut registry = ToolRegistry::with_workspace(workspace.clone());
     registry.register(Arc::new(ConfirmWrite)).unwrap();
+    for tool in extra_tools {
+        registry.register(tool).unwrap();
+    }
     let store_dyn = store;
     let create_root = config.data.dir.join("skills");
     let skills = SkillCatalog::load_with_paths(
@@ -1002,4 +1018,349 @@ async fn skill_drafts_can_be_listed_and_approved_but_are_inactive_first() {
         .await
         .unwrap();
     assert_eq!(detail.status(), StatusCode::OK);
+}
+
+// ───────────── Capability endpoints: /tools /mcp /usage /system ─────────────
+//
+// Bốn endpoint này là nguồn dữ liệu của màn Tools/MCP/Status và widget Hub.
+// Test ở đây chốt ba thứ UI không tự kiểm được: RBAC lọc ở server, trạng thái
+// MCP suy ra từ registry chứ không bịa, và API không bao giờ lộ secret.
+
+/// Tool có tag RBAC và mức rủi ro cố định — đủ cho test `/api/tools`.
+#[derive(Debug)]
+struct TaggedTool {
+    name: &'static str,
+    risk: Risk,
+    tags: &'static [&'static str],
+    untrusted: bool,
+}
+
+#[async_trait]
+impl Tool for TaggedTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::new(
+            self.name,
+            "tool có tag để test phân quyền",
+            serde_json::json!({"type": "object"}),
+        )
+    }
+
+    fn risk(&self, _args: &serde_json::Value) -> Risk {
+        self.risk
+    }
+
+    fn required_tags(&self) -> Vec<&str> {
+        self.tags.to_vec()
+    }
+
+    fn marks_untrusted(&self) -> bool {
+        self.untrusted
+    }
+
+    async fn call(&self, _ctx: &ToolCtx, _args: serde_json::Value) -> Result<String, ToolError> {
+        Ok("ok".into())
+    }
+}
+
+/// Fixture cho phép sửa config và đăng ký thêm tool trước khi dựng app.
+async fn fixture_with(
+    origin: &str,
+    tweak: impl FnOnce(&mut Config),
+    extra_tools: Vec<Arc<dyn Tool>>,
+) -> (tempfile::TempDir, AxumRouter, Arc<MemoryStore>) {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut config = make_config(&data, &workspace, origin);
+    tweak(&mut config);
+    let store = Arc::new(MemoryStore::new());
+    let (app, _state) = make_state_with(config, store.clone(), vec![], extra_tools).await;
+    (dir, app, store)
+}
+
+/// GET một endpoint đã đăng nhập và parse JSON.
+async fn get_json(app: &AxumRouter, path: &str, origin: &str, token: &str) -> serde_json::Value {
+    use http_body_util::BodyExt;
+
+    let response = app
+        .clone()
+        .oneshot(get_request(path, origin, Some(token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "GET {path} phải trả 200");
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+fn role_config(name: &str, tags: &[&str]) -> RoleConfig {
+    RoleConfig {
+        name: name.to_string(),
+        tool_tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+        forbid_tags: Vec::new(),
+        allowed_tool_tags: Vec::new(),
+        context_budget_tokens: None,
+        daily_token_budget: None,
+    }
+}
+
+#[tokio::test]
+async fn capability_endpoints_require_login_and_answer_json() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, _store) = fixture(origin, vec![]).await;
+    for path in ["/api/tools", "/api/mcp", "/api/usage", "/api/system"] {
+        let response = app
+            .clone()
+            .oneshot(get_request(path, origin, None))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{path} phải cần đăng nhập"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json",
+            "{path} phải trả lỗi JSON, không phải HTML"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tools_endpoint_reports_risk_source_and_tags() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _store) = fixture_with(
+        origin,
+        |_| {},
+        vec![Arc::new(TaggedTool {
+            name: "security_scan",
+            risk: Risk::Dangerous,
+            tags: &["infra-scan"],
+            untrusted: true,
+        })],
+    )
+    .await;
+    let token = login(&app, origin).await;
+    let body = get_json(&app, "/api/tools", origin, &token).await;
+
+    // RBAC tắt ⇒ mọi tool đều thấy, và UI phải biết điều đó để không hiển thị
+    // thông báo "một số tool bị ẩn vì quyền" vô nghĩa.
+    assert_eq!(body["rbac_enabled"], false);
+    assert_eq!(body["viewer_role"], "default");
+    assert_eq!(body["total"], 2);
+    let names: Vec<&str> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["confirm_write", "security_scan"]);
+
+    let scan = &body["tools"][1];
+    assert_eq!(scan["risk"], "dangerous");
+    assert_eq!(scan["source"], "builtin");
+    assert_eq!(scan["mcp_server"], serde_json::Value::Null);
+    assert_eq!(scan["required_tags"], serde_json::json!(["infra-scan"]));
+    assert_eq!(scan["untrusted"], true);
+    assert!(scan["description"].as_str().unwrap().len() > 10);
+    assert_eq!(body["tools"][0]["risk"], "confirm");
+    assert_eq!(body["tools"][0]["untrusted"], false);
+}
+
+#[tokio::test]
+async fn tools_endpoint_hides_tagged_tool_from_rbac_role() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _store) = fixture_with(
+        origin,
+        |config| {
+            config.roles = vec![
+                role_config("admin", &["*"]),
+                role_config("finance-readonly", &["billing-read"]),
+            ];
+            // RBAC chỉ bật khi user_roles có phần tử; định danh phiên web mặc định
+            // là web:admin nên map này đổi luôn role của người đang gọi API.
+            config
+                .agent
+                .user_roles
+                .insert("web:admin".to_string(), "finance-readonly".to_string());
+        },
+        vec![Arc::new(TaggedTool {
+            name: "security_scan",
+            risk: Risk::Dangerous,
+            tags: &["infra-scan"],
+            untrusted: true,
+        })],
+    )
+    .await;
+    let token = login(&app, origin).await;
+    let body = get_json(&app, "/api/tools", origin, &token).await;
+    let raw = serde_json::to_string(&body).unwrap();
+
+    // Điều kiện cốt lõi: tool gate-tag không xuất hiện ở BẤT KỲ đâu trong body.
+    assert!(
+        !raw.contains("security_scan"),
+        "tool mang tag infra-scan lọt vào payload của role tài chính: {raw}"
+    );
+    assert!(raw.contains("confirm_write"), "tool untagged vẫn phải thấy");
+
+    assert_eq!(body["viewer_role"], "finance-readonly");
+    assert_eq!(body["rbac_enabled"], true);
+    // `total` vẫn là tổng registry: UI nói được "2 tool đang chạy, bạn thấy 1".
+    assert_eq!(body["total"], 2);
+    assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mcp_endpoint_derives_connection_and_never_leaks_env() {
+    let origin = "http://127.0.0.1:7878";
+    let secret = "super-secret-siem-token";
+    let (_dir, app, _store) = fixture_with(
+        origin,
+        |config| {
+            config.mcp_servers.push(McpServerConfig {
+                name: "siem".to_string(),
+                command: "docker".to_string(),
+                args: vec!["run".to_string(), "--rm".to_string()],
+                env: BTreeMap::from([("SIEM_TOKEN".to_string(), secret.to_string())]),
+                trust: false,
+                call_timeout_seconds: Some(300),
+                inherit_env: vec![],
+                tool_tags: vec!["infra-read".to_string()],
+            });
+            config.mcp_servers.push(McpServerConfig {
+                name: "dead".to_string(),
+                command: "/bin/false".to_string(),
+                args: vec![],
+                env: BTreeMap::new(),
+                trust: true,
+                call_timeout_seconds: None,
+                inherit_env: vec![],
+                tool_tags: vec![],
+            });
+        },
+        // Tool duy nhất mang tiền tố `mcp__siem__` ⇒ server `siem` được coi là đã
+        // discovery thành công, còn `dead` thì không.
+        vec![Arc::new(TaggedTool {
+            name: "mcp__siem__cve_lookup",
+            risk: Risk::Safe,
+            tags: &["infra-read"],
+            untrusted: true,
+        })],
+    )
+    .await;
+    let token = login(&app, origin).await;
+    let body = get_json(&app, "/api/mcp", origin, &token).await;
+    let raw = serde_json::to_string(&body).unwrap();
+
+    assert_eq!(body["servers"].as_array().unwrap().len(), 2);
+    let siem = &body["servers"][0];
+    assert_eq!(siem["name"], "siem");
+    assert_eq!(siem["command"], "docker");
+    assert_eq!(siem["args"], serde_json::json!(["run", "--rm"]));
+    assert_eq!(siem["tool_count"], 1);
+    assert_eq!(siem["connected"], true);
+    assert_eq!(siem["trusted"], false);
+    assert_eq!(siem["required_tags"], serde_json::json!(["infra-read"]));
+    assert_eq!(siem["call_timeout_seconds"], serde_json::json!(300));
+
+    let dead = &body["servers"][1];
+    assert_eq!(dead["connected"], false);
+    assert_eq!(dead["tool_count"], 0);
+    assert_eq!(dead["trusted"], true);
+    assert_eq!(dead["call_timeout_seconds"], serde_json::Value::Null);
+
+    // `env` của MCP server là secret (mục 15.6): không giá trị, không cả tên biến.
+    assert!(
+        !raw.contains(secret) && !raw.contains("SIEM_TOKEN") && !raw.contains("\"env\""),
+        "biến môi trường của MCP server bị lộ qua API: {raw}"
+    );
+}
+
+#[tokio::test]
+async fn usage_endpoint_is_clamped_chronological_and_never_fabricates() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, store) = fixture(origin, vec![]).await;
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    store
+        .add_usage(
+            &today,
+            Usage {
+                input_tokens: 1200,
+                output_tokens: 300,
+            },
+        )
+        .await
+        .unwrap();
+    let token = login(&app, origin).await;
+
+    let body = get_json(&app, "/api/usage", origin, &token).await;
+    assert_eq!(
+        body["days"].as_array().unwrap().len(),
+        14,
+        "mặc định 14 ngày"
+    );
+    assert_eq!(body["today_tokens"], 1500);
+    assert_eq!(body["daily_token_budget"], 2000000);
+
+    let days = body["days"].as_array().unwrap();
+    assert_eq!(days[13]["day"], serde_json::json!(today));
+    assert_eq!(days[13]["total_tokens"], 1500);
+    assert_eq!(days[13]["input_tokens"], 1200);
+    // Ngày không có dữ liệu phải là **0**, không được vắng mặt: biểu đồ thiếu cột
+    // thì người dùng đọc là "hệ thống ngừng chạy", sai hoàn toàn.
+    assert_eq!(days[12]["total_tokens"], 0);
+
+    for window in days.windows(2) {
+        assert!(
+            window[0]["day"].as_str().unwrap() < window[1]["day"].as_str().unwrap(),
+            "danh sách ngày phải tăng dần: {} rồi {}",
+            window[0]["day"],
+            window[1]["day"]
+        );
+    }
+
+    // Trần và sàn: mỗi ngày là một query nên API tự clamp, không đẩy việc đó cho UI.
+    let clamped = get_json(&app, "/api/usage?days=999", origin, &token).await;
+    assert_eq!(clamped["days"].as_array().unwrap().len(), 31);
+    let floored = get_json(&app, "/api/usage?days=0", origin, &token).await;
+    assert_eq!(floored["days"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn system_endpoint_reports_config_without_secrets() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, _store) = fixture(origin, vec![]).await;
+    let token = login(&app, origin).await;
+    let body = get_json(&app, "/api/system", origin, &token).await;
+    let raw = serde_json::to_string(&body).unwrap();
+
+    assert_eq!(body["sandbox"]["mode"], "docker");
+    assert_eq!(body["sandbox"]["network"], false);
+    assert_eq!(body["web"]["bind"], "127.0.0.1:7878");
+    assert_eq!(body["web"]["allow_remote"], false);
+    assert_eq!(body["telegram"]["enabled"], true);
+    assert_eq!(body["telegram"]["allowed_users"], 1);
+    assert_eq!(body["rbac_enabled"], false);
+    assert_eq!(body["projects"], serde_json::json!(["default"]));
+    assert_eq!(body["provider"], "anthropic");
+    assert_eq!(body["api_key_env"], "ANTHROPIC_API_KEY");
+    assert_eq!(body["max_steps"], 25);
+
+    // Những thứ phải **không** có mặt: mật khẩu, token phiên đang dùng, bí mật Telegram.
+    assert!(
+        !raw.contains(PASSWORD),
+        "mật khẩu đăng nhập không được xuất hiện ở bất kỳ endpoint nào"
+    );
+    assert!(
+        !raw.contains(&token),
+        "token phiên không được echo lại qua API"
+    );
+    assert!(
+        !raw.contains("TELEGRAM_BOT_TOKEN") && !raw.contains("token_env"),
+        "tên biến chứa bot token không thuộc về response: {raw}"
+    );
+    // Tên biến API key thì được phép: đó là cách cấu hình, không phải bí mật.
+    assert!(raw.contains("ANTHROPIC_API_KEY"));
 }

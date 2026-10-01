@@ -7,6 +7,7 @@ import type {
   LoginRequest,
   LoginResponse,
   LogoutResponse,
+  McpServerListResponse,
   MemoryFileRequest,
   MemoryFileResponse,
   MemoryListResponse,
@@ -22,11 +23,14 @@ import type {
   SkillDraftListResponse,
   SkillListResponse,
   StatusResponse,
+  SystemResponse,
   TaskDto,
   TaskListResponse,
   TaskRequest,
   TaskUpdateRequest,
+  ToolListResponse,
   UpdateSessionRequest,
+  UsageListResponse,
 } from "@/api/bindings";
 import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
 
@@ -142,6 +146,33 @@ export const api = {
    */
   listAgents: (signal?: AbortSignal) => requestJson<AgentListResponse>("/api/agents", { signal }),
 
+  /**
+   * Tool đang chạy trong agent, **đã lọc theo RBAC ở server**.
+   *
+   * `total` là tổng registry, `tools.length` là phần người gọi được thấy — hai số
+   * khác nhau là cố ý để UI nói được "27 tool đang chạy, bạn thấy 12" thay vì để
+   * người dùng tưởng Bean chỉ có 12 tool.
+   */
+  listTools: (signal?: AbortSignal) => requestJson<ToolListResponse>("/api/tools", { signal }),
+
+  /**
+   * MCP server đã khai báo + trạng thái suy ra từ registry.
+   *
+   * API **không** trả `env` của server: giá trị biến môi trường là secret, và tên
+   * biến cũng gợi ý loại credential đang dùng.
+   */
+  listMcpServers: (signal?: AbortSignal) => requestJson<McpServerListResponse>("/api/mcp", { signal }),
+
+  /** Token đã dùng theo từng ngày (server clamp 1–31 ngày). */
+  usage: (days = 14, signal?: AbortSignal) =>
+    requestJson<UsageListResponse>(withQuery("/api/usage", { days }), { signal }),
+
+  /**
+   * Cấu hình runtime **đã khử secret** — API key, bot token và MCP `env` không bao
+   * giờ đi qua endpoint này; chỉ có *tên* biến môi trường của API key.
+   */
+  system: (signal?: AbortSignal) => requestJson<SystemResponse>("/api/system", { signal }),
+
   listSessions: (query: SessionListOptions = {}, signal?: AbortSignal) =>
     requestJson<SessionListResponse>(
       withQuery("/api/sessions", {
@@ -214,8 +245,15 @@ export const api = {
 
   deleteTask: (id: number) => requestJson<DeleteResponse>(`/api/tasks/${id}`, { method: "DELETE", body: {} }),
 
-  listAudit: (before: number | null = null, signal?: AbortSignal) =>
-    requestJson<AuditListResponse>(withQuery("/api/audit", { before, limit: 25 }), { signal }),
+  /**
+   * Trang audit mới nhất (cũ hơn `before`).
+   *
+   * `limit` mặc định khớp `AUDIT_PAGE_SIZE` của màn Audit; widget HUB truyền số
+   * nhỏ hơn vì nó chỉ hiện 5 dòng — tải 25 dòng rồi cắt còn 5 là tải thừa mà
+   * người dùng không đợi được. Server clamp tối đa 500.
+   */
+  listAudit: (before: number | null = null, signal?: AbortSignal, limit = 25) =>
+    requestJson<AuditListResponse>(withQuery("/api/audit", { before, limit }), { signal }),
 
   status: (signal?: AbortSignal) => requestJson<StatusResponse>("/api/status", { signal }),
 };

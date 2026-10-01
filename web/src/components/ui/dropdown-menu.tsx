@@ -3,7 +3,13 @@ import type * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-/** DropdownMenu — shadcn/ui trên nền Radix (nét sẵn có trong package.json). */
+/**
+ * DropdownMenu — shadcn/ui trên nền Radix (nét sẵn có trong package.json).
+ *
+ * Chỉ dùng cho menu **hành động**. Chọn *một giá trị* trong tập giá trị thì dùng
+ * `select.tsx` (`Select`): `vi`/`en` là hai trạng thái song song, không phải hai
+ * việc cần làm, và `Select` cho mục `role="option"` + `aria-selected` đúng nghĩa.
+ */
 function DropdownMenu(props: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }

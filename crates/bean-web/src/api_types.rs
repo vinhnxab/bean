@@ -625,3 +625,250 @@ pub enum ServerMsg {
     },
     Pong,
 }
+
+// ───────────────────────────── Tools (read-only) ────────────────────────────
+
+/// Một tool đã đăng ký trong registry, phục vụ màn **Tools**.
+///
+/// # Vì sao `risk` là mức *khởi điểm*
+///
+/// `Tool::risk` nhận `args` — một số tool đổi mức rủi ro **theo tham số**
+/// (`run_shell` với lệnh nguy hiểm là `Dangerous`, với `ls` là `Confirm`).
+/// Ở đây không có lời gọi thật nào để xét, nên dùng tham số rỗng — cùng cách
+/// `bean_core::mcp_server::gate::expose_gate` đang dùng, để hai nơi không lệch nhau.
+/// UI vì thế phải hiển thị nhãn "mức rủi ro mặc định", không khẳng định mọi lời
+/// gọi đều ở mức đó.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ToolDto {
+    /// Tên tool đúng như model nhìn thấy (`read_file`, `mcp__<server>__<tool>`).
+    pub name: String,
+    /// Mô tả tool — chính là text gửi cho model, nên màn Tools là nơi duy nhất
+    /// người dùng đọc được "Bean tự hiểu tool này để làm gì".
+    pub description: String,
+    /// Mức rủi ro với tham số rỗng (xem docs ở [`ToolDto`]).
+    pub risk: RiskDto,
+    /// `"builtin"` hoặc `"mcp"`.
+    pub source: String,
+    /// Tên MCP server khi `source = "mcp"`; `None` với tool built-in.
+    pub mcp_server: Option<String>,
+    /// Tag RBAC mà role phải giữ **ít nhất một** để thấy/gọi tool. Rỗng ⇒ tool
+    /// untagged: mọi role đã cấp quyền đều thấy (role `no-access` vẫn không thấy).
+    pub required_tags: Vec<String>,
+    /// Tag bổ sung (`also_visible_to`): mở một tool untagged cho role cụ thể (M24).
+    pub extra_tags: Vec<String>,
+    /// Tool trả nội dung từ nguồn ngoài lõi và được bọc `<untrusted_content>`
+    /// (mục 15.4) — lý do nó có thể dẫn tới prompt injection.
+    pub untrusted: bool,
+}
+
+/// Response của `GET /api/tools`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ToolListResponse {
+    /// Tool mà **người gọi** được thấy, đã sort theo tên.
+    ///
+    /// Lọc xảy ra ở server trước khi serialise: tool bị chặn không xuất hiện
+    /// trong payload (RBAC không phải việc của UI — xem `list_agents`).
+    pub tools: Vec<ToolDto>,
+    /// Tổng số tool đã đăng ký, kể cả tool người gọi không được thấy.
+    pub total: usize,
+    /// Role của người gọi — UI dùng để giải thích vì sao danh sách bị cắt.
+    pub viewer_role: String,
+    /// RBAC có bật không (`agent.user_roles` khác rỗng). `false` ⇒ một người dùng,
+    /// mọi tool đều thấy.
+    pub rbac_enabled: bool,
+}
+
+// ───────────────────────────── MCP servers (read-only) ──────────────────────
+
+/// Một `[[mcp_servers]]` kèm trạng thái kết nối **suy ra từ registry**.
+///
+/// # Trạng thái lấy từ đâu
+///
+/// `McpRuntime` giữ connection nhưng không expose trạng thái, và thêm API đó sẽ
+/// chạm vào đường khởi động. Trong khi đó `McpRuntime::register_server` chỉ đăng
+/// ký tool **sau khi** initialize + discovery thành công, nên "có bao nhiêu tool
+/// `mcp__<server>__*` trong registry" là bằng chứng trung thực nhất: `> 0` nghĩa
+/// là server đã nói chuyện được với Bean.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpServerDto {
+    /// Tên server (tiền tố `mcp__<name>__`).
+    pub name: String,
+    /// Lệnh khởi chạy — có thể là `docker run …` để bọc server không tin cậy.
+    pub command: String,
+    /// Tham số dòng lệnh.
+    pub args: Vec<String>,
+    /// `true` ⇒ tool của server hạ xuống `Safe`; `false` ⇒ mọi tool là `Confirm`.
+    pub trusted: bool,
+    /// Trần thời gian cho **một lần gọi tool** của server này (giây).
+    pub call_timeout_seconds: Option<u32>,
+    /// Tag RBAC áp cho mọi tool của server (M22).
+    pub required_tags: Vec<String>,
+    /// Số tool của server đang có trong registry (0 ⇒ chưa kết nối hoặc không có tool).
+    pub tool_count: usize,
+    /// `tool_count > 0`: server đã kết nối và discovery thành công.
+    pub connected: bool,
+}
+
+/// Response của `GET /api/mcp`.
+///
+/// **Không** chứa `env`: giá trị biến môi trường của MCP server là secret (mục 15.6),
+/// và ngay tên biến cũng gợi ý loại credential đang dùng — UI không cần chúng.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpServerListResponse {
+    /// Danh sách server theo thứ tự khai báo trong `bean.toml`.
+    pub servers: Vec<McpServerDto>,
+}
+
+// ───────────────────────────── Usage (read-only) ────────────────────────────
+
+/// Token đã dùng trong **một ngày** (chốt UTC — cùng khoá với bảng `usage_by_role`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageDayDto {
+    /// Ngày dạng `YYYY-MM-DD`.
+    pub day: String,
+    /// Token đầu vào.
+    pub input_tokens: u64,
+    /// Token đầu ra.
+    pub output_tokens: u64,
+    /// Tổng hai chiều — so với `daily_token_budget` để tính mức đã dùng.
+    pub total_tokens: u64,
+}
+
+/// Query của `GET /api/usage`.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageQuery {
+    /// Số ngày gần nhất (tính cả hôm nay). Mặc định 14, tối đa 31 — biểu đồ
+    /// theo ngày không cần dài hơn, và mỗi ngày là một query SQLite.
+    #[serde(default)]
+    pub days: Option<i64>,
+}
+
+/// Response của `GET /api/usage`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageListResponse {
+    /// Các ngày gần nhất theo thứ tự **tăng dần** (ngày cũ nhất trước).
+    pub days: Vec<UsageDayDto>,
+    /// Ngân sách token/ngày (`security.daily_token_budget`).
+    pub daily_token_budget: u64,
+    /// Token đã dùng hôm nay — bằng phần tử cuối của `days` khi hôm nay có dữ liệu.
+    pub today_tokens: u64,
+}
+// ───────────────────────────── System / config (read-only) ──────────────────
+
+/// Thông tin sandbox (`[security.sandbox]`) cho màn Status.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SandboxDto {
+    /// `"docker"` hoặc `"host"` — `host` nghĩa là **mọi** lệnh shell là `Dangerous`.
+    pub mode: String,
+    /// Image dùng cho container sandbox.
+    pub image: String,
+    /// Container có được ra mạng không (mặc định: không).
+    pub network: bool,
+    /// Trần bộ nhớ (`docker --memory`).
+    pub memory: String,
+    /// Số CPU được dùng.
+    pub cpus: f32,
+    /// Trần số tiến trình (chống fork bomb).
+    pub pids_limit: u32,
+    /// Thời gian tối đa cho một lệnh shell (giây).
+    pub timeout_seconds: u64,
+}
+
+/// Một role trong `[[roles]]` — màn Status giải thích RBAC bằng dữ liệu thật.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RoleDto {
+    /// Tên role.
+    pub name: String,
+    /// Tag được cấp (`["*"]` = toàn quyền).
+    pub tool_tags: Vec<String>,
+    /// Tag bị **cấm cứng** (four-eyes, M21.6).
+    pub forbid_tags: Vec<String>,
+    /// Danh sách trắng tag — rỗng ⇒ không giới hạn (M24).
+    pub allowed_tool_tags: Vec<String>,
+}
+
+/// Kênh web (`[web]`) — chỉ những thứ người vận hành cần biết, không có secret.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WebChannelDto {
+    /// Bật hay tắt.
+    pub enabled: bool,
+    /// Địa chỉ bind (`127.0.0.1:7878` = chỉ máy chủ).
+    pub bind: String,
+    /// Cho phép bind ngoài loopback — khi `true` phải đặt sau reverse proxy TLS.
+    pub allow_remote: bool,
+    /// TTL của phiên đăng nhập (giờ).
+    pub session_ttl_hours: u32,
+}
+
+/// Kênh Telegram (`[telegram]`) — **không bao giờ** chứa token.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TelegramChannelDto {
+    /// Bật hay tắt.
+    pub enabled: bool,
+    /// Số user id trong allowlist (id cụ thể không cần cho màn trạng thái).
+    pub allowed_users: usize,
+    /// Giới hạn số tin mỗi phút cho mỗi chat.
+    pub rate_limit_per_minute: u32,
+}
+
+/// Response của `GET /api/system` — cấu hình **đã khử secret** để hiển thị.
+///
+/// Bất biến: endpoint này **không** trả API key, bot token, MCP `env`, hay đường dẫn
+/// `bean.toml`. `api_key_env` là **tên biến môi trường**, không phải giá trị (mục 15.6).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SystemResponse {
+    /// Tên agent (`agent.agent_name`).
+    pub agent_name: String,
+    /// Thư mục làm việc — mọi thao tác file bị jail trong đây.
+    pub workspace: String,
+    /// Múi giờ IANA dùng cho cron và lịch hẹn.
+    pub timezone: String,
+    /// Provider LLM (`anthropic` | `openai_compat`).
+    pub provider: String,
+    /// Model đang dùng.
+    pub model: String,
+    /// Tên biến môi trường chứa API key (**không** phải key).
+    pub api_key_env: String,
+    /// Trần token mỗi lượt gọi.
+    pub max_tokens: u32,
+    /// Ngân sách token cho context gửi model.
+    pub context_budget_tokens: u32,
+    /// Trần số bước của một run.
+    pub max_steps: u32,
+    /// Trần thời gian cho mỗi tool call (giây).
+    pub tool_timeout_seconds: u64,
+    /// Nhóm tool đang bật (`[tools].enabled`).
+    pub tool_groups: Vec<String>,
+    /// Project profile; rỗng ⇒ chỉ có project `default`.
+    pub projects: Vec<String>,
+    /// Bảng role RBAC.
+    pub roles: Vec<RoleDto>,
+    /// RBAC có bật không.
+    pub rbac_enabled: bool,
+    /// Sandbox cho `run_shell`.
+    pub sandbox: SandboxDto,
+    /// Kênh web.
+    pub web: WebChannelDto,
+    /// Kênh Telegram.
+    pub telegram: TelegramChannelDto,
+    /// Learning loop (đề xuất skill nháp sau run) có bật không.
+    pub learning_enabled: bool,
+    /// Bean có đang làm MCP server cho client ngoài không (M25).
+    pub mcp_server_enabled: bool,
+    /// Số MCP client được phép gọi vào Bean (M25).
+    pub mcp_clients: usize,
+    /// Tool browser (M26) có bật không.
+    pub browser_enabled: bool,
+}

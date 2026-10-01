@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { StatusPage } from "@/features/status/StatusPage";
 import { renderManagement } from "@/test/management";
-import { testServer } from "@/test/server";
+import { testServer, usageFixture } from "@/test/server";
 
 describe("StatusPage", () => {
   it("hiển thị trạng thái tải", () => {
@@ -46,5 +46,38 @@ describe("StatusPage", () => {
     );
     renderManagement(<StatusPage />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Đã xảy ra lỗi.");
+  });
+
+  it("hiển thị xu hướng token 14 ngày cạnh số của hôm nay", async () => {
+    testServer.use(
+      http.get("/api/usage", () =>
+        HttpResponse.json(
+          usageFixture([
+            { day: "2026-09-28", total: 900 },
+            { day: "2026-09-29", total: 400 },
+          ]),
+        ),
+      ),
+    );
+    renderManagement(<StatusPage />);
+    expect(await screen.findAllByTestId("usage-bar")).toHaveLength(2);
+    expect(screen.getByText("Token 14 ngày")).toBeInTheDocument();
+    expect(screen.getByText("1,300")).toBeInTheDocument();
+  });
+
+  it("panel cấu hình cho thấy sandbox và bind address thật", async () => {
+    renderManagement(<StatusPage />);
+    expect(await screen.findByText("bean-sandbox:latest")).toBeInTheDocument();
+    expect(screen.getByText("docker")).toBeInTheDocument();
+    expect(screen.getByText("127.0.0.1:7878")).toBeInTheDocument();
+    expect(screen.getByText(/RBAC đang tắt/)).toBeInTheDocument();
+  });
+
+  it("panel cấu hình chỉ in **tên** biến API key, không có chỗ cho giá trị", async () => {
+    renderManagement(<StatusPage />);
+    expect(await screen.findByText("ANTHROPIC_API_KEY")).toBeInTheDocument();
+    // `/api/system` đã khử secret phía server; UI cũng không được tự thêm gì có dạng key.
+    expect(document.body.textContent).not.toMatch(/sk-[A-Za-z0-9-]{8,}/);
+    expect(document.body.textContent).not.toMatch(/token\s*[:=]\s*[A-Za-z0-9_-]{16,}/i);
   });
 });

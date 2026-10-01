@@ -18,9 +18,25 @@ export const queryKeys = {
   skillDrafts: ["skills", "drafts"] as const,
   tasks: ["tasks"] as const,
   audit: ["audit"] as const,
+  /**
+   * Nguồn cấp 5 dòng audit đầu cho widget HUB. Tách khoá khỏi `audit` vì hai
+   * chỗ dùng hai kiểu query khác nhau trên cùng endpoint: màn Audit cần phân
+   * trang vô hạn, HUB chỉ cần một trang đầu. Dùng chung khoá sẽ khiến React
+   * Query phải chọn giữa `InfiniteData` và mảng phẳng — nguồn của lỗi dữ liệu
+   * kiểu "lần nào cũng rỗng ở trang 2".
+   */
+  auditFeed: ["audit", "feed"] as const,
   status: ["status"] as const,
   /** Báo cáo agent đã lọc RBAC ở server — không lọc lại ở client. */
   agents: ["agents"] as const,
+  /** Danh sách tool (cũng đã lọc RBAC ở server). */
+  tools: ["tools"] as const,
+  /** MCP server đã khai báo + trạng thái suy ra từ registry. */
+  mcp: ["mcp"] as const,
+  /** Token theo ngày — `days` là một phần của khoá vì đáp án khác nhau theo nó. */
+  usage: (days: number) => ["usage", { days }] as const,
+  /** Cấu hình runtime đã khử secret. */
+  system: ["system"] as const,
 };
 
 export function useAuth() {

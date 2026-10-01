@@ -18,7 +18,17 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:7878",
+        // Backend dev chạy bằng cấu hình riêng (`bean.dev.toml`) ở cổng **7879**,
+        // vì Bean kiểm tra `Origin` phải khớp `web.public_origin`: muốn xem giao
+        // diện ở `http://localhost:5173` thì `public_origin` của instance dev
+        // phải là chính `http://localhost:5173`. Instance thật (cổng 7878,
+        // `public_origin` 127.0.0.1:7878) không bị ảnh hưởng và không đụng
+        // `data.dir` của nó.
+        target: "http://127.0.0.1:7879",
+        // GIỮ `false`: `Origin` của trình duyệt (localhost:5173) phải đi nguyên
+        // tới backend để nó tự so khớp với `public_origin`. Đổi thành `true` sẽ
+        // ép `Origin` về giá trị của `target` — che đúng cái rào CSRF mà
+        // `public_origin` dựng ra.
         changeOrigin: false,
         ws: true,
       },
