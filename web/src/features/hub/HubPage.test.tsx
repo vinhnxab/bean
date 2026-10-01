@@ -341,23 +341,35 @@ describe("HUB", () => {
     expect(block).toContain("scroll-behavior: auto !important");
   });
 
-  it("favicon không bị cắt tai: mọi nét nằm trong viewBox", async () => {
-    const { MARK_BOUNDS, MARK_NUDGE } = await import("@/components/brand/markPaths");
-    const { readFileSync } = await import("node:fs");
-    const favicon = readFileSync("public/favicon.svg", "utf8");
+  it("index.html trỏ favicon vào badge PNG, không còn favicon.svg", async () => {
+    const { existsSync, readFileSync } = await import("node:fs");
+    const html = readFileSync("index.html", "utf8");
+
+    // Icon chính là badge PNG sinh từ `brand/bean.png` (pnpm brand) — đúng hình
+    // với avatar trong app, không có bản vector riêng để lệch. File favicon.svg
+    // cũ phải biến mất hẳn: còn trong `public/` là vẫn bị nhúng vào bản build.
+    expect(html).toContain('<link rel="icon" type="image/png" sizes="64x64" href="/bean-avatar-sm.png" />');
+    expect(html).not.toContain("favicon.svg");
+    expect(existsSync("public/favicon.svg")).toBe(false);
+
+    // iOS bỏ qua PNG 64 và chỉ nhận apple-touch-icon đúng 180×180.
+    expect(html).toContain('<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />');
+  });
+
+  it("mascot vector nằm trong viewBox của BeanMark, không bị cắt âm thầm", async () => {
+    const { MARK_BOUNDS, MARK_NUDGE, MARK_VIEWBOX } = await import("@/components/brand/markPaths");
+    const { container } = render(<BeanMark size={44} />);
 
     // SVG mặc định `overflow: hidden`: vượt `viewBox` là **bị cắt**, không báo
-    // lỗi. Bản favicon cũ đẩy tai phải ra ngoài x=24 và mất tai — mọi thứ vẫn
-    // "pass" vì test cũ chỉ kiểm tra có chứa đúng các `path`. Test này chặn đúng
-    // lớp lỗi đó.
-    const [, vbW, vbH] = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(favicon) ?? [];
+    // lỗi. Bản favicon cũ đẩy tai phải ra ngoài x=24 và mất tai mà không ai
+    // nhận ra — component phải vẽ đúng viewBox khai báo của markPaths.
+    const svg = container.querySelector("svg");
+    expect(svg).toHaveAttribute("viewBox", MARK_VIEWBOX);
+
+    const [, vbW, vbH] = /^0 0 ([\d.]+) ([\d.]+)$/.exec(MARK_VIEWBOX) ?? [];
     expect(vbW).toBe("24");
 
-    // Nền phải phủ đúng `viewBox`; nền rộng hơn thì bị cắt, hẹp hơn thì lộ viền.
-    const rect = /<rect width="([\d.]+)" height="([\d.]+)"/.exec(favicon);
-    expect([rect?.[1], rect?.[2]]).toEqual([vbW, vbH]);
-
-    // Mascot sau khi dịch phải vẫn nằm trong ô.
+    // Mascot sau khi dịch (MARK_NUDGE) phải vẫn nằm trong ô.
     const moved = {
       minX: MARK_BOUNDS.minX + MARK_NUDGE.x,
       maxX: MARK_BOUNDS.maxX + MARK_NUDGE.x,
@@ -368,19 +380,5 @@ describe("HUB", () => {
     expect(moved.minY).toBeGreaterThanOrEqual(0);
     expect(moved.maxX).toBeLessThanOrEqual(Number(vbW));
     expect(moved.maxY).toBeLessThanOrEqual(Number(vbH));
-
-    // Và `translate` trong file phải đúng bằng hằng số đã khai báo.
-    expect(favicon).toContain(`translate(${MARK_NUDGE.x} ${MARK_NUDGE.y})`);
-  });
-
-  it("favicon được sinh từ cùng hằng số hình với component", async () => {
-    const { markPaths } = await import("@/components/brand/markPaths");
-    const { readFileSync } = await import("node:fs");
-    const favicon = readFileSync("public/favicon.svg", "utf8");
-    // Favicon phải chứa đúng các đường nét mà component vẽ cho `silhouette` — đây
-    // là cách bắt "quên chạy lại script" thay vì để hình lệch âm thầm.
-    for (const d of markPaths("silhouette")) {
-      expect(favicon).toContain(d);
-    }
   });
 });

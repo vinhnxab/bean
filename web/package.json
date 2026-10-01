@@ -10,7 +10,6 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "gen:favicon": "node --experimental-strip-types scripts/gen-favicon.ts",
     "shot": "node --experimental-strip-types scripts/screenshot.ts",
     "test": "vitest run",
     "test:watch": "vitest",

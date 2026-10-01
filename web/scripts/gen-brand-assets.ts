@@ -21,13 +21,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
-import {
-  BADGE_BG,
-  BG_PROBE_POINTS,
-  BG_TOLERANCE,
-  CROP,
-  SOURCE_EDGE,
-} from "../src/components/brand/crop.ts";
+import { BADGE_BG, BG_PROBE_POINTS, BG_TOLERANCE, SOURCE_EDGE } from "../src/components/brand/badge.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = resolve(ROOT, "brand/bean.png");
@@ -35,30 +29,29 @@ const SOURCE = resolve(ROOT, "brand/bean.png");
 /**
  * Kích thước sinh ra — mỗi cái đều ứng với một chỗ dùng thật trong UI.
  *
- * `from` quyết định lấy **vùng nào** của ảnh gốc, và đó không phải chi tiết thừa:
+ * **Không mục nào bị cắt, không mục nào bị bo**: mọi kích thước chỉ **thu nhỏ
+ * trọn ảnh gốc** về cạnh tương ứng. Chú chó, bong bóng "?" và vòng viền luôn còn
+ * nguyên ở mọi cỡ — avatar 28px trong chat và avatar 56px ở màn đăng nhập là
+ * **cùng một hình**, chỉ khác tỉ lệ. Bốn góc ảnh gốc trong suốt (đo được:
+ * alpha=0) nên ảnh giữ nguyên hình tròn của huy hiệu mà **không cần mặt nạ**.
+ * Trước đây avatar cắt cúp vào mặt; bản này bỏ hẳn bước crop.
  *
- * - `face` — cắt sát đầu chó. Đúng cho avatar, vì avatar cần **mặt nhìn rõ** ở
- *   28–44px. Đây cũng là chỗ bong bóng "?" và vòng viền sẽ lọt vào nếu lệch, nên
- *   toạ độ nằm ở `crop.ts` kèm bất biến kiểm được.
- * - `badge` — lấy **cả huy hiệu tròn**. Đúng cho icon: huy hiệu vốn được vẽ để
- *   làm icon, có sẵn vòng viền làm ranh giới, và bốn góc ảnh gốc đã trong suốt
- *   (đo được: alpha=0). Dùng `face` cho icon sẽ ra một ô vuông có vệt be ở góc —
- *   trông như bẩn, và ở 16px thành hai chấm sáng giả.
+ * `fill: true` (chỉ `apple-touch-icon`) lót kín nền be: iOS đổ nền trong suốt
+ * thành đen, mà icon màn hình chính cần nền đặc, không thể trong suốt.
  */
 const TARGETS = [
-  // Avatar lớn: trạng thái rỗng (56px) và logo HUB (44px) — ×2 cho Retina.
-  { file: "bean-avatar.png", size: 128, from: "face", round: true },
-  // Avatar nhỏ: dòng tin nhắn trong chat (28–32px). Một phiên chat dài có hàng
-  // trăm avatar, và mỗi bản 128×128 giải mã thành 64 KB trong RAM. Bản 64×64
-  // cắt đi 4 lần bộ nhớ, vẫn sắc ở 32px trên màn hình Retina 2x.
-  { file: "bean-avatar-sm.png", size: 64, from: "face", round: true },
-  // Icon dự phòng cho trình duyệt cũ bỏ qua SVG. Giữ góc trong suốt: tab trình
-  // duyệt tự thu nhỏ, và huy hiệu tròn là hình dạng đúng.
-  { file: "bean-icon.png", size: 64, from: "badge", round: false, fill: false },
+  // Avatar: màn đăng nhập (56px), logo HUB (44px), tin nhắn trong chat (28–32px).
+  // Bản lớn 128×128 (×2 cho Retina) dùng cho avatar ≥ 44px.
+  { file: "bean-avatar.png", size: 128, fill: false },
+  // Bản nhỏ 64×64: một phiên chat dài có hàng trăm avatar, và mỗi bản 128×128
+  // giải mã thành 64 KB trong RAM — 64×64 giảm 4 lần bộ nhớ, vẫn sắc ở 32px trên
+  // màn hình Retina 2x. Chính bản này cũng là **favicon** (xem `index.html`):
+  // huy hiệu tròn là hình dạng đúng cho một tab trình duyệt.
+  { file: "bean-avatar-sm.png", size: 64, fill: false },
   // iOS **không** dùng SVG cho icon màn hình chính, bỏ qua mọi kích thước khác
   // 180, và **nền trong suốt bị đổ thành đen** — icon sẽ là huy hiệu tròn trên ô
   // vuông đen. Nên phải lót kín bằng màu nền của chính huy hiệu.
-  { file: "apple-touch-icon.png", size: 180, from: "badge", round: false, fill: true },
+  { file: "apple-touch-icon.png", size: 180, fill: true },
 ] as const;
 
 const CHROME = "/usr/bin/google-chrome";
@@ -72,18 +65,15 @@ async function main(): Promise<void> {
   try {
     const page = await browser.newPage();
     for (const target of TARGETS) {
-      // Cắt vùng đầu rồi vẽ vào canvas, xuất PNG: trình duyệt tự resize, không cần
-      // thư viện ảnh. `imageSmoothingQuality = "high"` để lông xoăn không bị vỡ
-      // bậc khi thu từ 236px xuống 28px.
+      // Thu nhỏ ảnh gốc rồi vẽ vào canvas, xuất PNG: trình duyệt tự resize, không
+      // cần thư viện ảnh. `imageSmoothingQuality = "high"` để lông xoăn không bị
+      // vỡ bậc khi thu từ 500px xuống 28px.
       const dataUrl = await page.evaluate(
         async (
           base64: string,
           size: number,
-          crop: typeof CROP,
           edge: number,
-          round: boolean,
           fileName: string,
-          from: "face" | "badge",
           fill: boolean,
           probePoints: readonly (readonly [number, number])[],
           expectedBg: { r: number; g: number; b: number },
@@ -93,11 +83,11 @@ async function main(): Promise<void> {
           image.src = `data:image/png;base64,${base64}`;
           await image.decode();
           // Đo ảnh thật, đừng so với hằng số: nếu bạn thay `bean.png` bằng ảnh
-          // cỡ khác, `crop` sẽ lệch mà không có gì báo sai. Cảnh báo ngay.
+          // cỡ khác, mọi kích thước sẽ lệch mà không có gì báo sai. Cảnh báo ngay.
           if (image.naturalWidth !== edge || image.naturalHeight !== edge) {
             throw new Error(
               `Ảnh gốc là ${image.naturalWidth}×${image.naturalHeight}, ` +
-                `không phải ${edge}×${edge}. Cần chỉnh lại CROP trong script này.`,
+                `không phải ${edge}×${edge}. Cập nhật SOURCE_EDGE trong badge.ts.`,
             );
           }
           const canvas = document.createElement("canvas");
@@ -132,7 +122,7 @@ async function main(): Promise<void> {
               }
               if (bright.length < 2) {
                 throw new Error(
-                  `Chỉ dò được ${bright.length} điểm sáng; điểm dò trong crop.ts không còn nằm trên nền huy hiệu.`,
+                  `Chỉ dò được ${bright.length} điểm sáng; điểm dò trong badge.ts không còn nằm trên nền huy hiệu.`,
                 );
               }
               const median = (i: number) => {
@@ -148,7 +138,7 @@ async function main(): Promise<void> {
               if (drift > tolerance) {
                 throw new Error(
                   `Màu nền huy hiệu đo được rgb(${rgb.join(", ")}) lệch ${drift} ` +
-                    `> ${tolerance} so với BADGE_BG đã khai. Cần cập nhật crop.ts.`,
+                    `> ${tolerance} so với BADGE_BG đã khai. Cần cập nhật badge.ts.`,
                 );
               }
               return `rgb(${rgb.join(", ")})`;
@@ -157,27 +147,11 @@ async function main(): Promise<void> {
             ctx.fillRect(0, 0, size, size);
           }
 
-          if (from === "badge") {
-            ctx.drawImage(image, 0, 0, edge, edge, 0, 0, size, size);
-          } else {
-            ctx.drawImage(image, crop.x, crop.y, crop.size, crop.size, 0, 0, size, size);
-          }
+          // Thu nhỏ **trọn** ảnh gốc: không cắt, chỉ scale. Không cần mặt nạ bo
+          // tròn — huy hiệu vốn là hình tròn trên nền trong suốt, nên chỉ scale
+          // là giữ nguyên hình dạng.
+          ctx.drawImage(image, 0, 0, edge, edge, 0, 0, size, size);
 
-          if (round) {
-            // Cắt tròn bằng `destination-in`: giữ nguyên alpha bên trong hình tròn
-            // và xoá alpha bên ngoài. 4 góc thành **trong suốt** — đúng, vì UI
-            // cũng bo tròn avatar bằng CSS, nên phần trong suốt ấy vốn không bao
-            // giờ hiện; giữ nó lại chỉ để ảnh không mang nội dung thừa.
-            //
-            // Rút `- 0.5` ở bán kính để mép không còn 1px viền răng cưa khi
-            // trình duyệt nội suy.
-            ctx.globalCompositeOperation = "destination-in";
-            ctx.beginPath();
-            ctx.arc(size / 2, size / 2, size / 2 - 0.5, 0, Math.PI * 2);
-            ctx.fillStyle = "#000";
-            ctx.fill();
-            ctx.globalCompositeOperation = "source-over";
-          }
           // Tự kiểm tra kết quả: đọc alpha ở 4 góc **từ chính ảnh vừa xuất**.
           // Sai ở đây không hề báo lỗi — generator vẫn chạy, file vẫn sinh ra,
           // không test nào đỏ; chỉ có mắt người thấy. Nên kiểm ở đây, ngay chỗ
@@ -195,30 +169,21 @@ async function main(): Promise<void> {
           const corner = (x: number, y: number) =>
             cctx.getImageData(x, y, 1, 1).data[3] ?? 0;
           const corners = [corner(0, 0), corner(size - 1, 0), corner(0, size - 1), corner(size - 1, size - 1)];
-          const transparent = corners.every((a) => a < 8);
-          const opaque = corners.every((a) => a > 247);
-          if (round && !transparent) {
+          // Ảnh gốc để góc **trong suốt** (huy hiệu tròn trên nền trong suốt);
+          // riêng `apple-touch-icon` có lót nền nên góc phải **đặc**. Lệch một
+          // trong hai nghĩa là `bean.png` đã đổi (thêm nền) hoặc lớp lót bị lệch.
+          const uniform = fill ? corners.every((a) => a > 247) : corners.every((a) => a < 8);
+          if (!uniform) {
             throw new Error(
-              `${fileName}: yêu cầu bo tròn nhưng góc vẫn đục (alpha=${corners.join(",")})`,
-            );
-          }
-          // Ảnh vuông chấp nhận cả hai: có lót nền thì góc đặc (iOS), không lót
-          // thì góc trong suốt (tab trình duyệt). Chỉ sai khi góc *lệch* — kiểu
-          // nửa trong suốt nửa đục — tức lớp lót bị lệch khung.
-          if (!round && !(transparent || opaque)) {
-            throw new Error(
-              `${fileName}: góc lẫn tạp (alpha=${corners.join(",")}) — lớp lót lệch khung?`,
+              `${fileName}: góc không như mong đợi (alpha=${corners.join(",")}, fill=${fill})`,
             );
           }
           return url;
         },
         bytes.toString("base64"),
         target.size,
-        CROP,
         SOURCE_EDGE,
-        target.round,
         target.file,
-        target.from,
         target.fill,
         BG_PROBE_POINTS,
         BADGE_BG,

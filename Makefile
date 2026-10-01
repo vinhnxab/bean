@@ -35,11 +35,11 @@ check-web: ## Biome + tsc + vitest + build production
 
 # Tài nguyên thương hiệu là **sinh ra**, nên phải chống trường hợp commit ảnh cũ
 # còn nằm trong repo: đổi `bean.png` mà quên chạy `pnpm brand` thì mọi thứ vẫn
-# xanh, chỉ có mắt người thấy — cùng lớp lỗi với favicon bị cắt tai trước đây.
+# xanh, chỉ có mắt người thấy — cùng lớp lỗi với favicon bị cắt tai trước đây
+# (favicon nay cũng là ảnh badge PNG, sinh cùng `pnpm brand`).
 # Sinh lại rồi `git diff --exit-code` y hệt cách `make types` chặn kiểu TS lệch.
 check-brand:
 	cd $(WEB_DIR) && $(PNPM) brand
-	cd $(WEB_DIR) && $(PNPM) gen:favicon
 	git diff --exit-code -- web/public
 
 check: check-rust check-web ## Cổng chất lượng của mỗi milestone

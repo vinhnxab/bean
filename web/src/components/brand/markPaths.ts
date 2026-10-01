@@ -3,10 +3,12 @@
  *
  * # Vì sao một nguồn, không vẽ tay ở từng chỗ
  *
- * Mascot xuất hiện ở 5 vị trí (favicon, logo HUB, avatar Manager, skeleton
- * loading, trạng thái rỗng). Nếu mỗi vị trí có một bản riêng, chúng chắc chắn lệch
- * nhau sau vài lần sửa — và sự lệch đó không ai báo lỗi. `favicon.svg` được **sinh
- * từ đúng hằng số trong file này**, không phải một bản vẽ thứ hai.
+ * Mascot xuất hiện ở nhiều vị trí trong app (trạng thái rỗng, trang trí nhỏ,
+ * skeleton...). Nếu mỗi vị trí có một bản riêng, chúng chắc chắn lệch
+ * nhau sau vài lần sửa — và sự lệch đó không ai báo lỗi. Mọi bản vector đều lấy
+ * **đúng hằng số trong file này** qua `BeanMark`, không phải một bản vẽ thứ hai.
+ * Favicon và avatar dùng ảnh badge thật (`BeanAvatar`, sinh từ `brand/bean.png`
+ * bằng `pnpm brand`).
  *
  * # Đặc tả nhận diện ở kích thước nhỏ
  *

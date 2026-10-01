@@ -13,12 +13,10 @@
          chặn render, nên chắc chắn chạy xong trước lần vẽ đầu.
          Hằng số phải khớp THEME_STORAGE_KEY / DEFAULT_THEME ở src/lib/theme.tsx. -->
     <script src="/theme-init.js"></script>
-    <!-- Favicon vector sinh từ `src/components/brand/markPaths.ts` (pnpm gen:favicon).
-         Ở 16px ảnh bitmap thành vệt tối nên favicon vẫn dùng vector; phần còn lại
-         của thương hiệu dùng ảnh thật trong `bean.png` (pnpm brand). -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="alternate icon" type="image/png" sizes="64x64" href="/bean-icon.png" />
-    <!-- Icon màn hình chính: iOS bỏ qua SVG và chỉ nhận đúng 180×180. -->
+    <!-- Favicon là **ảnh badge PNG** (`bean-avatar-sm.png`, sinh từ `brand/bean.png`
+         bằng `pnpm brand`) — đúng hình với avatar trong app, không có bản vector
+         riêng để lệch. Icon màn hình chính iOS cần đúng 180×180 nên khai riêng. -->
+    <link rel="icon" type="image/png" sizes="64x64" href="/bean-avatar-sm.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>Bean</title>
   </head>

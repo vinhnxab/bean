@@ -2,21 +2,20 @@ import { MARK_STROKE, MARK_VIEWBOX, type MarkVariant, markPaths } from "@/compon
 import { cn } from "@/lib/utils";
 
 /**
- * Mascot Bean dạng **vector** — dùng cho favicon và các vị trí quá nhỏ để ảnh
- * bitmap còn đọc được.
+ * Mascot Bean dạng **vector** — dùng cho các vị trí nhỏ, cần màu theo
+ * `currentColor` (trạng thái rỗng, trang trí).
  *
  * # Ranh giới với `BeanAvatar` (ảnh thật)
  *
  * Hai component này **cố tình khác nhau**, không phải hai bản của cùng một thứ:
  *
- * - `BeanAvatar` (`/bean-avatar.png`) cho avatar 28–56px: ở đó bộ lông xoăn và
- *   bong bóng "?" đọc được, và đó mới là hình đại diện bạn muốn thấy.
- * - `BeanMark` (vector) cho favicon 16px: ở đó chi tiết bitmap vỡ thành vệt mực,
- *   còn đường nét vẽ thì sắc ở mọi tỉ lệ và chỉ 590 byte.
+ * - `BeanAvatar` (`/bean-avatar.png`) cho avatar 28–56px **và favicon**: ở đó bộ
+ *   lông xoăn và bong bóng "?" đọc được, và đó mới là hình đại diện bạn muốn thấy.
+ * - `BeanMark` (vector) cho chỗ cần nét theo `currentColor`: sắc ở mọi tỉ lệ và
+ *   chỉ 590 byte, không phụ thuộc ảnh tải được hay không.
  *
- * `public/favicon.svg` được **sinh** từ `markPaths.ts` bằng `scripts/gen-favicon.ts`
- * nên favicon không bao giờ lệch với component này. `BeanAvatar` không sinh gì từ
- * vector — nó dùng ảnh gốc `web/brand/bean.png` của bạn.
+ * `BeanAvatar` dùng ảnh gốc `web/brand/bean.png` của bạn, sinh ra các file trong
+ * `public/` bằng `scripts/gen-brand-assets.ts` (`pnpm brand`).
  */
 export function BeanMark({
   size,

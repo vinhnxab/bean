@@ -1,18 +1,25 @@
-import { BADGE_BG_CSS } from "@/components/brand/crop";
+import { BADGE_BG_CSS } from "@/components/brand/badge";
 import { cn } from "@/lib/utils";
 
 /**
  * Avatar Bean — chú poodle đen trong huy hiệu tròn, **ảnh thật do bạn cung cấp**
  * (`web/brand/bean.png`), dùng ở mọi chỗ cần "hình đại diện của Bean".
  *
+ * # Không cắt: chỉ thu nhỏ (scale)
+ *
+ * Ảnh gốc là huy hiệu tròn 500×500. Avatar luôn hiển thị **trọn ảnh gốc** — chú
+ * chó, bong bóng "?" và vòng viền đều còn nguyên — chỉ được **thu nhỏ** cho vừa
+ * chỗ dùng. Mọi kích thước (28px trong chat, 44px ở HUB, 56px ở màn đăng nhập) là
+ * **cùng một hình** ở các tỉ lệ khác nhau, nên hình đại diện luôn nhất quán.
+ *
  * # Vì sao có cả `BeanAvatar` (ảnh) lẫn `BeanMark` (vector)
  *
  * Chúng phục vụ hai mục đích khác nhau, không thay thế được nhau:
  *
- * - **Avatar ≥ 24px** → dùng ảnh này. Ở 28–56px, bộ lông xoăn và bong bóng "?"
- *   đọc được và cho personality; vector cùng bộ nét sẽ chỉ là một hình sơ đồ.
- * - **Favicon 16px** → vẫn dùng `BeanMark` vector. Ở 16px, chi tiết của ảnh
- *   bitmap vỡ thành vệt mực, còn vector sắc nét ở mọi tỉ lệ và chỉ 590 byte.
+ * - **Avatar ≥ 24px** và **favicon** → dùng ảnh này. Ở 28–56px, bộ lông xoăn và
+ *   bong bóng "?" đọc được và cho personality; vector cùng bộ nét sẽ chỉ là một
+ *   hình sơ đồ. Favicon 64×64 (`bean-avatar-sm.png`) cũng là badge — huy hiệu
+ *   tròn chính là hình dạng đúng cho một tab trình duyệt.
  *
  * # Vì sao `/bean-avatar.png` chứ không nhúng ảnh gốc
  *
@@ -65,13 +72,3 @@ export function BeanAvatar({
     />
   );
 }
-
-/**
- * Mascot Bean (poodle) — component dùng chung cho **mọi** vị trí hiển thị.
- *
- * 5 vị trí: favicon (`public/favicon.svg`, sinh từ `markPaths`), logo HUB (44px),
- * avatar Manager trong chat (28px), skeleton loading (24px), trạng thái rỗng (56px).
- *
- * Dùng `currentColor` nên mascot tự nhận màu của vùng chứa — đó là lý do "chó poodle"
- * là **thứ ấm duy nhất** trên màn hình mà vẫn không phải một khối màu trang trí.
- */
