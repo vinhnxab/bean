@@ -71,7 +71,7 @@ export function ToolCard({
       </div>
       <details className="mt-3">
         <summary className="cursor-pointer text-sm font-medium">{t("tool.args")}</summary>
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-accent p-3 font-mono text-xs">
+        <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-accent p-3 font-mono text-xs">
           {argsPreview}
         </pre>
       </details>
@@ -90,7 +90,7 @@ export function ToolCard({
           />
         ) : null}
         <pre
-          className={`max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-card p-3 font-mono text-xs leading-5 text-foreground ${image ? "mt-2" : ""}`}
+          className={`whitespace-pre-wrap break-words rounded-lg bg-card p-3 font-mono text-xs leading-5 text-foreground ${image ? "mt-2" : ""}`}
         >
           {outputPreview || t("tool.noOutput")}
         </pre>
@@ -120,9 +120,7 @@ export function ToolCard({
               {t("common.close")}
             </button>
           </div>
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
-            {full ?? ""}
-          </pre>
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs">{full ?? ""}</pre>
         </div>
       ) : null}
     </article>

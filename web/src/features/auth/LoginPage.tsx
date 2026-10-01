@@ -32,7 +32,11 @@ export function LoginPage() {
 
   const error = login.error instanceof ApiRequestError ? login.error : null;
   return (
-    <main className="relative flex min-h-svh items-center justify-center bg-background p-4">
+    // `grid h-svh place-items-center overflow-y-auto`: một màn hình, không để trình
+    // duyệt cuộn. `grid` (không `flex`) + `place-items-center` canh giữa mà vẫn
+    // cuộn được từ **đầu** khi khung quá thấp (bàn phím điện thoại) — flexbox
+    // `justify-center` + `overflow` sẽ cắt mất mép trên, không cuộn tới được.
+    <main className="relative grid h-svh place-items-center overflow-y-auto bg-background p-4">
       {/* Nút chủ đề đặt ở góc màn hình: màn đăng nhập là nơi người dùng hay đổi
           chủ đề lần đầu, không nên bắt họ đăng nhập mới đổi được. */}
       <ThemeToggle className="absolute top-4 right-4" />

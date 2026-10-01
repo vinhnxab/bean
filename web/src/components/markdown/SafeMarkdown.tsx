@@ -5,7 +5,6 @@ import { isValidElement, type ReactNode, useState } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
 
 function safeUrl(value: string): string | null {
   try {
@@ -119,12 +118,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           </button>
         </div>
       </div>
-      <pre
-        className={cn(
-          "overflow-x-auto p-4 text-sm leading-6 text-ink",
-          !collapsed && "max-h-[32rem] overflow-y-auto",
-        )}
-      >
+      <pre className="overflow-x-auto p-4 text-sm leading-6 text-ink">
         <code className={language ? `language-${language}` : undefined}>
           {collapsed
             ? `${code.split("\n").slice(0, COLLAPSE_LINES).join("\n")}\n…`

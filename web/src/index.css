@@ -162,6 +162,16 @@
 @custom-variant light (&:where(.light, .light *));
 
 @layer base {
+  /* Bean là ứng dụng MỘT màn hình: khoá cuộn ở tầng tài liệu để cửa sổ trình
+     duyệt **không bao giờ cuộn**. Mọi vùng cuộn nằm BÊN TRONG (khung hội thoại,
+     danh sách phiên, thân trang) — không bao giờ là cửa sổ. `overscroll-behavior`
+     chặn luôn hiệu ứng "nảy" khi chạm mép trên thiết bị cảm ứng. */
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
   html {
     color-scheme: dark;
   }

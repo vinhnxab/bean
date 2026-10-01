@@ -76,7 +76,7 @@ export function ConfirmCard({
         </span>
       </div>
       <p className="mb-1 text-xs font-medium opacity-70">{t("confirm.action")}</p>
-      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white/70 p-3 font-mono text-sm">
+      <pre className="whitespace-pre-wrap break-words rounded-lg bg-white/70 p-3 font-mono text-sm">
         {confirm.prompt}
       </pre>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">

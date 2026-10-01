@@ -135,7 +135,11 @@ export function ChatLayout() {
   }
 
   return (
-    <div className="flex min-h-svh bg-background text-foreground">
+    // `h-svh overflow-hidden`: khung ứng dụng cao đúng một màn hình và **không để
+    // trình duyệt cuộn**. Nội dung từng màn cuộn bên trong `<main>` (bên dưới),
+    // còn sidebar tự cuộn trong `<nav>`. Dùng `min-h-svh` như trước thì khung cao
+    // theo nội dung, trang dài sẽ đẩy cả thanh địa chỉ lẫn sidebar — sai ý đồ.
+    <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <button
         type="button"
         className="fixed left-3 top-3 z-30 rounded-lg border border-border bg-card p-2 shadow-sm md:hidden"
@@ -398,7 +402,7 @@ export function ChatLayout() {
           </button>
         </div>
       </aside>
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {/* `Suspense` đặt quanh `Outlet` chứ không quanh cả `ChatLayout` (ở `App.tsx`):
             khi đang tải chunk của màn, chỉ vùng nội dung được thay bằng skeleton —
             sidebar vẫn đứng yên. Bọc ở ngoài sẽ làm cả khung giao diện biến mất rồi
