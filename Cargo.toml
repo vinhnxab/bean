@@ -166,3 +166,14 @@ rmcp = { version = "3.4.0", default-features = false, features = [
 [profile.release]
 lto = "thin"
 strip = true
+
+# Vá `E0365` (future-incompat) của `proc-macro-error2 2.0.1` — xem `vendor/README.md`
+# và K21 trong `docs/known-issues.md`. Bản gốc khai báo `extern crate proc_macro;` ở
+# chế độ riêng tư rồi lại `pub use` nó, nên Rust cảnh báo và sẽ thành hard error khi
+# nâng version. Bản vendor khai báo `pub extern crate proc_macro;` cho hợp lệ.
+#
+# Gỡ được khi upstream phát hành bản đã sửa: `cargo update -p proc-macro-error2` sau
+# khi bỏ khối này. Teloxide → aquamarine là dependency gián tiếp, không tắt được
+# (aquamarine không optional, teloxide không có feature nào gate nó).
+[patch.crates-io]
+proc-macro-error2 = { path = "vendor/proc-macro-error2" }
