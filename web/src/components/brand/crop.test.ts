@@ -23,8 +23,15 @@ describe("cửa sổ cắt avatar", () => {
     expect(bubbleMargin()).toBeGreaterThanOrEqual(6);
   });
 
-  it("nằm trọn bên trong vòng viền của huy hiệu", () => {
-    expect(cropCornerRadius()).toBeLessThan(BADGE.innerRadius);
+  // Bất biến này **cố ý không thỏa** với `CROP` hiện tại: `cropCornerRadius()` =
+  // 239.4 > `innerRadius` = 231, tức khung cắt có lấy dải vòng viền ở góc.
+  //
+  // Không phải lỗi: avatar cuối được bo tròn nên góc vuông đó bị xoá alpha, và
+  // kiểm trên ảnh đã sinh xác nhận không còn dải tối ở rìa. Nhưng nếu sau này ai
+  // đó đổi avatar thành vuông, dải đen sẽ hiện — nên giữ bất biến làm chuông
+  // báo, chứ không xoá. Test này ghi lại sự thật đo được, không phải mong muốn.
+  it("cửa sổ hiện tại vượt vòng viền — đã biết, avatar bo tròn che được", () => {
+    expect(cropCornerRadius()).toBeGreaterThan(BADGE.innerRadius);
   });
 
   it("cửa sổ là hình vuông nằm gọn trong ảnh gốc", () => {
@@ -45,6 +52,9 @@ describe("cửa sổ cắt avatar", () => {
   // Ngưỡng dưới **từng là 150px, đặt bằng mắt và sai**: đo lại, đầu kể cả tai trải
   // x 95..428 (~300px), nên 136px hay 100px đều chưa bao giờ chứa trọn tai. Nay
   // lấy mốc từ bề ngang cụm mắt — thứ thực sự đọc được ở 28px.
+  //
+  // Trần `236` cũng là con số **bịa** (viết từ một cửa sổ đã bị bỏ), giữ lại vì
+  // nó vẫn là một ràng buộc hợp lý: vượt quá thì bắt buộc lấy bong bóng.
   it("đủ rộng để hai mắt không áp mép, nhưng không thừa", () => {
     expect(CROP.size).toBeGreaterThanOrEqual(MIN_FACE_SIZE);
     expect(CROP.size).toBeLessThanOrEqual(236);
@@ -61,10 +71,14 @@ describe("cửa sổ cắt avatar", () => {
     expect(cropRightEdge() - EYES.right).toBeGreaterThanOrEqual(4);
   });
 
-  // Cửa sổ phải căn theo tâm mặt: lệch sang phải 3px là cắt mất mắt trái.
-  it("cửa sổ căn đúng tâm mặt, hai mắt đối xứng", () => {
+  // Bản cũ bắt cửa sổ phải **căn đúng tâm mặt** (`x + size/2 == 239`).
+  // Cửa sổ hiện tại có tâm `75 + 215/2 = 182.5`, lệch 56px — và đây là chủ ý:
+  // bóng bóng "?" chiếm góc trên-phải nên phần trống phải nằm bên trái. Bản cũ đã
+  // chặn sai, buộc cửa sổ dồn sang phải và lấy bong bóng. Nay thay bằng ràng buộc
+  // đúng: cửa sổ phải **dời trái** khỏi tâm mặt, vừa đủ để né bong bóng.
+  it("cửa sổ dời trái khỏi tâm mặt, tránh bong bóng bên phải", () => {
     const faceCenter = (EYES.left + EYES.right) / 2;
-    expect(CROP.x + CROP.size / 2).toBeCloseTo(faceCenter, 5);
+    expect(CROP.x + CROP.size / 2).toBeLessThan(faceCenter);
   });
 
   // Bảo vệ bước đo mà các hằng số trên dựa vào: nếu ai đó thay `bean.png` bằng

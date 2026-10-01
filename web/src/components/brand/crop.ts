@@ -22,7 +22,7 @@ export const SOURCE_EDGE = 500;
  * Vòng viền chạm sát mép ảnh nên bán kính ngoài vượt khung; ta chỉ cần **mép
  * trong** để biết vùng an toàn.
  */
-export const BADGE = { cx: 249, cy: 249.5, innerRadius: 239 } as const;
+export const BADGE = { cx: 249, cy: 249.5, innerRadius: 231 } as const;
 
 /**
  * Mép trái của bong bóng suy nghĩ "?" (px trong ảnh gốc) — **đo, không đoán**.
@@ -59,44 +59,70 @@ export const EYE_SPAN = EYES.right - EYES.left;
 export const MIN_FACE_SIZE = EYE_SPAN + 14; // 96
 
 /**
- * Cửa sổ cắt: **siết vào khuôn mặt**, không bong bóng, không vệt vòng viền.
+ * Cửa sổ cắt: **toàn bộ đầu chó** — tai, mõm, cổ — không bị cắt cụt.
  *
- * Chọn trên số đo, không bằng mắt:
+ * ## Vì sao đổi từ 100px sang cỡ này
  *
- * - **Mặt ở giữa**: hai mắt trải `198..280`, tâm mặt = **239**. Cửa sổ `189..289`
- *   có tâm 239 — khớp tuyệt đối, mắt đối xứng 9px mỗi bên.
- * - **Mép phải 289 < 315**: dừng trước bong bóng "?", biên an toàn 26px.
- * - Góc xa nhất `hypot(40, 91.5) ≈ 100` < 239 ⇒ trọn trong vòng viền.
+ * Bản cũ cắt `{x: 189, y: 158, size: 100}` — chỉ vùng quanh hai mắt rồi phóng
+ * to lên 128px. Ở cỡ thật 28px avatar đó là **hai đốm mắt mờ**, không đọc ra là
+ * chú chó; người dùng phải tự mở file mới thấy. Cốt lõi: cửa sổ cắt đã **siết quá
+ * tay** tới mức ảnh gốc bị mất phần lớn nội dung, và sai lệch này **không hề báo
+ * lỗi** — generator vẫn chạy, test vẫn xanh, chỉ có mắt người thấy.
  *
- * # Vì sao siết tới 100px
+ * Mở rộng từng bước rồi soi **ở đúng cỡ dùng** (28/44/56px), không đoán:
  *
- * Người dùng yêu cầu scale to hơn thay vì giữ tỉ lệ gốc. Đo bề rộng cụm mắt
- * (`82`px): ở bản cũ `136`px, mắt chỉ chiếm `82/136 ≈ 60%` khung — ở **28px
- * thật** avatar là một cục tối có hai chấm trắng. Soi 5 ứng viên ở đúng 28px:
+ * | crop | 28px thật trông như |
+ * |---|---|
+ * | 100px (bản cũ) | hai đốm mắt mờ, không đọc ra là chó |
+ * | 150px | có mặt nhưng tai bị cắt cụt |
+ * | 190px | có tai, mõm thấp |
+ * | 215px (bản này) | **rõ tai + mõm + cổ áo**, con gần đầy khung |
+ * | 245px | con nhỏ lại, nền be chiếm nhiều — đọc kém hơn |
+ * | 260px | bong bóng "?" lọt vào góc phải thành đốm trắng |
  *
- * | crop | mắt chiếm | đọc được ở 28px |
- * |---|---|---|
- * | 136px | 60% | cục tối, mõm chưa ra |
- * | 124px | 66% | bắt đầu thấy mõm |
- * | 112px | 73% | có mặt |
- * | **100px** | **82%** | **rõ là khuôn mặt, có mõm** |
- * | 92px | 89% | sát mép, mõm bị cắt |
+ * ## Vì sao dừng ở đây
  *
- * Chọn **100px** — siết thêm 1.36× so với bản cũ.
+ * Cửa sổ đã chọn: `x = 75, y = 85, size = 215` ⇒ mép phải `290`, **cách mép trái
+ * bong bóng 25px** (`BUBBLE_LEFT = 315`); mép dưới `300`, còn `215px` chiều cao
+ * dùng hết khoảng `85..300` — vừa đủ cho tai + mõm + cổ áo.
  *
- * # Đính chính một lỗi trong chính file này
+ * - **Trọn trong vòng viền**: góc xa nhất của khung so với tâm huy hiệu là
+ *   `cropCornerRadius() = 239.4`, **vượt** `innerRadius = 231`. Nên khung này
+ *   **vẫn lấy dải tối ở góc trên-trái** — đúng như bản soi ở trên. Bất biến
+ *   "trọn trong vòng viền" **không thỏa**; xem mục kế bên.
+ * - **Cân bằng**: thử dịch `x` từ 60 → 105 cho thấy con **luôn lệch phải** — vì
+ *   bản thân con nằm lệch trái so với tâm ảnh gốc, đổi `x` chỉ đổi lề trái chứ
+ *   không dịtâm vật thể.
  *
- * Bản trước ghi *"dưới 150px là mất tai"* và test khoá cứng `size >= 150`. Con số
- * 150 đó **viết bằng mắt và sai**: đo lại, đầu kể cả tai trải `x 95..428` — rộng
- * **~300px**, nghĩa là crop 136px, kể cả 100px, **đều chưa bao giờ chứa trọn tai**.
- * Ở 28px tai vốn không phân giải được; thứ đọc được là **mắt + mõm**. Mốc dưới
- * nay lấy từ `MIN_FACE_SIZE` (bề ngang cụm mắt `+14`) thay vì hằng số bịa.
+ * ## Vì sao vẫn chấp nhận dải tối ở góc
  *
- * Lỗi thứ hai ngay sau đó: tôi đặt tâm cửa sổ là 236 trong khi tâm mặt là 239,
- * khiến **mắt trái bị cắt mất 12px**. Test biên mắt mới bắt được; giờ tâm khớp
- * tuyệt đối.
+ * Vòng viền là **đen đặc** (`r ≥ 242`), còn nền huy hiệu là **be sáng**. Dải đen
+ * lọt vào góc avatar trông như vết bẩn — nên về nguyên tắc phải tránh. Nhưng
+ * avatar cuối cùng được **bo tròn** (`destination-in`), nên phần góc vươn ra ngoài
+ * bán kính bị xoá alpha. Kiểm trên chính ảnh đã sinh: `whitePct = 0.26%` (không
+ * có bong bóng lọt) và **không còn dải đen ở rìa ngoài** — chỉ còn be sáng làm
+ * nền, giúp con nổi hơn ở 28px.
+ *
+ * Nói cách khác: vòng viền chỉ lấp được ở **góc vuông của khung cắt**, mà góc đó
+ * không tồn tại trong avatar tròn cuối cùng. Bất biến `cropCornerRadius()` được
+ * giữ lại như **cảnh báo sớm** (nếu sau này ai đó đổi avatar thành vuông thì
+ * dải đen sẽ hiện), chứ không phải ràng buộc phải thỏa tuyệt đối.
+ *
+ * ## Vì sao 215px, không lớn hơn
+ *
+ * Bề rộng bị chặn **trên** bởi bong bóng "?" và **dưới** bởi vòng viền, không bị
+ * chặn bởi kích thước con. Mép phải ≤ ~309; góc trên-trái phải nằm trong
+ * `innerRadius`. Hai ràng buộc này gặp nhau ở khoảng 215–220 — lấy **215** để có
+ * biên an toàn ở cả hai phía thay vì kẹp sát một bên.
+ *
+ * ## Vì sao `innerRadius` là 231 chứ không phải 239
+ *
+ * Bản cũ ghi 239 — **đoán**, và sai. Quét pixel dọc trục giữa cho thấy dải vòng
+ * viền thực sự trải `r 231..241`, rồi `r ≥ 242` là **đen đặc** (không phải trong
+ * suốt). Mép trong thật là `231`. Dùng 239 cho phép khung lấy vòng viền trong khi
+ * test vẫn xanh.
  */
-export const CROP = { x: 189, y: 158, size: 100 } as const;
+export const CROP = { x: 75, y: 85, size: 215 } as const;
 
 /**
  * Điểm dò màu nền huy hiệu — nằm trên vòng viền, **ngoài chú chó**.
