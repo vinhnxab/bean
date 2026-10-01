@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Khởi động Bean — đảm bảo CHỈ CÓ MỘT tiến trình bean trong một thời điểm.
+#
+# Vì sao cần script: `OPENROUTER_API_KEY` chỉ sống trong RAM của một terminal
+# thì lần restart sau (hoặc khi máy mở lại) Bean khởi động không có key ⇒
+# không gọi được LLM ⇒ chat im lặng, nhưng server vẫn trả 200 nên rất khó đoán.
+#
+# Vì sao phải dừng instance cũ trước: hai tiến trình cùng đọc `data.dir` sẽ tranh
+# nhau SQLite và scheduler, dễ sinh "database is locked" và task chạy hai lần.
+#
+# Cách dùng:
+#   beanctl start     # dừng instance cũ (nếu có) rồi khởi động mới
+#   beanctl stop      # dừng hẳn
+#   beanctl status    # xem đang chạy gì
+#   beanctl restart   # = stop + start
+
+set -uo pipefail
+
+REPO="/home/vinhnx/dev/BeanAgent"
+BIN="$REPO/target/release/bean"
+CONFIG="$REPO/bean.toml"
+ENV_FILE="$HOME/.config/bean/env"
+LOG="/tmp/bean-run/serve.log"
+
+# Chạy Bean nền, tách phiên terminal (nó sống sót sau khi terminal đóng) và
+# tách luôn stdin. `setsid` quan trọng: không có nó thì SIGHUP của terminal sẽ
+# giết Bean khi bạn đóng cửa sổ.
+launch() {
+  mkdir -p "$(dirname "$LOG")"
+  ( set -a; . "$ENV_FILE"; set +a
+    export RUST_LOG="${RUST_LOG:-info,bean_security=warn}"
+    exec setsid "$BIN" --config "$CONFIG" serve >>"$LOG" 2>&1 </dev/null
+  ) &
+  disown
+}
+
+stop_all() {
+  local pids
+  # `pgrep -f` khớp cả chính dòng lệnh này nên loại trừ $$ và PPID.
+  pids=$(pgrep -f "target/release/bean --config" 2>/dev/null | grep -vx -e "$$" -e "$PPID" || true)
+  if [ -z "$pids" ]; then
+    echo "Không có tiến trình Bean nào đang chạy."
+    return 0
+  fi
+  echo "Đang dừng: $(echo "$pids" | tr '\n' ' ')"
+  # SIGTERM để Bean tắt êm (đóng SQLite, huỷ task con). Chờ tối đa 15s rồi mới ép.
+  kill -TERM $pids 2>/dev/null
+  for _ in $(seq 1 15); do
+    pgrep -f "target/release/bean --config" >/dev/null 2>&1 || { echo "Đã dừng êm."; return 0; }
+    sleep 1
+  done
+  echo "Không phản hồi SIGTERM trong 15s — dùng SIGKILL."
+  pkill -KILL -f "target/release/bean --config" 2>/dev/null
+  sleep 1
+}
+
+require_key() {
+  if [ ! -r "$ENV_FILE" ]; then
+    echo "LỖI: thiếu $ENV_FILE" >&2
+    echo "Tạo file này (quyền 600) chứa: export OPENROUTER_API_KEY=<key>" >&2
+    echo "Lấy key ở https://openrouter.ai/keys" >&2
+    exit 1
+  fi
+  ( set -a; . "$ENV_FILE"; set +a
+    if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+      echo "LỖI: OPENROUTER_API_KEY rỗng trong $ENV_FILE" >&2; exit 1
+    fi )
+}
+
+case "${1:-start}" in
+  start)
+    if [ ! -x "$BIN" ]; then
+      echo "LỖI: không có binary $BIN — chạy 'make build' trong $REPO trước." >&2
+      exit 1
+    fi
+    require_key
+    stop_all          # luôn dừng cái cũ trước, kể cả khi không thấy pid
+    launch
+    sleep 3
+    if pgrep -f "target/release/bean --config" >/dev/null 2>&1; then
+      echo "Đã khởi động Bean (pid $(pgrep -f "target/release/bean --config" | head -1)). Log: $LOG"
+      pgrep -f "target/release/bean --config" | while read -r p; do
+        echo "  pid $p: $(tr '\0' ' ' </proc/$p/cmdline | sed 's|.*/||')"
+      done
+    else
+      echo "Bean không lên — xem $LOG" >&2
+      tail -15 "$LOG" >&2
+      exit 1
+    fi
+    ;;
+  stop)   stop_all ;;
+  restart) require_key; stop_all; launch; sleep 3
+           pgrep -f "target/release/bean --config" >/dev/null && echo "Đã restart." || { echo "Không lên, xem $LOG" >&2; exit 1; } ;;
+  status)
+    n=$(pgrep -f "target/release/bean --config" | grep -vx -e "$$" -e "$PPID" | wc -l)
+    echo "Số tiến trình Bean: $n"
+    if [ "$n" -gt 1 ]; then
+      echo "⚠  Nhiều hơn một tiến trình — chạy 'beanctl restart' để gom về một."
+    fi
+    pgrep -f "target/release/bean --config" | grep -vx -e "$$" -e "$PPID" | while read -r p; do
+      echo "  pid $p (đã chạy $(ps -o etime= -p "$p" | tr -d ' '))"
+    done
+    ss -ltn 2>/dev/null | grep -E '127.0.0.1:(7878|7879)' | sed 's/^/  /' || true
+    ;;
+  *) echo "Dùng: beanctl {start|stop|restart|status}" >&2; exit 2 ;;
+esac
