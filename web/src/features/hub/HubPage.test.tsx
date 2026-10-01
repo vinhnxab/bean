@@ -268,6 +268,40 @@ describe("HUB", () => {
     expect(img?.getAttribute("aria-hidden")).toBe("true");
   });
 
+  // Lỗi thật: avatar trong tin Bean dài bị kéo giãn thành hình bầu dục.
+  // Nguyên nhân: attribute width/height KHÔNG ràng buộc kích thước hiển thị, và
+  // `<img>` trong flex container mặc định `align-items: stretch` nên bị kéo
+  // theo chiều cao nội dung. `shrink-0` không cứu được vì chỉ chặn chiều ngang.
+  it("BeanAvatar khoá cả width và height trong CSS để không bị kéo giãn", () => {
+    const { container } = render(<BeanAvatar size={44} />);
+    const img = container.querySelector<HTMLElement>("img");
+    // Nếu một trong hai thiếu, trình duyệt sẽ suy ra chiều còn lại từ ảnh và
+    // `align-items: stretch` sẽ nắm quyền chiều đó — tức là méo.
+    expect(img?.style.width).toBe("44px");
+    expect(img?.style.height).toBe("44px");
+  });
+
+  it("BeanAvatar dùng object-contain để hiện trọn ảnh, không crop", () => {
+    const { container } = render(<BeanAvatar size={44} />);
+    const img = container.querySelector("img");
+    expect(img?.className).toContain("object-contain");
+    // `shrink-0` vẫn phải giữ: không có nó thì avatar bị bóp ngang khi nội dung
+    // dài chiếm hết bề ngang.
+    expect(img?.className).toContain("shrink-0");
+    expect(img?.className).toContain("rounded-full");
+  });
+
+  it("BeanAvatar giữ CSS khoá kích thước ở mọi size dùng trong UI", () => {
+    // 28 = chat, 44 = logo HUB, 56 = trang đăng nhập/trạng thái rỗng.
+    for (const size of [28, 44, 56]) {
+      const { container, unmount } = render(<BeanAvatar size={size} />);
+      const img = container.querySelector<HTMLElement>("img");
+      expect(img?.style.width).toBe(`${size}px`);
+      expect(img?.style.height).toBe(`${size}px`);
+      unmount();
+    }
+  });
+
   it("BeanAvatar có nhãn trợ năng khi được định danh", () => {
     const { container } = render(<BeanAvatar size={28} title="Bean" />);
     const img = container.querySelector("img");

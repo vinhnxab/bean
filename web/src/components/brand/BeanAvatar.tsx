@@ -47,8 +47,21 @@ export function BeanAvatar({
       // chế độ tối, nếu để trong suốt thì chú chó đen hoà vào nền tối và chỉ còn
       // một khối tối không đọc được. Lót tròn bằng màu be của huy hiệu — đúng màu
       // ở cả hai theme, nên hình tròn luôn "có mặt".
-      style={{ backgroundColor: BADGE_BG_CSS }}
-      className={cn("shrink-0 rounded-full", className)}
+      //
+      // `width`/`height` ở `style` là **bắt buộc**, không phải lặp lại thừa. Đặc
+      // tính `width`/`height` ở trên chỉ dành cho trình đọc màn hình và chống
+      // layout shift; nó **không** ràng buộc kích thước hiển thị. Không có CSS
+      // `height` thì `<img>` trong flex container (mặc định `align-items:
+      // stretch`) bị kéo giãn theo chiều cao của nội dung bên cạnh ⇒ ở tin Bean
+      // dài, avatar bị méo thành hình bầu dục. `shrink-0` không cứu được vì nó
+      // chỉ chặn co theo **chiều ngang**.
+      //
+      // `object-contain`: ảnh gốc vuông 128×128 nên với khung vuông `cover` và
+      // `contain` giống nhau — nhưng `contain` nói rõ ý định "hiện trọn bức
+      // ảnh, không cắt bớt", nên nếu sau này đổi ảnh hoặc đổi khung thì không
+      // xuất hiện phần bị crop im lặng.
+      style={{ width: size, height: size, backgroundColor: BADGE_BG_CSS }}
+      className={cn("shrink-0 rounded-full object-contain", className)}
       draggable={false}
     />
   );
