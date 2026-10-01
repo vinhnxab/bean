@@ -281,12 +281,12 @@ describe("HUB", () => {
     expect(img?.style.height).toBe("44px");
   });
 
-  it("BeanAvatar dùng object-contain để hiện trọn ảnh, không crop", () => {
+  it("BeanAvatar giữ class nền tảng để không đổi hình dạng", () => {
     const { container } = render(<BeanAvatar size={44} />);
     const img = container.querySelector("img");
-    expect(img?.className).toContain("object-contain");
-    // `shrink-0` vẫn phải giữ: không có nó thì avatar bị bóp ngang khi nội dung
-    // dài chiếm hết bề ngang.
+    // `shrink-0` chặn bóp ngang khi nội dung dài chiếm hết bề ngang;
+    // `rounded-full` bo tròn. Không cần `object-fit`: ảnh và khung đều vuông,
+    // đã so pixel trên Chrome thì mọi giá trị đều cho kết quả giống nhau.
     expect(img?.className).toContain("shrink-0");
     expect(img?.className).toContain("rounded-full");
   });

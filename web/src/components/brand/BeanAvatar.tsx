@@ -48,20 +48,19 @@ export function BeanAvatar({
       // một khối tối không đọc được. Lót tròn bằng màu be của huy hiệu — đúng màu
       // ở cả hai theme, nên hình tròn luôn "có mặt".
       //
-      // `width`/`height` ở `style` là **bắt buộc**, không phải lặp lại thừa. Đặc
-      // tính `width`/`height` ở trên chỉ dành cho trình đọc màn hình và chống
-      // layout shift; nó **không** ràng buộc kích thước hiển thị. Không có CSS
-      // `height` thì `<img>` trong flex container (mặc định `align-items:
-      // stretch`) bị kéo giãn theo chiều cao của nội dung bên cạnh ⇒ ở tin Bean
-      // dài, avatar bị méo thành hình bầu dục. `shrink-0` không cứu được vì nó
-      // chỉ chặn co theo **chiều ngang**.
+      // `width`/`height` ở `style` là thứ **ràng buộc kích thước hiển thị**, còn
+      // attribute cùng tên ở trên chỉ dành cho trình đọc màn hình và chống layout
+      // shift. Không có CSS `height` thì `<img>` trong flex container (mặc định
+      // `align-items: stretch`) bị kéo theo chiều cao nội dung bên cạnh ⇒ ở tin Bean
+      // dài, avatar méo thành bầu dục (đo được: 128×4314). `shrink-0` không cứu
+      // được vì nó chỉ chặn co theo **chiều ngang**.
       //
-      // `object-contain`: ảnh gốc vuông 128×128 nên với khung vuông `cover` và
-      // `contain` giống nhau — nhưng `contain` nói rõ ý định "hiện trọn bức
-      // ảnh, không cắt bớt", nên nếu sau này đổi ảnh hoặc đổi khung thì không
-      // xuất hiện phần bị crop im lặng.
+      // Không thêm `object-fit`: ảnh gốc vuông 128×128 và khung cũng vuông, nên
+      // `cover`/`contain`/`fill` cho ra **cùng một kết quả** — đã so pixel thật
+      // trên Chrome, cả bốn đều ra hash giống hệt. Không cần khoá ratio riêng:
+      // đặt `width` bằng `height` đã đảm bảo khung vuông.
       style={{ width: size, height: size, backgroundColor: BADGE_BG_CSS }}
-      className={cn("shrink-0 rounded-full object-contain", className)}
+      className={cn("shrink-0 rounded-full", className)}
       draggable={false}
     />
   );
