@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use bean_types::{Risk, ToolSpec, config::McpServerConfig as ServerConfig};
 use rmcp::{
     ServiceExt,
-    model::{CallToolRequestParams, CallToolResponse},
+    model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock},
     service::{RoleClient, RunningService},
     transport::TokioChildProcess,
 };
@@ -520,6 +520,39 @@ const fn risk_for_trust(trusted: bool) -> Risk {
     if trusted { Risk::Safe } else { Risk::Confirm }
 }
 
+/// Kết quả tool có khối text **đọc được** không.
+///
+/// `false` nghĩa là server trả về im lặng: mọi khối text đều rỗng hoặc chỉ toàn khoảng
+/// trắng. Đây là tín hiệu duy nhất phân biệt được "tool lỗi" với "tool lỗi nhưng server
+/// nuốt mất lý do" — xem [`McpTool::silent_remote_error`].
+///
+/// Ảnh/âm thanh/resource vẫn tính là **có** nội dung (model nhìn được, mục 26); chỉ
+/// text rỗng mới bị coi là im lặng.
+fn has_readable_text(content: &[ContentBlock]) -> bool {
+    content.iter().any(|block| match block {
+        ContentBlock::Text(text) => !text.text.trim().is_empty(),
+        _ => true,
+    })
+}
+
+/// Payload thay thế khi MCP server báo lỗi mà không kèm message.
+///
+/// Giữ nguyên `raw` để không đánh mất thông tin, và nói rõ cho model biết phải làm gì:
+/// đây là lỗi *cục bộ của server*, không phải hành động bị từ chối — nên cách sửa đúng là
+/// kiểm tra tham số, đặc biệt là đường dẫn phải **tuyệt đối** cho tool ngoài core.
+fn silent_error_payload(server: &str, raw: &CallToolResult) -> serde_json::Value {
+    serde_json::json!({
+        "isError": true,
+        "error": format!(
+            "MCP server `{server}` báo tool thất bại nhưng KHÔNG kèm message lỗi. \
+             Server bỏ sót chi tiết ở chế độ rút gọn (ví dụ chrome-devtools-mcp với `--slim`). \
+             Hãy kiểm tra lại tham số; với `url`/`file` phải dùng đường dẫn TUYỆT ĐỐI trên máy chủ \
+             (xem mục `# Environment` của system prompt), đừng suy ra từ đường dẫn tương đối."
+        ),
+        "raw": raw,
+    })
+}
+
 impl McpTool {
     fn mark_untrusted(ctx: &ToolCtx) {
         ctx.untrusted_seen
@@ -530,6 +563,26 @@ impl McpTool {
         Self::mark_untrusted(ctx);
         let encoded = serde_json::to_string(&payload)
             .unwrap_or_else(|_| "{\"error\":\"không serialize được kết quả MCP\"}".to_string());
+        ToolError::Mcp(wrap(&encoded))
+    }
+
+    /// `isError: true` mà **không kèm message lỗi** — server nuốt mất lý do.
+    ///
+    /// Xảy ra thật với `chrome-devtools-mcp` ở chế độ `--slim` (đã bật trong `bean.toml`):
+    /// `SlimMcpResponse.handle()` chỉ serialize `responseLines` — rỗng khi handler ném lỗi —
+    /// và **không** kèm message, trong khi `McpResponse.handle()` ở chế độ thường có
+    /// `errorMessage: this.#error?.message`. Đã kiểm tra cả bản 1.10.1: y hệt, chưa sửa.
+    ///
+    /// Trả về đúng thông báo lỗi cho model thay vì chuỗi rỗng — nếu không, model và UI chỉ
+    /// thấy `{"content":[{"type":"text","text":""}],"isError":true}` và không có cách nào
+    /// đoán nguyên nhân.
+    fn silent_remote_error(ctx: &ToolCtx, server: &str, raw: &CallToolResult) -> ToolError {
+        Self::mark_untrusted(ctx);
+        let encoded =
+            serde_json::to_string(&silent_error_payload(server, raw)).unwrap_or_else(|_| {
+                "{\"isError\":true,\"error\":\"MCP server báo lỗi mà không kèm message\"}"
+                    .to_string()
+            });
         ToolError::Mcp(wrap(&encoded))
     }
 
@@ -616,6 +669,15 @@ impl Tool for McpTool {
         match response {
             CallToolResponse::Complete(result) => {
                 let is_error = result.is_error.unwrap_or(false);
+                // Server báo lỗi nhưng không kèm lý do: phải nói rõ thay vì trả chuỗi
+                // rỗng (xem `silent_remote_error`).
+                if is_error && !has_readable_text(&result.content) {
+                    return Err(Self::silent_remote_error(
+                        ctx,
+                        &self.connection.server,
+                        &result,
+                    ));
+                }
                 let encoded = match serde_json::to_string(&result) {
                     Ok(encoded) => encoded,
                     Err(error) => {
@@ -655,9 +717,95 @@ impl Tool for McpTool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use std::collections::BTreeMap;
 
     use super::*;
+
+    /// Dựng `CallToolResult` từ đúng JSON server gửi trên wire.
+    ///
+    /// `CallToolResult` là `#[non_exhaustive]` nên không dựng bằng struct literal được;
+    /// deserialize từ JSON vừa khả thi vừa sát thực tế hơn.
+    fn result_from_wire(json: serde_json::Value) -> CallToolResult {
+        serde_json::from_value(json).expect("JSON kết quả MCP phải hợp lệ")
+    }
+
+    /// Hồi quy đúng lỗi gặp thật: `chrome-devtools-mcp` `--slim` trả
+    /// `{"content":[{"type":"text","text":""}],"isError":true}` — không có lý do.
+    #[test]
+    fn empty_text_block_reads_as_silent_failure() {
+        let result = result_from_wire(serde_json::json!({
+            "content": [{ "type": "text", "text": "" }],
+            "isError": true
+        }));
+        assert!(!has_readable_text(&result.content));
+    }
+
+    #[test]
+    fn whitespace_only_text_is_also_silent() {
+        let result = result_from_wire(serde_json::json!({
+            "content": [{ "type": "text", "text": "   \n\t  " }],
+            "isError": true
+        }));
+        assert!(
+            !has_readable_text(&result.content),
+            "chỉ khoảng trắng thì model cũng không đọc được gì"
+        );
+    }
+
+    /// Có message thật thì phải giữ nguyên đường cũ — không được đụng vào kết quả hợp lệ.
+    #[test]
+    fn real_message_still_counts_as_readable() {
+        let result = result_from_wire(serde_json::json!({
+            "content": [{ "type": "text", "text": "Navigated to file:///tmp/a.html." }],
+            "isError": false
+        }));
+        assert!(has_readable_text(&result.content));
+    }
+
+    /// Server trả về cả ảnh (mục 26) thì vẫn là nội dung đọc được, không phải im lặng.
+    #[test]
+    fn image_block_counts_as_readable_content() {
+        let result = result_from_wire(serde_json::json!({
+            "content": [
+                { "type": "text", "text": "" },
+                { "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" }
+            ],
+            "isError": true
+        }));
+        assert!(has_readable_text(&result.content));
+    }
+
+    #[test]
+    fn no_content_at_all_is_silent() {
+        let result = result_from_wire(serde_json::json!({ "isError": true }));
+        assert!(!has_readable_text(&result.content));
+    }
+
+    /// Payload thay thế phải **có nội dung dùng được**: nêu tên server và chỉ cách sửa.
+    ///
+    /// Trước khi có `silent_error_payload`, model nhận đúng `text: ""` — nên đây là
+    /// hồi quy cho đúng cái lỗi người dùng gặp phải.
+    #[test]
+    fn silent_error_payload_explains_the_cause_and_keeps_raw() {
+        let raw = result_from_wire(serde_json::json!({
+            "content": [{ "type": "text", "text": "" }],
+            "isError": true
+        }));
+        let payload = silent_error_payload("chrome", &raw);
+
+        let message = payload["error"].as_str().expect("phải có error");
+        assert!(message.contains("chrome"), "phải nêu tên server: {message}");
+        assert!(
+            message.contains("TUYỆT ĐỐI"),
+            "phải chỉ cách sửa đúng: {message}"
+        );
+
+        // `raw` giữ lại nguyên trạng để không mất thông tin gì của server.
+        assert_eq!(payload["raw"]["content"][0]["text"], "");
+        assert_eq!(payload["isError"], true);
+    }
 
     #[test]
     fn risk_is_confirm_unless_server_is_trusted() {

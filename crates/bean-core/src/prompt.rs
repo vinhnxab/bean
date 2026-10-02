@@ -4,7 +4,28 @@
 //! Skills được nạp theo progressive disclosure: system prompt chỉ có index
 //! `name: description`; nội dung đầy đủ chỉ mở khi model gọi `load_skill`.
 
+use std::path::{Path, PathBuf};
+
 use bean_types::config::AgentConfig;
+
+/// Đường dẫn workspace để đưa vào system prompt, **luôn ở dạng tuyệt đối**.
+///
+/// Vì sao phải tuyệt đối: `bean.toml` khai `workspace = "./workspace"` và
+/// `Config::validate` chỉ `expand_tilde` (không canonicalize), nên trước đây prompt in
+/// ra đúng chữ `Workspace: ./workspace`. Model đọc xong tự ghép thành
+/// `file:///workspace/index-inline.html` rồi gọi MCP/browser — mọi tool chạy ngoài core
+/// (MCP, browser) đều thao tác trên **máy chủ** chứ không bị jail theo workspace, nên
+/// đường dẫn tương đối ở đây là fail chắc chắn và lỗi về đến model chỉ là `ERR_FILE_NOT_FOUND`.
+///
+/// Ưu tiên `canonicalize` (giải quyết symlink, trả đường dẫn thật); `serve` đã
+/// `create_dir_all` workspace nên tới lúc chạy thật nó luôn tồn tại. Với test hoặc lúc
+/// dựng config (workspace chưa có) thì rơi về `absolute`, rồi mới tới giá trị gốc.
+fn absolute_workspace(workspace: &Path) -> PathBuf {
+    if let Ok(real) = std::fs::canonicalize(workspace) {
+        return real;
+    }
+    std::path::absolute(workspace).unwrap_or_else(|_| workspace.to_path_buf())
+}
 
 /// Tạo system prompt cho một lượt hội thoại.
 ///
@@ -51,7 +72,8 @@ and call load_skill(name) to read it.
 {user_md}
 
 # Environment
-Workspace: {workspace}. Current time: {now} ({timezone})."#,
+Workspace: {workspace} (absolute path — use it verbatim for file:// URLs and for any path outside the sandbox; never guess a shorter form).
+Current time: {now} ({timezone})."#,
         name = config.agent_name,
         skills_index = if skills_index.is_empty() {
             "\n".into()
@@ -68,7 +90,7 @@ Workspace: {workspace}. Current time: {now} ({timezone})."#,
         } else {
             user_md.to_string()
         },
-        workspace = config.workspace.display(),
+        workspace = absolute_workspace(&config.workspace).display(),
         now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
         timezone = config.timezone,
     );
@@ -107,8 +129,9 @@ fn role_guidance(role: &str) -> Option<&'static str> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use super::system_prompt;
+    use super::{absolute_workspace, system_prompt};
     use bean_types::config::AgentConfig;
+    use std::path::Path;
 
     fn prompt_for(role: &str) -> String {
         system_prompt(&AgentConfig::default(), "", "", "", role)
@@ -157,6 +180,67 @@ mod tests {
         assert!(
             guidance > environment,
             "hướng dẫn phải nối sau phần Environment"
+        );
+    }
+
+    /// Hồi quy: workspace tương đối trong `bean.toml` **không được** lọt vào prompt.
+    ///
+    /// Đây chính là lỗi làm model ghép `file:///workspace/...` (không tồn tại trên máy
+    /// chủ) rồi gọi MCP: `ERR_FILE_NOT_FOUND` không kèm lý do. Cả trường hợp thư mục
+    /// **đã tồn tại** (canonicalize được) và **chưa tồn tại** (rơi về `absolute`) đều
+    /// phải ra đường dẫn tuyệt đối.
+    #[test]
+    fn workspace_is_always_rendered_as_an_absolute_path() {
+        let dir = tempfile::tempdir().expect("tạo thư mục tạm");
+        let existing = dir.path().join("ws");
+        std::fs::create_dir_all(&existing).expect("tạo workspace");
+
+        for relative in [Path::new("./workspace"), Path::new("workspace")] {
+            let rendered = absolute_workspace(relative);
+            assert!(
+                rendered.is_absolute(),
+                "`{relative:?}` phải ra đường dẫn tuyệt đối, thực tế `{rendered:?}`"
+            );
+        }
+
+        // Thư mục có thật: phải resolve về đúng chỗ, không phải chuỗi rỗng hay `..`.
+        let resolved = absolute_workspace(&existing);
+        assert_eq!(
+            std::fs::canonicalize(&existing).expect("canonicalize"),
+            resolved
+        );
+    }
+
+    /// Thư mục chưa tồn tại không được làm hỏng prompt — vẫn phải ra đường dẫn tuyệt đối.
+    #[test]
+    fn missing_workspace_still_renders_absolute() {
+        let rendered = absolute_workspace(Path::new("./khong/ton/tai/workspace"));
+        assert!(rendered.is_absolute(), "{rendered:?}");
+    }
+
+    /// Prompt phải nói rõ đường dẫn là tuyệt đối, vì chính model là người dựng `file://` URL.
+    #[test]
+    fn prompt_tells_the_model_the_workspace_path_is_absolute() {
+        let config = AgentConfig {
+            workspace: Path::new("./workspace").to_path_buf(),
+            ..AgentConfig::default()
+        };
+        let prompt = system_prompt(&config, "", "", "", "");
+
+        assert!(prompt.contains("absolute path"), "{prompt}");
+        // Đường dẫn tuyệt đối phải nằm trong prompt (chứ không chỉ mẹo "absolute path").
+        let line = prompt
+            .lines()
+            .find(|line| line.starts_with("Workspace: "))
+            .expect("phải còn dòng Workspace");
+        let rendered = absolute_workspace(&config.workspace).display().to_string();
+        assert!(
+            line.contains(&rendered),
+            "dòng Workspace phải chứa `{rendered}`, thực tế `{line}`"
+        );
+        assert!(
+            !line.contains("./workspace)"),
+            "không được sót lại dạng tương đối: `{line}`"
         );
     }
 }
