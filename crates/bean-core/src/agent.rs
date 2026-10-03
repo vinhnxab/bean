@@ -146,6 +146,9 @@ pub enum EndReason {
     MaxSteps,
     /// Đã chạm hoặc vượt ngân sách token/ngày.
     BudgetExceeded,
+    /// Provider kết thúc lượt nhưng **không trả về chữ nào** — run vẫn ghi vào lịch
+    /// sử, nhưng kèm thông báo nói rõ chuyện gì xảy ra thay vì im lặng.
+    EmptyResponse,
 }
 
 /// Kết quả đầy đủ cho Router; wrapper [`run_turn`] chỉ trả text để tương thích M3.
@@ -348,6 +351,29 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         }
         let is_final = resp.tool_calls.is_empty();
         let final_text = resp.text.clone().unwrap_or_default();
+
+        // Provider kết thúc lượt mà **không trả về chữ nào**. Trước đây `unwrap_or_default()`
+        // biến nó thành chuỗi rỗng: UI hiện một dòng assistant rỗng, người dùng thấy màn
+        // hình trống và không có cách nào đoán lý do. Nguyên nhân điển hình là model
+        // reasoning dùng hết `llm.max_tokens` cho `reasoning` rồi `content: null`
+        // (đo thật: `nvidia/nemotron-3-super-120b-a12b:free` với `max_tokens = 2048` trả
+        // `finish_reason: length` + `content: null`; nâng lên 16384 thì trả lời bình thường).
+        //
+        // Không ghi message rỗng vào DB: thay bằng thông báo nêu đúng nguyên nhân, để vừa
+        // cho người đọc biết, vừa cho lượt sau của model biết phải làm gì.
+        if is_final && final_text.trim().is_empty() {
+            return finish_with_notice(
+                store,
+                session,
+                transcript,
+                empty_response_notice(resp.stop),
+                EndReason::EmptyResponse,
+                tool_call_count,
+                loaded_skills,
+            )
+            .await;
+        }
+
         let assistant_message = Message::from_response(&resp);
         let message_id =
             append_run_message(store, session, &mut transcript, assistant_message).await?;
@@ -727,6 +753,27 @@ fn budget_notice(used: u64, limit: u64) -> String {
     format!(
         "Đã dừng: ngân sách token/ngày đã đạt {used}/{limit} token. Hãy tiếp tục vào ngày mới hoặc tăng `security.daily_token_budget`."
     )
+}
+
+/// Thông báo khi provider kết thúc lượt mà không trả về chữ nào.
+///
+/// Tách nhánh `MaxTokens` vì đó là nguyên nhân đo được và **hành động sửa được**:
+/// model reasoning dùng hết ngân sách token cho phần `reasoning` nên `content` về
+/// `null`. Nói rõ cách sửa tốt hơn nhiều so với trả chuỗi rỗng.
+fn empty_response_notice(stop: StopReason) -> String {
+    match stop {
+        StopReason::MaxTokens => {
+            "Model đã dùng hết `llm.max_tokens` cho phần suy luận nội bộ và chưa kịp \
+             trả lời (provider báo `finish_reason: length`, nội dung rỗng). Hãy tăng \
+             `llm.max_tokens` trong `bean.toml`, hoặc đổi sang model không suy luận dài. \
+             Yêu cầu của bạn chưa được xử lý — hãy gửi lại sau khi đổi cấu hình."
+                .to_string()
+        }
+        _ => "Model kết thúc lượt mà không trả về nội dung nào (không phải lỗi xác thực \
+             hay hết ngân sách). Yêu cầu của bạn chưa được xử lý — hãy thử lại, hoặc đổi \
+             model trong `bean.toml` nếu tình trạng này lặp lại."
+            .to_string(),
+    }
 }
 
 async fn append_run_message(

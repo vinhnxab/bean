@@ -335,6 +335,72 @@ async fn finishes_when_model_answers_without_tools() {
     assert!(tool_messages(&store).await.is_empty());
 }
 
+/// Hồi quy: provider kết thúc lượt mà trả về **không có chữ nào** thì Bean phải nói rõ
+/// lý do, không được trả tin nhắn rỗng.
+///
+/// Đo thật trên OpenRouter: `nvidia/nemotron-3-super-120b-a12b:free` là model reasoning;
+/// với `max_tokens` nhỏ nó dùng hết ngân sách cho `reasoning` rồi trả `content: null`
+/// + `finish_reason: length`. Trước đây `unwrap_or_default()` biến thành chuỗi rỗng và UI
+/// hiện một dòng assistant trống — người dùng không hề biết vì sao.
+#[tokio::test]
+async fn empty_final_response_is_explained_not_silent() {
+    let (_, _ws, reg) = probe(Risk::Safe, false);
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let truncated = LlmResponse {
+        text: None,
+        tool_calls: Vec::new(),
+        stop: StopReason::MaxTokens,
+        usage: Usage::default(),
+    };
+
+    let out = turn(vec![truncated], &reg, &io, &store, &cfg(5))
+        .await
+        .unwrap();
+
+    assert!(!out.trim().is_empty(), "không được trả tin nhắn rỗng");
+    assert!(
+        out.contains("max_tokens"),
+        "phải chỉ ra nguyên nhân và cách sửa: {out}"
+    );
+
+    // Lịch sử không được lưu message assistant rỗng.
+    let hist = store.history(SessionId::new(1), None, 0).await.unwrap();
+    assert!(
+        hist.iter()
+            .all(|m| m.text.as_deref().unwrap_or("").trim() != ""),
+        "không được ghi message rỗng vào DB: {hist:?}"
+    );
+}
+
+/// Cùng tình huống nhưng **không** phải hết token: vẫn phải có thông báo, chỉ không
+/// quy chụp nguyên nhân "hết token" khi không đúng.
+#[tokio::test]
+async fn empty_final_response_without_max_tokens_stays_generic() {
+    let (_, _ws, reg) = probe(Risk::Safe, false);
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let silent = LlmResponse {
+        text: Some("   \n ".into()),
+        tool_calls: Vec::new(),
+        stop: StopReason::EndTurn,
+        usage: Usage::default(),
+    };
+
+    let out = turn(vec![silent], &reg, &io, &store, &cfg(5))
+        .await
+        .unwrap();
+
+    assert!(
+        !out.trim().is_empty(),
+        "khoảng trắng cũng phải bị coi là rỗng"
+    );
+    assert!(
+        !out.contains("max_tokens"),
+        "không được đoán sai thành hết token: {out}"
+    );
+}
+
 /// 2. Chạy tool rồi trả lời cuối; tool result không lỗi được ghi đủ.
 #[tokio::test]
 async fn runs_tool_then_final_answer() {
