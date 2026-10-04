@@ -95,6 +95,141 @@ pub(super) fn parse(input: &str) -> Result<Command<'_>, ParseError> {
     })
 }
 
+use bean_types::{RunEvent, RunId, SessionId};
+
+use super::{Incoming, Router, lock, read_lock, router_error_code, write_lock};
+
+impl Router {
+    pub(super) async fn handle_command(
+        &self,
+        incoming: &Incoming,
+        session: SessionId,
+        run_id: RunId,
+        command: &str,
+    ) -> Result<(), RouterError> {
+        let parsed = match parse(command) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                return self.command_error(session, run_id, error.code(), &error.message());
+            }
+        };
+        let result: Result<String, RouterError> = match parsed {
+            Command::New => {
+                if self.session_busy(session) {
+                    Err(RouterError::SessionBusy)
+                } else {
+                    self.inner.store.archive_session(session).await?;
+                    lock(&self.inner.state)?.policies.remove(&session);
+                    let new_session = self
+                        .inner
+                        .store
+                        .ensure_session_for_user(
+                            &incoming.channel,
+                            &incoming.chat_id,
+                            &incoming.user_id,
+                            "",
+                        )
+                        .await?;
+                    Ok(format!("Đã tạo phiên mới: {new_session}"))
+                }
+            }
+            Command::Stop => {
+                self.cancel_session(session).await;
+                Ok("Đã yêu cầu dừng run hiện tại.".into())
+            }
+            Command::ShowModel => {
+                let config = read_lock(&self.inner.config)?;
+                Ok(format!(
+                    "Model hiện tại: {}. Cho phép: {}",
+                    config.llm.model,
+                    config.llm.effective_allowed_models().join(", ")
+                ))
+            }
+            Command::SetModel(argument) => {
+                let mut config = write_lock(&self.inner.config)?;
+                if config
+                    .llm
+                    .effective_allowed_models()
+                    .iter()
+                    .any(|model| model == argument)
+                {
+                    config.llm.model = argument.to_string();
+                    Ok(format!("Model đổi thành: {argument}"))
+                } else {
+                    Err(RouterError::ModelNotAllowed(argument.to_string()))
+                }
+            }
+            Command::Skills => {
+                let index = self.inner.skills.index()?;
+                Ok(if index.trim().is_empty() {
+                    "Chưa nạp skill.".into()
+                } else {
+                    index
+                })
+            }
+            Command::MemoryUsage => Ok("Dùng: /memory <truy vấn>".into()),
+            Command::MemorySearch(query) => {
+                let hits = self.inner.store.memory_search(query).await?;
+                Ok(if hits.is_empty() {
+                    "Không tìm thấy ghi nhớ.".into()
+                } else {
+                    hits.into_iter()
+                        .map(|hit| format!("- {}", hit.text))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+            }
+            Command::Tasks => Ok("Chưa có tác vụ định kỳ.".into()),
+            Command::ApproveDraft("") => Ok("Dùng: /approve <id>".into()),
+            Command::RejectDraft("") => Ok("Dùng: /reject <id>".into()),
+            Command::ApproveDraft(id) => self
+                .approve_draft(id, &incoming.user_id)
+                .await
+                .map(|decision| format!("Đã duyệt và kích hoạt skill `{}`.", decision.name)),
+            Command::RejectDraft(id) => self
+                .reject_draft(id, &incoming.user_id)
+                .await
+                .map(|decision| format!("Đã bỏ skill nháp `{}`.", decision.name)),
+        };
+        match result {
+            Ok(text) => {
+                self.emit(RunEvent::Final {
+                    session_id: session,
+                    run_id,
+                    text,
+                    message_id: None,
+                });
+                Ok(())
+            }
+            Err(error) => {
+                self.emit(RunEvent::Error {
+                    session_id: session,
+                    run_id,
+                    code: router_error_code(&error).into(),
+                    message: error.to_string(),
+                });
+                Ok(())
+            }
+        }
+    }
+
+    fn command_error(
+        &self,
+        session: SessionId,
+        run_id: RunId,
+        code: &str,
+        message: &str,
+    ) -> Result<(), RouterError> {
+        self.emit(RunEvent::Error {
+            session_id: session,
+            run_id,
+            code: code.into(),
+            message: message.into(),
+        });
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -153,3 +288,11 @@ mod tests {
         assert_eq!(parse("").unwrap_err().code(), "unknown_command");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Thực thi slash command
+//
+// [`parse`] ở trên chỉ lo cú pháp; phần *tác dụng* nằm ở đây. Cùng module để một
+// đầu vào slash command nằm trọn trong một chỗ, và `router.rs` không phải mang
+// thêm một `match` dài.
+// ---------------------------------------------------------------------------
