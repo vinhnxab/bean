@@ -113,7 +113,7 @@ impl ConfirmRegistry {
         // `actor`): `actor` là người sẽ *trả lời*, còn HUB cần biết *agent nào* đang
         // chờ. Khi run đã kết thúc, `active` không còn ⇒ `None`, đúng như lúc đó
         // confirm sẽ bị dọn theo `finish`.
-        let role = state.active.get(&run_id).and_then(|run| run.role.clone());
+        let role = state.queue.role_of(&run_id);
         state.confirms.insert(
             confirm_id.clone(),
             PendingConfirm {
@@ -182,6 +182,27 @@ impl ConfirmRegistry {
             .confirms
             .remove(id)
             .map(|pending| (pending.session_id, pending.run_id))
+    }
+
+    /// Gỡ mọi confirm thuộc một run vừa kết thúc.
+    ///
+    /// Trả về `(confirm_id, session_id, run_id)` để `Router` phát `ConfirmResolved`
+    /// với outcome `Denied` — nếu thiếu bước này, UI sẽ đếm ngược tới hết hạn một thẻ
+    /// duyệt đã vô nghĩa.
+    pub(super) fn drop_for_run(
+        state: &mut RouterState,
+        run_id: &RunId,
+    ) -> Vec<(ConfirmId, SessionId, RunId)> {
+        let stale: Vec<_> = state
+            .confirms
+            .iter()
+            .filter(|(_, pending)| pending.run_id == *run_id)
+            .map(|(id, pending)| (id.clone(), pending.session_id, pending.run_id.clone()))
+            .collect();
+        for (id, _, _) in &stale {
+            state.confirms.remove(id);
+        }
+        stale
     }
 
     /// Danh sách confirm đang chờ — nguồn cho `Sync` sau khi WebSocket nối lại.

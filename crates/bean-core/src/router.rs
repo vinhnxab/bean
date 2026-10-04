@@ -3,7 +3,7 @@
 //! Run thuộc Router: adapter chỉ `submit` và nhận event. Vòng đời run không phụ
 //! thuộc subscriber, nên WebSocket rớt không làm cancel tool hoặc confirm.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak};
 use std::time::Duration;
@@ -27,10 +27,12 @@ use crate::store::{Store, StoreError};
 
 use command::{self as slash, Command};
 use confirm::{ConfirmRegistry, ConfirmRequest};
+use queue::{Enqueued, RunQueue};
 
 mod command;
 mod confirm;
 mod outbox;
+mod queue;
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;
 const OUTBOX_BATCH_SIZE: usize = 50;
@@ -275,12 +277,6 @@ pub struct RouterSnapshot {
     pub pending_confirms: Vec<PendingConfirmInfo>,
 }
 
-#[derive(Debug)]
-struct SessionQueue {
-    active: Option<RunId>,
-    pending: VecDeque<QueuedRun>,
-}
-
 #[derive(Debug, Clone)]
 struct QueuedRun {
     run_id: RunId,
@@ -294,16 +290,6 @@ struct QueuedRun {
     /// Mang theo bản thân job (thay vì resolve lại lúc `finish`) để khi run kế tiếp
     /// được kích hoạt, `ActiveRun` nhận đúng role mà lúc xếp hàng đã quyết định —
     /// không phụ thuộc cấu hình có bị sửa giữa đường.
-    role: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ActiveRun {
-    channel: String,
-    chat_id: String,
-    cancel: CancellationToken,
-    /// Role đã resolve cho run này (M21.3) — để HUB quy đổi "đang chạy" về đúng
-    /// agent thay vì chỉ biết có run. `None` khi RBAC tắt.
     role: Option<String>,
 }
 
@@ -329,9 +315,12 @@ struct Confirmation {
 
 #[derive(Debug, Default)]
 struct RouterState {
-    queues: HashMap<SessionId, SessionQueue>,
-    active: HashMap<RunId, ActiveRun>,
+    /// Máy trạng thái lịch trình: hàng đợi theo session + run đang chạy.
+    queue: RunQueue,
+    /// Sổ xác nhận đang chờ (mục 15.3).
     confirms: HashMap<ConfirmId, PendingConfirm>,
+    /// "Cho phép tool này trong phiên" theo session — chỉ trong RAM, không ghi DB
+    /// (mục 10, `D1.7`).
     policies: HashMap<SessionId, Arc<SessionPolicy>>,
 }
 
@@ -448,20 +437,7 @@ impl Router {
     pub fn shutdown(&self) {
         self.inner.shutdown.cancel();
         let tokens = lock(&self.inner.state)
-            .map(|state| {
-                let mut tokens: Vec<_> = state
-                    .active
-                    .values()
-                    .map(|active| active.cancel.clone())
-                    .collect();
-                tokens.extend(
-                    state
-                        .queues
-                        .values()
-                        .flat_map(|queue| queue.pending.iter().map(|job| job.cancel.clone())),
-                );
-                tokens
-            })
+            .map(|state| state.queue.all_cancel_tokens())
             .unwrap_or_default();
         for token in tokens {
             token.cancel();
@@ -588,32 +564,16 @@ impl Router {
     fn enqueue(&self, queued: QueuedRun) -> Result<(), RouterError> {
         let (start, position) = {
             let mut state = lock(&self.inner.state)?;
-            let queue = state
-                .queues
-                .entry(queued.session_id)
-                .or_insert_with(|| SessionQueue {
-                    active: None,
-                    pending: VecDeque::new(),
-                });
-            if queue.active.is_some() {
-                queue.pending.push_back(queued.clone());
-                (false, Some(queue.pending.len() as u32))
-            } else {
-                queue.active = Some(queued.run_id.clone());
-                state
-                    .policies
-                    .entry(queued.session_id)
-                    .or_insert_with(|| Arc::new(SessionPolicy::new()));
-                state.active.insert(
-                    queued.run_id.clone(),
-                    ActiveRun {
-                        channel: queued.incoming.channel.clone(),
-                        chat_id: queued.incoming.chat_id.clone(),
-                        cancel: queued.cancel.clone(),
-                        role: queued.role.clone(),
-                    },
-                );
-                (true, None)
+            match state.queue.enqueue(&queued) {
+                Enqueued::Start => {
+                    // "Cho phép tool trong phiên" chỉ tồn tại khi session có run thật.
+                    state
+                        .policies
+                        .entry(queued.session_id)
+                        .or_insert_with(|| Arc::new(SessionPolicy::new()));
+                    (true, None)
+                }
+                Enqueued::Queued { position } => (false, Some(position)),
             }
         };
         if let Some(position) = position {
@@ -893,49 +853,16 @@ impl Router {
                 Ok(state) => state,
                 Err(_) => return,
             };
-            state.active.remove(run_id);
-            let stale: Vec<_> = state
-                .confirms
-                .iter()
-                .filter(|(_, pending)| pending.run_id == *run_id)
-                .map(|(id, pending)| (id.clone(), pending.session_id, pending.run_id.clone()))
-                .collect();
-            for (id, _, _) in &stale {
-                state.confirms.remove(id);
-            }
-            let Some(queue) = state.queues.get_mut(&session_id) else {
+            // Confirm của run này trở nên vô nghĩa ⇒ gỡ và báo `Denied` cho UI.
+            let stale = ConfirmRegistry::drop_for_run(&mut state, run_id);
+            let Some(advanced) =
+                state
+                    .queue
+                    .advance(run_id, session_id, self.inner.shutdown.is_cancelled())
+            else {
                 return;
             };
-            if queue.active.as_ref() != Some(run_id) {
-                return;
-            }
-            queue.active = None;
-            let shutting_down = self.inner.shutdown.is_cancelled();
-            let next = if shutting_down {
-                queue.pending.clear();
-                None
-            } else {
-                queue.pending.pop_front()
-            };
-            let positions: Vec<_> = queue
-                .pending
-                .iter()
-                .enumerate()
-                .map(|(index, job)| (job.run_id.clone(), index as u32 + 1))
-                .collect();
-            if let Some(next) = &next {
-                queue.active = Some(next.run_id.clone());
-                state.active.insert(
-                    next.run_id.clone(),
-                    ActiveRun {
-                        channel: next.incoming.channel.clone(),
-                        chat_id: next.incoming.chat_id.clone(),
-                        cancel: next.cancel.clone(),
-                        role: next.role.clone(),
-                    },
-                );
-            }
-            (next, positions, stale)
+            (advanced.next, advanced.positions, stale)
         };
         for (confirm_id, confirm_session, confirm_run) in stale {
             self.emit(RunEvent::ConfirmResolved {
@@ -970,21 +897,7 @@ impl Router {
                 };
             }
         };
-        let running = state
-            .active
-            .iter()
-            .map(|(run_id, active)| RunningInfo {
-                run_id: run_id.clone(),
-                session_id: state
-                    .queues
-                    .iter()
-                    .find_map(|(session, queue)| {
-                        (queue.active.as_ref() == Some(run_id)).then_some(*session)
-                    })
-                    .unwrap_or_else(|| SessionId::new(0)),
-                role: active.role.clone(),
-            })
-            .collect();
+        let running = state.queue.running();
         let pending_confirms = ConfirmRegistry::pending(&state);
         RouterSnapshot {
             running,
@@ -1070,13 +983,9 @@ impl Router {
 
     /// Huỷ active run của channel/chat; queued run không bị huỷ.
     pub async fn cancel(&self, channel: &str, chat_id: &str) {
-        let token = lock(&self.inner.state).ok().and_then(|state| {
-            state
-                .active
-                .iter()
-                .find(|(_, active)| active.channel == channel && active.chat_id == chat_id)
-                .map(|(_, active)| active.cancel.clone())
-        });
+        let token = lock(&self.inner.state)
+            .ok()
+            .and_then(|state| state.queue.cancel_token_for_channel(channel, chat_id));
         if let Some(token) = token {
             token.cancel();
         }
@@ -1087,20 +996,9 @@ impl Router {
     /// WebSocket gửi `session_id`, nên adapter không được dùng `cancel(channel,
     /// chat_id)` vì nhiều session của cùng user có thể bị huỷ nhầm.
     pub async fn cancel_session(&self, session: SessionId) {
-        let run_id = lock(&self.inner.state).ok().and_then(|state| {
-            state
-                .queues
-                .get(&session)
-                .and_then(|queue| queue.active.clone())
-        });
-        let token = run_id.and_then(|run_id| {
-            lock(&self.inner.state).ok().and_then(|state| {
-                state
-                    .active
-                    .get(&run_id)
-                    .map(|active| active.cancel.clone())
-            })
-        });
+        let token = lock(&self.inner.state)
+            .ok()
+            .and_then(|state| state.queue.cancel_token_for_session(session));
         if let Some(token) = token {
             token.cancel();
         }
@@ -1110,11 +1008,7 @@ impl Router {
     #[must_use]
     pub fn active_run(&self, channel: &str, chat_id: &str) -> Option<RunId> {
         let state = lock(&self.inner.state).ok()?;
-        state
-            .active
-            .iter()
-            .find(|(_, active)| active.channel == channel && active.chat_id == chat_id)
-            .map(|(run_id, _)| run_id.clone())
+        state.queue.active_run_for(channel, chat_id)
     }
 
     // -----------------------------------------------------------------------
@@ -1211,12 +1105,7 @@ impl Router {
     }
 
     fn session_busy(&self, session: SessionId) -> bool {
-        lock(&self.inner.state).is_ok_and(|state| {
-            state
-                .queues
-                .get(&session)
-                .is_some_and(|queue| queue.active.is_some() || !queue.pending.is_empty())
-        })
+        lock(&self.inner.state).is_ok_and(|state| state.queue.is_busy(session))
     }
 
     async fn handle_command(
