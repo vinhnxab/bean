@@ -24,7 +24,7 @@ pub mod web;
 
 pub use audit::{AuditEntry, AuditLog, entry_now, redact_secrets, redact_text_secrets};
 pub use paths::CapWorkspace;
-pub use policy::{DenyReason, Policy, PolicyDecision, SessionPolicy, deny_list_reason};
+pub use policy::{DenyReason, PolicyDecision, SessionPolicy, decide, deny_list_reason};
 pub use ratelimit::{DEFAULT_MAX_LOCK, DEFAULT_THRESHOLD, DEFAULT_WINDOW, RateLimiter};
 pub use sandbox::{Sandbox, SandboxError, ShellOutcome};
 pub use shell::{run_shell, run_shell_for_projects};

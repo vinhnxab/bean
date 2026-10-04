@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use bean_scan::{ScanScope, ScannerCmd, security_scan};
-use bean_security::{CapWorkspace, Policy, PolicyDecision, Sandbox, SessionPolicy};
+use bean_security::{CapWorkspace, PolicyDecision, Sandbox, SessionPolicy, decide};
 use bean_tools::{AlertSink, Tool, ToolCtx};
 use bean_types::config::{SandboxConfig, SandboxMode, ScanScopeEntry, ScanTargetKind};
 use bean_types::{Alert, AlertSeverity, RolePermissions, SessionId};
@@ -276,10 +276,9 @@ fn only_roles_with_infra_scan_tag_see_the_tool() {
 fn scan_tool_never_allows_session_permission() {
     let (tool, _m, _k) = setup(sample_scope());
     let args = serde_json::json!({ "target": "192.0.2.5" });
-    let policy = Policy::new();
     let session = SessionPolicy::default();
 
-    let decision = policy.decide("security_scan", tool.risk(&args), &args, false, &session);
+    let decision = decide("security_scan", tool.risk(&args), &args, false, &session);
     assert_eq!(
         decision,
         PolicyDecision::NeedsConfirm {
@@ -294,13 +293,12 @@ fn scan_tool_never_allows_session_permission() {
 fn even_after_reading_untrusted_or_session_allow_scan_still_asks() {
     let (tool, _m, _k) = setup(sample_scope());
     let args = serde_json::json!({ "target": "192.0.2.5" });
-    let policy = Policy::new();
 
     let session = SessionPolicy::default();
     session.allow("security_scan");
 
     for untrusted_seen in [false, true] {
-        let decision = policy.decide(
+        let decision = decide(
             "security_scan",
             tool.risk(&args),
             &args,

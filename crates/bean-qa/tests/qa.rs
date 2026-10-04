@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bean_qa::{SuiteCatalog, qa_test};
-use bean_security::{CapWorkspace, Policy, PolicyDecision, Sandbox, SessionPolicy};
+use bean_security::{CapWorkspace, PolicyDecision, Sandbox, SessionPolicy, decide};
 use bean_tools::{ToolCtx, ToolRegistry};
 use bean_types::config::{QaRunner, QaSandboxConfig, QaSuiteConfig, SandboxMode};
 use bean_types::{RolePermissions, SessionId};
@@ -280,11 +280,10 @@ fn qa_test_allows_session_permission_unlike_security_scan() {
     let catalog = SuiteCatalog::from_config(&[suite("core-unit", QaRunner::CargoTest, &[], ".")]);
     let tool = qa_test(catalog, sandbox);
     let args = serde_json::json!({ "suite_name": "core-unit" });
-    let policy = Policy::new();
 
     // (1) Lần đầu: hỏi, CÓ tuỳ chọn "cho phép trong phiên".
     assert_eq!(
-        policy.decide(
+        decide(
             "qa_test",
             tool.risk(&args),
             &args,
@@ -301,7 +300,7 @@ fn qa_test_allows_session_permission_unlike_security_scan() {
     let session = SessionPolicy::default();
     session.allow("qa_test");
     assert_eq!(
-        policy.decide("qa_test", tool.risk(&args), &args, false, &session),
+        decide("qa_test", tool.risk(&args), &args, false, &session),
         PolicyDecision::Allowed,
         "đã cho phép trong phiên thì không hỏi lại"
     );
@@ -309,7 +308,7 @@ fn qa_test_allows_session_permission_unlike_security_scan() {
     // (3) Nhưng đã đọc nội dung untrusted trong lượt thì mất tuỳ chọn đó (mục 15.4) —
     //     lớp phòng thủ vẫn còn nguyên với `qa_test`.
     assert_eq!(
-        policy.decide("qa_test", tool.risk(&args), &args, true, &session),
+        decide("qa_test", tool.risk(&args), &args, true, &session),
         PolicyDecision::NeedsConfirm {
             allow_in_session: false
         },
@@ -320,7 +319,7 @@ fn qa_test_allows_session_permission_unlike_security_scan() {
     let scan_session = SessionPolicy::default();
     scan_session.allow("security_scan");
     assert_eq!(
-        policy.decide(
+        decide(
             "security_scan",
             bean_types::Risk::Dangerous,
             &args,

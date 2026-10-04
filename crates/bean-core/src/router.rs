@@ -4,7 +4,7 @@
 //! thuộc subscriber, nên WebSocket rớt không làm cancel tool hoặc confirm.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak};
 use std::time::Duration;
 
@@ -24,6 +24,8 @@ use crate::agent::{AgentError, RunOutcome, RunTurnArgs, run_turn_outcome};
 use crate::learning::{ReflectionArgs, reflect};
 use crate::run_io::{Decision, RunIo};
 use crate::store::{Store, StoreError};
+
+mod outbox;
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;
 const OUTBOX_BATCH_SIZE: usize = 50;
@@ -1574,82 +1576,17 @@ impl Router {
     }
 
     /// Khởi động worker retry outbox đúng một lần.
+    ///
+    /// Giao việc cho [`outbox::OutboxWorker`] — Router không còn ôm logic retry outbox.
     pub fn start_outbox_worker(self: &Arc<Self>) -> Result<(), RouterError> {
-        if self
-            .inner
-            .outbox_started
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Ok(());
-        }
-        let handle = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => handle,
-            Err(_) => {
-                self.inner.outbox_started.store(false, Ordering::Release);
-                return Err(RouterError::NoRuntime);
-            }
-        };
-        let weak = Arc::downgrade(&self.inner);
-        let shutdown = self.inner.shutdown.clone();
-        let interval = self.inner.options.outbox_poll_interval;
-        handle.spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = shutdown.cancelled() => break,
-                    _ = tokio::time::sleep(interval) => {
-                        let Some(inner) = weak.upgrade() else { break };
-                        let router = Self { inner };
-                        if let Err(error) = router.process_outbox_once().await {
-                            tracing::warn!(error = %error, "worker outbox lỗi");
-                        }
-                    }
-                }
-            }
-        });
-        Ok(())
+        Arc::new(outbox::OutboxWorker::new(&self.inner)).start()
     }
 
     /// Xử lý một batch outbox đến hạn (public để test không phụ thuộc wall clock).
+    ///
+    /// Giao việc cho [`outbox::OutboxWorker`].
     pub async fn process_outbox_once(&self) -> Result<usize, RouterError> {
-        let entries = self
-            .inner
-            .store
-            .due_outbox(&now_rfc3339(), OUTBOX_BATCH_SIZE)
-            .await?;
-        let count = entries.len();
-        for entry in entries {
-            let adapter = read_lock(&self.inner.channels)?
-                .get(&entry.channel)
-                .cloned();
-            let result = match adapter {
-                Some(adapter) => adapter.send(&entry.chat_id, entry.payload.clone()).await,
-                None => Err(anyhow::anyhow!("channel chưa đăng ký: {}", entry.channel)),
-            };
-            match result {
-                Ok(()) => self.inner.store.complete_outbox(entry.id).await?,
-                Err(error) => {
-                    let next_attempt_at = self.next_outbox_attempt(entry.attempts);
-                    self.inner
-                        .store
-                        .retry_outbox(entry.id, &next_attempt_at, &error.to_string())
-                        .await?;
-                }
-            }
-        }
-        Ok(count)
-    }
-
-    fn next_outbox_attempt(&self, attempts: u32) -> String {
-        let factor = 1_u32.checked_shl(attempts.min(16)).unwrap_or(u32::MAX);
-        let delay = self
-            .inner
-            .options
-            .outbox_base_delay
-            .saturating_mul(factor)
-            .min(self.inner.options.outbox_max_delay);
-        let delay = chrono::Duration::from_std(delay).unwrap_or(chrono::Duration::MAX);
-        (chrono::Utc::now() + delay).to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+        outbox::OutboxWorker::new(&self.inner).process_once().await
     }
 }
 

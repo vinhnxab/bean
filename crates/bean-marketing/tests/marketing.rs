@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bean_marketing::{PublishClient, marketing_draft, marketing_publish};
-use bean_security::{CapWorkspace, Policy, PolicyDecision, SessionPolicy};
+use bean_security::{CapWorkspace, PolicyDecision, SessionPolicy, decide};
 use bean_tools::{ToolCtx, ToolRegistry};
 use bean_types::config::{MarketingConfig, RoleConfig};
 use bean_types::{Config, Risk, RolePermissions, SessionId};
@@ -139,10 +139,9 @@ fn publish_always_needs_confirm_even_after_session_allow() {
     let args = serde_json::json!({ "text": "bài đăng" });
     assert_eq!(tool.risk(&args), Risk::Dangerous);
 
-    let policy = Policy::new();
     let session = SessionPolicy::default();
     assert_eq!(
-        policy.decide(
+        decide(
             "marketing_publish",
             tool.risk(&args),
             &args,
@@ -156,7 +155,7 @@ fn publish_always_needs_confirm_even_after_session_allow() {
     // Người dùng đã "cho phép trong phiên" ⇒ vẫn phải hỏi.
     session.allow("marketing_publish");
     assert_eq!(
-        policy.decide(
+        decide(
             "marketing_publish",
             tool.risk(&args),
             &args,

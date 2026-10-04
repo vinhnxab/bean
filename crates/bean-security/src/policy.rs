@@ -74,66 +74,58 @@ impl SessionPolicy {
     }
 }
 
-/// Đơn vị policy (M4): không giữ trạng thái nào của riêng nó ngoài `SessionPolicy`
-/// được truyền vào từ lõi.
-#[derive(Debug, Default)]
-pub struct Policy;
-
-impl Policy {
-    /// Policy mặc định.
-    #[must_use]
-    pub fn new() -> Self {
-        Self
+/// Quyết định policy cho một lời gọi tool (mục 7.2, 15.3, 15.4).
+///
+/// Đây là **hàm thuần** (không dựa vào trạng thái của đối tượng nào): mọi ngữ cảnh
+/// cần thiết đều là tham số. Trước đây nó nằm trong một unit struct `Policy` không
+/// giữ trạng thái nào — đúng kiểu "thư viện hàm đội lốt object". Tách thành hàm tự do
+/// để tầng thiết kế phản ánh đúng bản chất, tránh nhầm rằng có ngữ cảnh ẩn.
+///
+/// Tham số:
+/// * `tool` — tên tool.
+/// * `risk` — mức rủi ro **cơ bản** do tool tự khai báo (`Tool::risk`).
+/// * `args` — tham số lời gọi (dùng cho deny-list, lớp phụ).
+/// * `untrusted_seen` — lượt này đã đọc nội dung untrusted chưa (mục 15.4).
+/// * `session` — trạng thái "cho phép trong phiên".
+///
+/// Thứ tự áp dụng: deny-list (lớp phụ) → untrusted → session-allow → mức rủi ro.
+#[must_use]
+pub fn decide(
+    tool: &str,
+    risk: Risk,
+    args: &serde_json::Value,
+    untrusted_seen: bool,
+    session: &SessionPolicy,
+) -> PolicyDecision {
+    // 1. Deny-list (lớp phụ, mục 15.3): nâng thành Dangerous — luôn hỏi, không cho
+    //    phép cả phiên, dù tool là Confirm và đã được allow-in-session trước đó.
+    if deny_list_reason(tool, args).is_some() {
+        return PolicyDecision::NeedsConfirm {
+            allow_in_session: false,
+        };
     }
 
-    /// Quyết định cho một lời gọi tool.
-    ///
-    /// Tham số:
-    /// * `tool` — tên tool.
-    /// * `risk` — mức rủi ro **cơ bản** do tool tự khai báo (`Tool::risk`).
-    /// * `untrusted_seen` — lượt này đã đọc nội dung untrusted chưa (mục 15.4).
-    /// * `session` — trạng thái "cho phép trong phiên".
-    ///
-    /// Thứ tự áp dụng: deny-list (lớp phụ) → untrusted → session-allow → mức rủi ro.
-    #[must_use]
-    pub fn decide(
-        &self,
-        tool: &str,
-        risk: Risk,
-        args: &serde_json::Value,
-        untrusted_seen: bool,
-        session: &SessionPolicy,
-    ) -> PolicyDecision {
-        // 1. Deny-list (lớp phụ, mục 15.3): nâng thành Dangerous — luôn hỏi, không cho
-        //    phép cả phiên, dù tool là Confirm và đã được allow-in-session trước đó.
-        if deny_list_reason(tool, args).is_some() {
-            return PolicyDecision::NeedsConfirm {
-                allow_in_session: false,
-            };
-        }
+    // 2. Safe luôn chạy thẳng (deny-list ở trên vẫn có thể ép hỏi lại).
+    if risk == Risk::Safe {
+        return PolicyDecision::Allowed;
+    }
 
-        // 2. Safe luôn chạy thẳng (deny-list ở trên vẫn có thể ép hỏi lại).
-        if risk == Risk::Safe {
-            return PolicyDecision::Allowed;
-        }
+    // 3. Đã đọc untrusted trong lượt: Confirm trở lên luôn hỏi lại, vô hiệu
+    //    "cho phép trong phiên" (mục 15.4).
+    if untrusted_seen {
+        return PolicyDecision::NeedsConfirm {
+            allow_in_session: false,
+        };
+    }
 
-        // 3. Đã đọc untrusted trong lượt: Confirm trở lên luôn hỏi lại, vô hiệu
-        //    "cho phép trong phiên" (mục 15.4).
-        if untrusted_seen {
-            return PolicyDecision::NeedsConfirm {
-                allow_in_session: false,
-            };
-        }
+    // 4. Confirm đã được cho phép cho cả phiên → chạy thẳng.
+    if risk == Risk::Confirm && session.is_allowed(tool) {
+        return PolicyDecision::Allowed;
+    }
 
-        // 4. Confirm đã được cho phép cho cả phiên → chạy thẳng.
-        if risk == Risk::Confirm && session.is_allowed(tool) {
-            return PolicyDecision::Allowed;
-        }
-
-        // 5. Còn lại: hỏi. Dangerous không có tuỳ chọn "trong phiên" (mục 7.2).
-        PolicyDecision::NeedsConfirm {
-            allow_in_session: risk == Risk::Confirm,
-        }
+    // 5. Còn lại: hỏi. Dangerous không có tuỳ chọn "trong phiên" (mục 7.2).
+    PolicyDecision::NeedsConfirm {
+        allow_in_session: risk == Risk::Confirm,
     }
 }
 
@@ -270,32 +262,30 @@ mod tests {
 
     #[test]
     fn safe_runs_without_confirmation() {
-        let policy = Policy::new();
         let session = SessionPolicy::new();
         assert_eq!(
-            policy.decide("read_file", Risk::Safe, &json!({}), false, &session),
+            decide("read_file", Risk::Safe, &json!({}), false, &session),
             PolicyDecision::Allowed
         );
     }
 
     #[test]
     fn confirm_needs_confirmation_and_can_be_allowed_for_session() {
-        let policy = Policy::new();
         let session = SessionPolicy::new();
         assert_eq!(
-            policy.decide("write_file", Risk::Confirm, &json!({}), false, &session),
+            decide("write_file", Risk::Confirm, &json!({}), false, &session),
             PolicyDecision::NeedsConfirm {
                 allow_in_session: true
             }
         );
         session.allow("write_file");
         assert_eq!(
-            policy.decide("write_file", Risk::Confirm, &json!({}), false, &session),
+            decide("write_file", Risk::Confirm, &json!({}), false, &session),
             PolicyDecision::Allowed
         );
         // Tool khác vẫn phải hỏi.
         assert_eq!(
-            policy.decide("edit_file", Risk::Confirm, &json!({}), false, &session),
+            decide("edit_file", Risk::Confirm, &json!({}), false, &session),
             PolicyDecision::NeedsConfirm {
                 allow_in_session: true
             }
@@ -304,10 +294,9 @@ mod tests {
 
     #[test]
     fn dangerous_never_has_session_option() {
-        let policy = Policy::new();
         let session = SessionPolicy::new();
         assert_eq!(
-            policy.decide("run_shell", Risk::Dangerous, &json!({}), false, &session),
+            decide("run_shell", Risk::Dangerous, &json!({}), false, &session),
             PolicyDecision::NeedsConfirm {
                 allow_in_session: false
             }
@@ -315,7 +304,7 @@ mod tests {
         // Kể cả khi (nhầm) đã allow trong phiên — Dangerous không bao giờ được phép.
         session.allow("run_shell");
         assert_eq!(
-            policy.decide("run_shell", Risk::Dangerous, &json!({}), false, &session),
+            decide("run_shell", Risk::Dangerous, &json!({}), false, &session),
             PolicyDecision::NeedsConfirm {
                 allow_in_session: false
             }
@@ -325,26 +314,25 @@ mod tests {
     #[test]
     fn session_allow_is_invalidated_after_untrusted_read() {
         // (mục 15.4) — test bắt buộc của M4.
-        let policy = Policy::new();
         let session = SessionPolicy::new();
         session.allow("write_file");
 
         // Trước khi đọc untrusted: chạy thẳng.
         assert_eq!(
-            policy.decide("write_file", Risk::Confirm, &json!({}), false, &session),
+            decide("write_file", Risk::Confirm, &json!({}), false, &session),
             PolicyDecision::Allowed
         );
 
         // Sau khi đọc untrusted: luôn hỏi lại, không có tuỳ chọn "trong phiên".
         assert_eq!(
-            policy.decide("write_file", Risk::Confirm, &json!({}), true, &session),
+            decide("write_file", Risk::Confirm, &json!({}), true, &session),
             PolicyDecision::NeedsConfirm {
                 allow_in_session: false
             }
         );
         // Confirm khác cũng hỏi lại.
         assert_eq!(
-            policy.decide("edit_file", Risk::Confirm, &json!({}), true, &session),
+            decide("edit_file", Risk::Confirm, &json!({}), true, &session),
             PolicyDecision::NeedsConfirm {
                 allow_in_session: false
             }
@@ -355,11 +343,10 @@ mod tests {
     fn denylist_overrides_session_allow_and_safe() {
         // "Safe" bình thường nhưng khớp deny-list (giả định tool tự khai báo Safe cho
         // lệnh này) → vẫn phải hỏi, không cho phép cả phiên.
-        let policy = Policy::new();
         let session = SessionPolicy::new();
         session.allow("run_shell");
         assert_eq!(
-            policy.decide(
+            decide(
                 "run_shell",
                 Risk::Safe,
                 &shell_args("rm -rf /"),

@@ -3,7 +3,7 @@
 //! Chạy trong [`crate::sandbox::Sandbox`]: mặc định docker với workspace mount,
 //! `--network none`, `--cap-drop ALL`, no-new-privileges; chế độ host ⇒ mức rủi ro
 //! `Dangerous`. Mức rủi ro **cơ bản** lấy từ [`Sandbox::base_risk`]; deny-list mẫu
-//! và "cho phép trong phiên" do [`crate::policy::Policy`] áp thêm ở agent loop.
+//! và "cho phép trong phiên" do [`crate::policy::decide`] áp thêm ở agent loop.
 
 use std::sync::Arc;
 

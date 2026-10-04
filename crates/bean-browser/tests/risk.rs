@@ -14,7 +14,7 @@
 #![forbid(unsafe_code)]
 
 use bean_browser::build_tools;
-use bean_security::policy::{Policy, PolicyDecision, SessionPolicy};
+use bean_security::policy::{PolicyDecision, SessionPolicy, decide};
 use bean_tools::ToolRegistry;
 use bean_types::Risk;
 use bean_types::config::BrowserConfig;
@@ -49,9 +49,8 @@ fn whitelisted_origin_is_confirm_with_session_option() {
     let tool = registry.get("browser_navigate").expect("tool tồn tại");
     assert_eq!(tool.risk(&args("http://localhost:3000/app")), Risk::Confirm);
 
-    let policy = Policy::new();
     let session = SessionPolicy::new();
-    let decision = policy.decide(
+    let decision = decide(
         "browser_navigate",
         Risk::Confirm,
         &args("http://localhost:3000/app"),
@@ -69,7 +68,7 @@ fn whitelisted_origin_is_confirm_with_session_option() {
     // Lần hai sau khi người dùng bấm "cho phép trong phiên": chạy thẳng.
     session.allow("browser_navigate");
     assert_eq!(
-        policy.decide(
+        decide(
             "browser_navigate",
             Risk::Confirm,
             &args("http://localhost:3000/app"),
@@ -89,10 +88,9 @@ fn outside_origin_is_always_dangerous_even_when_repeated_in_session() {
     let outside = args("https://production.example.com/admin");
     assert_eq!(tool.risk(&outside), Risk::Dangerous);
 
-    let policy = Policy::new();
     let session = SessionPolicy::new();
     for round in 1..=3 {
-        let decision = policy.decide(
+        let decision = decide(
             "browser_navigate",
             Risk::Dangerous,
             &outside,
