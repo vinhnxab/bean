@@ -42,6 +42,11 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 todo = "deny"
+# Chặn hai mùi code đã phải sửa thủ công trong các đợt refactor OOP:
+# quá nhiều tham số (báo hiệu "gom thành struct") và kiểu quá phức tạp.
+# Nếu chạm phải, hãy sửa thiết kế chứ đừng thêm `#[allow]` trần.
+too_many_arguments = "deny"
+type_complexity = "deny"
 
 [workspace.dependencies]
 # --- crate nội bộ ---
