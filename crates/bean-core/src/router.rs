@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use anyhow::Result as AnyResult;
@@ -14,24 +14,28 @@ use bean_security::{AuditLog, SessionPolicy};
 use bean_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use bean_tools::{AlertSink, ToolRegistry, truncate_chars};
 use bean_types::{
-    AgentReport, AgentStatus, Alert, Config, ConfirmId, ConfirmOutcome, NO_ACCESS_ROLE, Outbound,
-    OutboundKind, Risk, RolePermissions, RunEvent, RunId, SessionId,
+    AgentReport, AgentStatus, Config, ConfirmId, ConfirmOutcome, NO_ACCESS_ROLE, Outbound, Risk,
+    RolePermissions, RunEvent, RunId, SessionId,
 };
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{AgentError, RunOutcome, RunTurnArgs, run_turn_outcome};
 use crate::learning::{ReflectionArgs, reflect};
-use crate::run_io::{Decision, RunIo};
+use crate::run_io::Decision;
 use crate::store::{Store, StoreError};
 
+use alert::RouterAlertSink;
 use command::{self as slash, Command};
 use confirm::{ConfirmRegistry, ConfirmRequest};
+use io::RouterIo;
 use learning::LearningGate;
 use queue::{Enqueued, RunQueue};
 
+mod alert;
 mod command;
 mod confirm;
+mod io;
 mod learning;
 mod outbox;
 mod queue;
@@ -640,15 +644,14 @@ impl Router {
         } else {
             &queued.incoming.channel
         };
-        let io = Arc::new(RouterIo {
-            inner: Arc::downgrade(&self.inner),
-            session_id: queued.session_id,
-            run_id: queued.run_id.clone(),
-            user_id: queued.incoming.user_id.clone(),
-            cancel: queued.cancel.clone(),
-            background_allowed_tools: queued.background_allowed_tools.clone(),
-            last_actor: Mutex::new(None),
-        });
+        let io = Arc::new(RouterIo::new(
+            Arc::downgrade(&self.inner),
+            queued.session_id,
+            queued.run_id.clone(),
+            queued.incoming.user_id.clone(),
+            queued.cancel.clone(),
+            queued.background_allowed_tools.clone(),
+        ));
         let skills_index = match read_lock(&self.inner.skills_index) {
             Ok(index) => index.clone(),
             Err(error) => {
@@ -1388,11 +1391,11 @@ impl Router {
         if channel.is_empty() || chat_id.is_empty() {
             return None;
         }
-        Some(Arc::new(RouterAlertSink {
-            router: Arc::new(self.clone()),
-            channel: channel.to_string(),
-            chat_id: chat_id.to_string(),
-        }))
+        Some(Arc::new(RouterAlertSink::new(
+            Arc::new(self.clone()),
+            channel.to_string(),
+            chat_id.to_string(),
+        )))
     }
 
     /// Khởi động worker retry outbox đúng một lần.
@@ -1407,158 +1410,6 @@ impl Router {
     /// Giao việc cho [`outbox::OutboxWorker`].
     pub async fn process_outbox_once(&self) -> Result<usize, RouterError> {
         outbox::OutboxWorker::new(&self.inner).process_once().await
-    }
-}
-
-struct RouterIo {
-    inner: Weak<RouterInner>,
-    session_id: SessionId,
-    run_id: RunId,
-    user_id: String,
-    cancel: CancellationToken,
-    background_allowed_tools: Option<Arc<HashSet<String>>>,
-    last_actor: Mutex<Option<String>>,
-}
-
-#[async_trait::async_trait]
-impl RunIo for RouterIo {
-    fn on_text(&self, text: &str) {
-        self.with_router(|router| {
-            router.emit(RunEvent::Text {
-                session_id: self.session_id,
-                run_id: self.run_id.clone(),
-                text: text.to_string(),
-            });
-        });
-    }
-
-    fn on_text_delta(&self, text: &str, index: u32, reset: bool) {
-        self.with_router(|router| {
-            router.emit(RunEvent::TextDelta {
-                session_id: self.session_id,
-                run_id: self.run_id.clone(),
-                text: text.to_string(),
-                index,
-                reset,
-            });
-        });
-    }
-
-    fn on_tool_start(&self, id: &str, tool: &str, risk: Risk, summary: &str, args: &str) {
-        self.with_router(|router| {
-            router.emit(RunEvent::ToolStart {
-                session_id: self.session_id,
-                run_id: self.run_id.clone(),
-                id: id.to_string(),
-                tool: tool.to_string(),
-                summary: preview(summary),
-                args_preview: preview(args),
-                risk,
-            });
-        });
-    }
-
-    fn on_tool_end(&self, id: &str, tool: &str, ok: bool, output: &str) {
-        self.with_router(|router| {
-            router.emit(RunEvent::ToolEnd {
-                session_id: self.session_id,
-                run_id: self.run_id.clone(),
-                id: id.to_string(),
-                tool: tool.to_string(),
-                ok,
-                output_preview: preview(output),
-            });
-        });
-    }
-
-    async fn confirm(
-        &self,
-        _id: &str,
-        _tool: &str,
-        risk: Risk,
-        prompt: &str,
-        allow_in_session: bool,
-        timeout: Duration,
-    ) -> Option<Decision> {
-        if self.background_allowed_tools.is_some() {
-            return Some(if self.background_tool_allowed(_tool) {
-                Decision::Allow
-            } else {
-                Decision::Deny
-            });
-        }
-        let inner = self.inner.upgrade()?;
-        let router = Router { inner };
-        let (confirm_id, receiver) = router
-            .begin_confirm(
-                self.session_id,
-                &self.run_id,
-                risk,
-                prompt,
-                allow_in_session,
-                &self.user_id,
-                timeout,
-            )
-            .ok()?;
-        let effective_timeout = timeout.min(router.inner.options.confirm_timeout);
-        let mut receiver = receiver;
-        let decision = tokio::select! {
-            biased;
-            _ = self.cancel.cancelled() => {
-                if router.expire_confirm(&confirm_id, ConfirmOutcome::Denied) {
-                    None
-                } else {
-                    receiver.await.ok().map(|confirmation| {
-                        remember_actor(&self.last_actor, confirmation.actor);
-                        confirmation.decision
-                    })
-                }
-            }
-            response = &mut receiver => response.ok().map(|confirmation| {
-                remember_actor(&self.last_actor, confirmation.actor);
-                confirmation.decision
-            }),
-            _ = tokio::time::sleep(effective_timeout) => {
-                if router.expire_confirm(&confirm_id, ConfirmOutcome::Expired) {
-                    None
-                } else {
-                    receiver.await.ok().map(|confirmation| {
-                        remember_actor(&self.last_actor, confirmation.actor);
-                        confirmation.decision
-                    })
-                }
-            }
-        };
-        decision
-    }
-
-    fn decision_actor(&self) -> Option<String> {
-        if self.background_allowed_tools.is_some() {
-            return Some("scheduler".into());
-        }
-        self.last_actor.lock().ok().and_then(|actor| actor.clone())
-    }
-
-    fn is_background(&self) -> bool {
-        self.background_allowed_tools.is_some()
-    }
-
-    fn background_tool_allowed(&self, tool: &str) -> bool {
-        self.background_allowed_tools
-            .as_ref()
-            .is_some_and(|tools| tools.contains(tool))
-    }
-
-    fn cancel_token(&self) -> &CancellationToken {
-        &self.cancel
-    }
-}
-
-impl RouterIo {
-    fn with_router(&self, action: impl FnOnce(&Router)) {
-        if let Some(inner) = self.inner.upgrade() {
-            action(&Router { inner });
-        }
     }
 }
 
@@ -1654,63 +1505,5 @@ fn router_error_code(error: &RouterError) -> &'static str {
         RouterError::StatePoisoned => "router_state",
         RouterError::Random(_) => "random_unavailable",
         RouterError::ToolNotExposed(_) => "tool_not_exposed",
-    }
-}
-
-/// Cài bản [`AlertSink`] bọc quanh [`Router::notify`] (M23).
-///
-/// Giữ **một** đường gửi: mọi cảnh báo đi qua `notify` nên lỗi vẫn rơi vào outbox và được
-/// thử lại — không mất tin cảnh báo an ninh.
-struct RouterAlertSink {
-    router: Arc<Router>,
-    channel: String,
-    chat_id: String,
-}
-
-#[async_trait::async_trait]
-impl AlertSink for RouterAlertSink {
-    async fn send_alert(&self, alert: &Alert) -> Result<(), String> {
-        let text = if alert.risks.is_empty() {
-            format!("{}\n{}", alert.title, alert.summary)
-        } else {
-            format!(
-                "{}\n{}\n- {}",
-                alert.title,
-                alert.summary,
-                alert.risks.join("\n- ")
-            )
-        };
-        // Ghi vào lịch sử trước để `message_id` có thật (adapter hiển thị và UI cần id này).
-        let session = self
-            .router
-            .inner
-            .store
-            .ensure_session(&self.channel, &self.chat_id, &alert.title)
-            .await
-            .map_err(|error| error.to_string())?;
-        let message_id = self
-            .router
-            .inner
-            .store
-            .append(
-                session,
-                bean_types::Message::assistant(Some(text.clone()), Vec::new()),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        self.router
-            .notify(
-                &self.channel,
-                &self.chat_id,
-                Outbound {
-                    session_id: session,
-                    message_id,
-                    text,
-                    kind: OutboundKind::Notification,
-                    action: None,
-                },
-            )
-            .await
-            .map_err(|error| error.to_string())
     }
 }
