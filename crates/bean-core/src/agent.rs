@@ -192,6 +192,31 @@ pub struct Turn<'a> {
     pub project: &'a str,
 }
 
+/// Trạng thái **thay đổi** trong một lượt — nhóm các biến `&mut` của vòng lặp.
+///
+/// Tách riêng khỏi [`Agent`] (bất biến theo tiến trình) và [`Turn`] (đầu vào của lượt)
+/// để vòng lặp không phải truyền tay hàng chục tham số `&mut`. Đây cũng là ranh giới
+/// tự nhiên để rút [`Agent::run_tool_call`] khỏi [`Agent::run`] mà không đụng logic.
+#[derive(Debug, Default)]
+struct TurnState {
+    /// Lịch sử của lượt (mirror DB; đồng thời là nguồn sự thật cho `RunOutcome`).
+    transcript: Vec<Message>,
+    /// Tổng số tool call đã chạy trong lượt (báo cáo + chống lặp).
+    tool_call_count: usize,
+    /// Skill đã nạp qua `load_skill` trong lượt này (đưa vào `RunOutcome`).
+    loaded_skills: BTreeSet<String>,
+    /// Số lần `(tool, args)` thất bại liên tiếp (chống lặp, agents.md mục 6).
+    failure_counts: HashMap<RepeatKey, u32>,
+    /// `(tool, args)` vừa thất bại — cờ "đang lặp ngay" cho lần gọi kế tiếp.
+    consecutive_same_failure: Option<RepeatKey>,
+    /// Cờ "lượt này đã đọc nội dung không tin cậy" (mục 15.4), dùng chung cho **mọi**
+    /// tool trong lượt: một tool result chứa `<untrusted_content>` ⇒ mọi tool `Confirm`
+    /// trở lên phải hỏi lại.
+    untrusted_seen: Arc<AtomicBool>,
+    /// Tool vừa thất bại 2 lần giống hệt nhau ⇒ kết thúc run bằng [`AgentError::RepeatFailure`].
+    repeated_tool: Option<String>,
+}
+
 /// Lý do run kết thúc bình thường.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndReason {
@@ -279,37 +304,31 @@ impl<'a> Agent<'a> {
     /// # Errors
     /// [`AgentError`] khi store/provider lỗi, khi run bị huỷ, hoặc chống-lặp kích hoạt.
     pub async fn run(&self, turn: Turn<'_>) -> Result<RunOutcome, AgentError> {
-        // Ràng buộc tên cục bộ trùng với thân vòng lặp bên dưới, để thân hàm giữ
-        // nguyên tuyệt đối sau khi chuyển từ hàm tự do sang method (giảm rủi ro hồi quy).
-        let Turn {
-            session,
-            user_text,
-            io,
-            cancel,
-            session_policy,
-            channel,
-            permissions,
-            project,
-        } = turn;
+        // `turn` **không** destructure: `run_tool_call` cần mượn `&turn` cho từng tool
+        // call, nên `turn` phải còn nguyên. Các thành phần dùng ngay ở đây được
+        // ràng buộc thành biến cục bộ (phần còn lại của thân hàm giữ nguyên).
+        let session = turn.session;
+        let permissions = turn.permissions;
+        let project = turn.project;
+        let io = &turn.io;
+        let cancel = &turn.cancel;
         let store = self.store;
         let registry = self.registry;
         let llm = self.llm;
         let config = self.config;
-        let audit_log = self.audit.clone();
         let skills_index = self.skills_index;
-        let alerts = self.alerts.clone();
         // (M5/D8.10) System prompt chỉ đi qua `ChatRequest.system` — **không** nhân bản nó
         // thành message `User` (M3 từng làm vậy: tốn token gấp đôi cho phần system và dễ
         // bị model hiểu nhầm là câu lệnh của người dùng). Giữ `turn_input` để dựng lỡ
         // trường hợp lịch sử rỗng.
-        let turn_input = user_text;
-        let mut transcript = Vec::new();
-        let mut tool_call_count = 0_usize;
-        let mut loaded_skills = BTreeSet::new();
+        let turn_input = turn.user_text.clone();
+        // Mọi biến `&mut` của lượt gom ở `TurnState` — kể cả cờ `untrusted_seen`
+        // dùng chung cho MỌI tool trong lượt (mục 15.4).
+        let mut state = TurnState::default();
         append_run_message(
             store,
             session,
-            &mut transcript,
+            &mut state.transcript,
             Message::user(turn_input.clone()),
         )
         .await?;
@@ -319,24 +338,19 @@ impl<'a> Agent<'a> {
                 return finish_with_notice(
                     store,
                     session,
-                    transcript,
+                    state.transcript,
                     budget_notice(used, limit),
                     EndReason::BudgetExceeded,
-                    tool_call_count,
-                    loaded_skills,
+                    state.tool_call_count,
+                    state.loaded_skills,
                 )
                 .await;
             }
             Err(error) => return Err(error.into()),
         }
-        let mut failure_counts: HashMap<RepeatKey, u32> = HashMap::new();
-        let mut consecutive_same_failure: Option<RepeatKey> = None;
-        // (M4, mục 15.4) Cờ untrusted dùng chung cho MỌI tool trong lượt — khi một tool
-        // result chứa khối <untrusted_content>, mọi tool Confirm trở lên phải hỏi lại.
-        let untrusted_seen = Arc::new(AtomicBool::new(false));
         // Session policy dùng chung; không truyền vào thì mỗi lượt hỏi lại (an toàn mặc định).
         let local_session_policy;
-        let session_policy: &SessionPolicy = match &session_policy {
+        let session_policy: &SessionPolicy = match turn.session_policy.as_ref() {
             Some(p) => p.as_ref(),
             None => {
                 local_session_policy = SessionPolicy::new();
@@ -368,7 +382,7 @@ impl<'a> Agent<'a> {
             // chạy tool đọc nội dung nào (mục 15.4 yêu cầu hai điều kiện kèm nhau: bọc thẻ
             // VÀ bật cờ — bọc thẻ một mình chỉ là soft control).
             if ctx.summary_present {
-                untrusted_seen.store(true, Ordering::SeqCst);
+                state.untrusted_seen.store(true, Ordering::SeqCst);
             }
             let mut messages = ctx.messages;
             if messages.is_empty() {
@@ -393,11 +407,11 @@ impl<'a> Agent<'a> {
                         return finish_with_notice(
                             store,
                             session,
-                            transcript,
+                            state.transcript,
                             budget_notice(used, limit),
                             EndReason::BudgetExceeded,
-                            tool_call_count,
-                            loaded_skills,
+                            state.tool_call_count,
+                            state.loaded_skills,
                         )
                         .await;
                     }
@@ -447,11 +461,11 @@ impl<'a> Agent<'a> {
                 return finish_with_notice(
                     store,
                     session,
-                    transcript,
+                    state.transcript,
                     budget_notice(used, role_budget),
                     EndReason::BudgetExceeded,
-                    tool_call_count,
-                    loaded_skills,
+                    state.tool_call_count,
+                    state.loaded_skills,
                 )
                 .await;
             }
@@ -471,344 +485,43 @@ impl<'a> Agent<'a> {
                 return finish_with_notice(
                     store,
                     session,
-                    transcript,
+                    state.transcript,
                     empty_response_notice(resp.stop),
                     EndReason::EmptyResponse,
-                    tool_call_count,
-                    loaded_skills,
+                    state.tool_call_count,
+                    state.loaded_skills,
                 )
                 .await;
             }
 
             let assistant_message = Message::from_response(&resp);
             let message_id =
-                append_run_message(store, session, &mut transcript, assistant_message).await?;
+                append_run_message(store, session, &mut state.transcript, assistant_message)
+                    .await?;
 
             if is_final {
                 return Ok(RunOutcome {
                     text: final_text,
                     message_id: Some(message_id),
                     ended: EndReason::Final,
-                    tool_call_count,
-                    loaded_skills: loaded_skills.into_iter().collect(),
-                    transcript,
+                    tool_call_count: state.tool_call_count,
+                    loaded_skills: state.loaded_skills.into_iter().collect(),
+                    transcript: state.transcript,
                 });
             }
             // Text "suy nghĩ" của model khi vẫn còn gọi tool đã được phát theo từng delta
             // trong vòng stream; không phát lại toàn bộ để tránh UI nhân đôi văn bản.
 
-            let mut repeated_tool: Option<String> = None;
-
+            state.repeated_tool = None;
             for call in resp.tool_calls {
-                tool_call_count = tool_call_count.saturating_add(1);
-
-                // (M21.5) **Chốt chặn thứ hai ở tầng thực thi.** Lọc ở `specs_visible_to` đã ngăn
-                // model *thấy* tool ngoài quyền, nhưng `args` là JSON không tin cậy: nội dung
-                // untrusted (mục 15.4) hoặc model bị ảo giác vẫn có thể bịa ra tên tool. Dùng
-                // **cùng** `RolePermissions` và **cùng** hàm `allows` ⇒ không thể lệch nhau
-                // giữa lúc lọc payload và lúc chạy, và không có logic RBAC thứ hai rải rác.
-                if !registry.allows(&call.name, permissions) {
-                    let message = format!(
-                        "Bạn không có quyền (`{}`) gọi tool `{}`.",
-                        permissions.role, call.name
-                    );
-                    tracing::warn!(
-                        tool = %call.name,
-                        role = %permissions.role,
-                        "từ chối tool call ngoài quyền của role"
-                    );
-                    append_run_message(
-                        store,
-                        session,
-                        &mut transcript,
-                        Message::tool_error(call.id.clone(), message.clone()),
-                    )
+                state.tool_call_count = state.tool_call_count.saturating_add(1);
+                self.run_tool_call(&turn, &mut state, session_policy, &call)
                     .await?;
-                    io.on_tool_start(&call.id, &call.name, Risk::Dangerous, &call.name, "");
-                    io.on_tool_end(&call.id, &call.name, false, &message);
-                    continue;
-                }
-
-                let risk = registry
-                    .get(&call.name)
-                    .map_or(bean_types::Risk::Safe, |tool| tool.risk(&call.args));
-                let args_preview = args_preview(&call.args);
-                io.on_tool_start(&call.id, &call.name, risk, &call.name, &args_preview);
-
-                if cancel.is_cancelled() {
-                    append_run_message(
-                        store,
-                        session,
-                        &mut transcript,
-                        Message::tool_error(call.id.clone(), CANCELLED_MSG),
-                    )
-                    .await?;
-                    io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
-                    continue;
-                }
-
-                // (M21.1) Workspace của **project profile** của lượt này; rơi về workspace
-                // chung khi project không có thư mục riêng. Nhờ vậy `MEMORY.md`/`USER.md` và
-                // mọi thao tác file của hai project không lẫn nhau.
-                let workspace = match registry.workspace_for(project) {
-                    Some(workspace) => workspace,
-                    None => {
-                        let message = format!("registry thiếu workspace cho project `{project}`");
-                        append_run_message(
-                            store,
-                            session,
-                            &mut transcript,
-                            Message::tool_error(call.id.clone(), message.clone()),
-                        )
-                        .await?;
-                        io.on_tool_end(&call.id, &call.name, false, &message);
-                        continue;
-                    }
-                };
-                let ctx = ToolCtx {
-                    workspace,
-                    session,
-                    cancel: io.cancel_token().clone(),
-                    untrusted_seen: untrusted_seen.clone(),
-                    project: project.to_string(),
-                    alerts: alerts.clone(),
-                };
-
-                let args_hash = hash_args(&call.args);
-                let key = (call.name.clone(), args_hash);
-                if failure_counts.get(&key).copied().unwrap_or(0) >= 2
-                    && consecutive_same_failure.as_ref() == Some(&key)
-                {
-                    let hint = format!(
-                        "Tool `{}` với cùng tham số đã thất bại 2 lần liên tiếp. Hãy thử cách khác.",
-                        call.name
-                    );
-                    append_run_message(
-                        store,
-                        session,
-                        &mut transcript,
-                        Message::tool_error(call.id.clone(), hint.clone()),
-                    )
-                    .await?;
-                    io.on_tool_end(&call.id, &call.name, false, &hint);
-                    repeated_tool = Some(call.name);
-                    continue;
-                }
-
-                let untrusted = untrusted_seen.load(Ordering::SeqCst);
-                let decision = decide(&call.name, risk, &call.args, untrusted, session_policy);
-
-                // Kết quả ghi audit cho lời gọi này (mục 15.8) — điền dần rồi ghi DUY NHẤT
-                // một lần ở cuối khối (trừ nhánh deny `continue` — ghi ngay trong nhánh).
-                let mut audit = entry_now(session.get(), channel, &call.name, &call.args);
-                match decision {
-                    PolicyDecision::Allowed => {
-                        audit.decision = "allow";
-                        audit.decided_by = "policy".into();
-                    }
-                    PolicyDecision::NeedsConfirm { allow_in_session } => {
-                        if cancel.is_cancelled() {
-                            append_run_message(
-                                store,
-                                session,
-                                &mut transcript,
-                                Message::tool_error(call.id.clone(), CANCELLED_MSG),
-                            )
-                            .await?;
-                            io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
-                            audit.decision = "deny";
-                            audit.decided_by = "cancelled".into();
-                            record_audit(audit_log.as_ref(), &audit);
-                            continue;
-                        }
-                        let deny_note = deny_list_reason(&call.name, &call.args)
-                            .map(|reason| format!("\n[cảnh báo deny-list] {}", reason.label))
-                            .unwrap_or_default();
-                        let prompt = format!("{} {}{deny_note}", call.name, args_preview);
-                        let replied = if io.is_background() && untrusted {
-                            Some(Decision::Deny)
-                        } else {
-                            io.confirm(
-                                &call.id,
-                                &call.name,
-                                risk,
-                                &prompt,
-                                allow_in_session,
-                                CONFIRM_TIMEOUT,
-                            )
-                            .await
-                        };
-                        let actor = io.decision_actor();
-                        match replied {
-                            Some(Decision::Allow) => {
-                                audit.decision = "allow";
-                                audit.decided_by = actor.unwrap_or_else(|| "user".into());
-                            }
-                            Some(Decision::AllowInSession) if allow_in_session => {
-                                session_policy.allow(&call.name);
-                                audit.decision = "allow_in_session";
-                                audit.decided_by = actor.unwrap_or_else(|| "user".into());
-                            }
-                            Some(Decision::AllowInSession) | Some(Decision::Deny) => {
-                                audit.decision = "deny";
-                                audit.decided_by = actor.unwrap_or_else(|| "user".into());
-                                record_audit(audit_log.as_ref(), &audit);
-                                let message = "Người dùng đã từ chối hành động này.".to_string();
-                                append_run_message(
-                                    store,
-                                    session,
-                                    &mut transcript,
-                                    Message::tool_error(call.id.clone(), message.clone()),
-                                )
-                                .await?;
-                                io.on_tool_end(&call.id, &call.name, false, &message);
-                                continue;
-                            }
-                            None => {
-                                let message = if cancel.is_cancelled() {
-                                    audit.decided_by = "cancelled".into();
-                                    CANCELLED_MSG.to_string()
-                                } else {
-                                    audit.decided_by = "timeout".into();
-                                    "Hết thời gian chờ xác nhận — hành động bị từ chối.".to_string()
-                                };
-                                audit.decision = "deny";
-                                record_audit(audit_log.as_ref(), &audit);
-                                append_run_message(
-                                    store,
-                                    session,
-                                    &mut transcript,
-                                    Message::tool_error(call.id.clone(), message.clone()),
-                                )
-                                .await?;
-                                io.on_tool_end(&call.id, &call.name, false, &message);
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                // Chạy tool, đua với huỷ (mục 6) và timeout. Khi token bị huỷ giữa chừng:
-                // ghi tool result "[bị người dùng huỷ]" để lịch sử giữ cặp tool_use/tool_result
-                // hợp lệ rồi kết thúc run. Ghi DB diễn ra SAU khi select hoàn tất nên không
-                // bị cắt giữa lúc ghi (cancel-safety của `select!`, mục 22.10).
-                // (M26) `call_rich` cho phép tool trả ảnh; `call` cũ vẫn chạy qua default
-                // implementation nên **mọi tool cũ hành xử y hệt**.
-                enum ExecOutcome {
-                    Done(Result<ToolOutput, ToolError>),
-                    Timeout,
-                    Cancelled,
-                }
-                let exec = timeout(
-                    Duration::from_secs(config.security.tool_timeout_seconds),
-                    execute_tool(registry, &ctx, &call),
-                );
-                let outcome = tokio::select! {
-                    biased;
-                    _ = cancel.cancelled() => ExecOutcome::Cancelled,
-                    r = exec => match r {
-                        Ok(inner) => ExecOutcome::Done(inner),
-                        Err(_) => ExecOutcome::Timeout,
-                    },
-                };
-
-                let (ok, output, image_block, cancelled) = match outcome {
-                    ExecOutcome::Done(Ok(ToolOutput::Image { caption, image })) => {
-                        (true, caption, Some(image), false)
-                    }
-                    ExecOutcome::Done(Ok(ToolOutput::Text(text))) => (true, text, None, false),
-                    ExecOutcome::Done(Err(e)) => (
-                        false,
-                        format!("Lỗi tool `{}`: {}", call.name, e),
-                        None,
-                        false,
-                    ),
-                    ExecOutcome::Timeout => (
-                        false,
-                        format!(
-                            "Tool `{}` hết thời gian cho phép ({} giây).",
-                            call.name, config.security.tool_timeout_seconds
-                        ),
-                        None,
-                        false,
-                    ),
-                    ExecOutcome::Cancelled => (false, CANCELLED_MSG.to_string(), None, true),
-                };
-
-                // Ảnh KHÔNG đi qua `truncate_output`: cắt theo ký tự một chuỗi base64 sẽ
-                // sinh PNG hỏng. Trần byte đã do tool áp (`[browser].max_image_bytes`).
-                let output = truncate_output(&output);
-                // Audit **không** bao giờ ghi base64 (mục 15.8): chỉ ghi tham chiếu.
-                if let Some(image) = image_block.as_ref() {
-                    audit.artifact = Some(format!(
-                        "image:{}:{}:{} bytes",
-                        image.media_type,
-                        image.sha256,
-                        image.data.len()
-                    ));
-                }
-                // (M4, mục 15.4) Bật cờ untrusted cho cả lượt khi tool trả nội dung ngoài lõi:
-                // mọi confirm Confirm/Dangerous SAU đây sẽ hỏi lại, không "trong phiên".
-                //
-                // Có hai lớp, cùng dùng để không lệ thuộc vào một quy ước ngầm:
-                // 1. `Tool::marks_untrusted()` — khai báo tường minh của tool. Đây là lớp
-                //    chính: tool mới quên bọc sẽ bị test hồi quy bắt, không hỏng âm thầm.
-                // 2. `contains_untrusted_block` — lưới an toàn cho output thực sự mang thẻ
-                //    (kể cả tool tự bọc tay như `web_fetch`, hoặc lỗi từ MCP đã bọc sẵn).
-                let marks_untrusted = registry
-                    .get(&call.name)
-                    .is_some_and(|tool| tool.marks_untrusted());
-                if marks_untrusted || contains_untrusted_block(&output) {
-                    untrusted_seen.store(true, Ordering::SeqCst);
-                }
-                // Audit kết quả thực thi (mục 15.8) — lỗi ghi chỉ là cảnh báo, không làm hỏng run.
-                audit.ok = Some(ok);
-                if !ok {
-                    audit.error = Some(output.chars().take(300).collect());
-                }
-                record_audit(audit_log.as_ref(), &audit);
-                let mut failed_twice = false;
-                if !ok {
-                    let count = failure_counts.entry(key.clone()).or_insert(0);
-                    *count = count.saturating_add(1);
-                    failed_twice = *count >= 2;
-                    consecutive_same_failure = Some(key);
-                } else {
-                    consecutive_same_failure = None;
-                }
-                let output = if failed_twice {
-                    // Chèn gợi ý ngay trong tool result sau 2 lần thất bại giống nhau (mục 6).
-                    format!(
-                        "{output}\n[Gợi ý] Hai lần gọi giống nhau đều thất bại — hãy thử cách khác."
-                    )
-                } else {
-                    output
-                };
-                // (M26) Tool trả **ảnh** dùng `Message::tool_with_image`: caption vẫn
-                // đi qua đường cắt ký tự như mọi tool, còn ảnh đi kèm nguyên vẹn.
-                let result_message = match (ok, image_block) {
-                    (true, Some(image)) => {
-                        Message::tool_with_image(call.id.clone(), output.clone(), image)
-                    }
-                    (true, None) => Message::tool(call.id.clone(), output.clone()),
-                    (false, _) => Message::tool_error(call.id.clone(), output.clone()),
-                };
-                append_run_message(store, session, &mut transcript, result_message).await?;
-                if ok
-                    && call.name == "load_skill"
-                    && let Some(name) = call.args.get("name").and_then(serde_json::Value::as_str)
-                {
-                    loaded_skills.insert(name.to_string());
-                }
-                io.on_tool_end(&call.id, &call.name, ok, &output);
-                if cancelled {
-                    continue;
-                }
             }
             if cancel.is_cancelled() {
                 return Err(AgentError::Cancelled);
             }
-            if let Some(tool) = repeated_tool.take() {
+            if let Some(tool) = state.repeated_tool.take() {
                 return Err(AgentError::RepeatFailure(tool));
             }
         }
@@ -820,13 +533,342 @@ impl<'a> Agent<'a> {
         finish_with_notice(
             store,
             session,
-            transcript,
+            state.transcript,
             text,
             EndReason::MaxSteps,
-            tool_call_count,
-            loaded_skills,
+            state.tool_call_count,
+            state.loaded_skills,
         )
         .await
+    }
+    /// Chạy **một** tool call: chặn RBAC ở tầng thực thi, xin xác nhận theo policy,
+    /// thực thi (timeout), cắt output, ghi transcript + audit và cập nhật [`TurnState`].
+    ///
+    /// Rút khỏi [`Agent::run`] để vòng lặp chỉ còn phần điều phối. Nhánh "bỏ qua lời
+    /// gọi này" từng là `continue` trong thân cũ, nay là `return Ok(())` — cùng ngữ nghĩa
+    /// vì caller vẫn xử lý các tool call còn lại của lượt.
+    ///
+    /// # Errors
+    /// [`AgentError`] chỉ khi ghi transcript vào store lỗi; lỗi của bản thân tool được
+    /// hoá thành tool result `is_error` (agents.md mục 6) chứ không `Err`.
+    async fn run_tool_call(
+        &self,
+        turn: &Turn<'_>,
+        state: &mut TurnState,
+        session_policy: &SessionPolicy,
+        call: &ToolCall,
+    ) -> Result<(), AgentError> {
+        let store = self.store;
+        let registry = self.registry;
+        let config = self.config;
+        let audit_log = self.audit.clone();
+        let alerts = self.alerts.clone();
+        let session = turn.session;
+        let io = &turn.io;
+        let cancel = &turn.cancel;
+        let channel = turn.channel;
+        let permissions = turn.permissions;
+        let project = turn.project;
+
+        // (M21.5) **Chốt chặn thứ hai ở tầng thực thi.** Lọc ở `specs_visible_to` đã ngăn
+        // model *thấy* tool ngoài quyền, nhưng `args` là JSON không tin cậy: nội dung
+        // untrusted (mục 15.4) hoặc model bị ảo giác vẫn có thể bịa ra tên tool. Dùng
+        // **cùng** `RolePermissions` và **cùng** hàm `allows` ⇒ không thể lệch nhau
+        // giữa lúc lọc payload và lúc chạy, và không có logic RBAC thứ hai rải rác.
+        if !registry.allows(&call.name, permissions) {
+            let message = format!(
+                "Bạn không có quyền (`{}`) gọi tool `{}`.",
+                permissions.role, call.name
+            );
+            tracing::warn!(
+                tool = %call.name,
+                role = %permissions.role,
+                "từ chối tool call ngoài quyền của role"
+            );
+            append_run_message(
+                store,
+                session,
+                &mut state.transcript,
+                Message::tool_error(call.id.clone(), message.clone()),
+            )
+            .await?;
+            io.on_tool_start(&call.id, &call.name, Risk::Dangerous, &call.name, "");
+            io.on_tool_end(&call.id, &call.name, false, &message);
+            return Ok(());
+        }
+
+        let risk = registry
+            .get(&call.name)
+            .map_or(bean_types::Risk::Safe, |tool| tool.risk(&call.args));
+        let args_preview = args_preview(&call.args);
+        io.on_tool_start(&call.id, &call.name, risk, &call.name, &args_preview);
+
+        if cancel.is_cancelled() {
+            append_run_message(
+                store,
+                session,
+                &mut state.transcript,
+                Message::tool_error(call.id.clone(), CANCELLED_MSG),
+            )
+            .await?;
+            io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
+            return Ok(());
+        }
+
+        // (M21.1) Workspace của **project profile** của lượt này; rơi về workspace
+        // chung khi project không có thư mục riêng. Nhờ vậy `MEMORY.md`/`USER.md` và
+        // mọi thao tác file của hai project không lẫn nhau.
+        let workspace = match registry.workspace_for(project) {
+            Some(workspace) => workspace,
+            None => {
+                let message = format!("registry thiếu workspace cho project `{project}`");
+                append_run_message(
+                    store,
+                    session,
+                    &mut state.transcript,
+                    Message::tool_error(call.id.clone(), message.clone()),
+                )
+                .await?;
+                io.on_tool_end(&call.id, &call.name, false, &message);
+                return Ok(());
+            }
+        };
+        let ctx = ToolCtx {
+            workspace,
+            session,
+            cancel: io.cancel_token().clone(),
+            untrusted_seen: state.untrusted_seen.clone(),
+            project: project.to_string(),
+            alerts: alerts.clone(),
+        };
+
+        let args_hash = hash_args(&call.args);
+        let key = (call.name.clone(), args_hash);
+        if state.failure_counts.get(&key).copied().unwrap_or(0) >= 2
+            && state.consecutive_same_failure.as_ref() == Some(&key)
+        {
+            let hint = format!(
+                "Tool `{}` với cùng tham số đã thất bại 2 lần liên tiếp. Hãy thử cách khác.",
+                call.name
+            );
+            append_run_message(
+                store,
+                session,
+                &mut state.transcript,
+                Message::tool_error(call.id.clone(), hint.clone()),
+            )
+            .await?;
+            io.on_tool_end(&call.id, &call.name, false, &hint);
+            state.repeated_tool = Some(call.name.clone());
+            return Ok(());
+        }
+
+        let untrusted = state.untrusted_seen.load(Ordering::SeqCst);
+        let decision = decide(&call.name, risk, &call.args, untrusted, session_policy);
+
+        // Kết quả ghi audit cho lời gọi này (mục 15.8) — điền dần rồi ghi DUY NHẤT
+        // một lần ở cuối khối (trừ nhánh deny `continue` — ghi ngay trong nhánh).
+        let mut audit = entry_now(session.get(), channel, &call.name, &call.args);
+        match decision {
+            PolicyDecision::Allowed => {
+                audit.decision = "allow";
+                audit.decided_by = "policy".into();
+            }
+            PolicyDecision::NeedsConfirm { allow_in_session } => {
+                if cancel.is_cancelled() {
+                    append_run_message(
+                        store,
+                        session,
+                        &mut state.transcript,
+                        Message::tool_error(call.id.clone(), CANCELLED_MSG),
+                    )
+                    .await?;
+                    io.on_tool_end(&call.id, &call.name, false, CANCELLED_MSG);
+                    audit.decision = "deny";
+                    audit.decided_by = "cancelled".into();
+                    record_audit(audit_log.as_ref(), &audit);
+                    return Ok(());
+                }
+                let deny_note = deny_list_reason(&call.name, &call.args)
+                    .map(|reason| format!("\n[cảnh báo deny-list] {}", reason.label))
+                    .unwrap_or_default();
+                let prompt = format!("{} {}{deny_note}", call.name, args_preview);
+                let replied = if io.is_background() && untrusted {
+                    Some(Decision::Deny)
+                } else {
+                    io.confirm(
+                        &call.id,
+                        &call.name,
+                        risk,
+                        &prompt,
+                        allow_in_session,
+                        CONFIRM_TIMEOUT,
+                    )
+                    .await
+                };
+                let actor = io.decision_actor();
+                match replied {
+                    Some(Decision::Allow) => {
+                        audit.decision = "allow";
+                        audit.decided_by = actor.unwrap_or_else(|| "user".into());
+                    }
+                    Some(Decision::AllowInSession) if allow_in_session => {
+                        session_policy.allow(&call.name);
+                        audit.decision = "allow_in_session";
+                        audit.decided_by = actor.unwrap_or_else(|| "user".into());
+                    }
+                    Some(Decision::AllowInSession) | Some(Decision::Deny) => {
+                        audit.decision = "deny";
+                        audit.decided_by = actor.unwrap_or_else(|| "user".into());
+                        record_audit(audit_log.as_ref(), &audit);
+                        let message = "Người dùng đã từ chối hành động này.".to_string();
+                        append_run_message(
+                            store,
+                            session,
+                            &mut state.transcript,
+                            Message::tool_error(call.id.clone(), message.clone()),
+                        )
+                        .await?;
+                        io.on_tool_end(&call.id, &call.name, false, &message);
+                        return Ok(());
+                    }
+                    None => {
+                        let message = if cancel.is_cancelled() {
+                            audit.decided_by = "cancelled".into();
+                            CANCELLED_MSG.to_string()
+                        } else {
+                            audit.decided_by = "timeout".into();
+                            "Hết thời gian chờ xác nhận — hành động bị từ chối.".to_string()
+                        };
+                        audit.decision = "deny";
+                        record_audit(audit_log.as_ref(), &audit);
+                        append_run_message(
+                            store,
+                            session,
+                            &mut state.transcript,
+                            Message::tool_error(call.id.clone(), message.clone()),
+                        )
+                        .await?;
+                        io.on_tool_end(&call.id, &call.name, false, &message);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // Chạy tool, đua với huỷ (mục 6) và timeout. Khi token bị huỷ giữa chừng:
+        // ghi tool result "[bị người dùng huỷ]" để lịch sử giữ cặp tool_use/tool_result
+        // hợp lệ rồi kết thúc run. Ghi DB diễn ra SAU khi select hoàn tất nên không
+        // bị cắt giữa lúc ghi (cancel-safety của `select!`, mục 22.10).
+        // (M26) `call_rich` cho phép tool trả ảnh; `call` cũ vẫn chạy qua default
+        // implementation nên **mọi tool cũ hành xử y hệt**.
+        enum ExecOutcome {
+            Done(Result<ToolOutput, ToolError>),
+            Timeout,
+            Cancelled,
+        }
+        let exec = timeout(
+            Duration::from_secs(config.security.tool_timeout_seconds),
+            execute_tool(registry, &ctx, call),
+        );
+        let outcome = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => ExecOutcome::Cancelled,
+            r = exec => match r {
+                Ok(inner) => ExecOutcome::Done(inner),
+                Err(_) => ExecOutcome::Timeout,
+            },
+        };
+
+        let (ok, output, image_block, cancelled) = match outcome {
+            ExecOutcome::Done(Ok(ToolOutput::Image { caption, image })) => {
+                (true, caption, Some(image), false)
+            }
+            ExecOutcome::Done(Ok(ToolOutput::Text(text))) => (true, text, None, false),
+            ExecOutcome::Done(Err(e)) => (
+                false,
+                format!("Lỗi tool `{}`: {}", call.name, e),
+                None,
+                false,
+            ),
+            ExecOutcome::Timeout => (
+                false,
+                format!(
+                    "Tool `{}` hết thời gian cho phép ({} giây).",
+                    call.name, config.security.tool_timeout_seconds
+                ),
+                None,
+                false,
+            ),
+            ExecOutcome::Cancelled => (false, CANCELLED_MSG.to_string(), None, true),
+        };
+
+        // Ảnh KHÔNG đi qua `truncate_output`: cắt theo ký tự một chuỗi base64 sẽ
+        // sinh PNG hỏng. Trần byte đã do tool áp (`[browser].max_image_bytes`).
+        let output = truncate_output(&output);
+        // Audit **không** bao giờ ghi base64 (mục 15.8): chỉ ghi tham chiếu.
+        if let Some(image) = image_block.as_ref() {
+            audit.artifact = Some(format!(
+                "image:{}:{}:{} bytes",
+                image.media_type,
+                image.sha256,
+                image.data.len()
+            ));
+        }
+        // (M4, mục 15.4) Bật cờ untrusted cho cả lượt khi tool trả nội dung ngoài lõi:
+        // mọi confirm Confirm/Dangerous SAU đây sẽ hỏi lại, không "trong phiên".
+        //
+        // Có hai lớp, cùng dùng để không lệ thuộc vào một quy ước ngầm:
+        // 1. `Tool::marks_untrusted()` — khai báo tường minh của tool. Đây là lớp
+        //    chính: tool mới quên bọc sẽ bị test hồi quy bắt, không hỏng âm thầm.
+        // 2. `contains_untrusted_block` — lưới an toàn cho output thực sự mang thẻ
+        //    (kể cả tool tự bọc tay như `web_fetch`, hoặc lỗi từ MCP đã bọc sẵn).
+        let marks_untrusted = registry
+            .get(&call.name)
+            .is_some_and(|tool| tool.marks_untrusted());
+        if marks_untrusted || contains_untrusted_block(&output) {
+            state.untrusted_seen.store(true, Ordering::SeqCst);
+        }
+        // Audit kết quả thực thi (mục 15.8) — lỗi ghi chỉ là cảnh báo, không làm hỏng run.
+        audit.ok = Some(ok);
+        if !ok {
+            audit.error = Some(output.chars().take(300).collect());
+        }
+        record_audit(audit_log.as_ref(), &audit);
+        let mut failed_twice = false;
+        if !ok {
+            let count = state.failure_counts.entry(key.clone()).or_insert(0);
+            *count = count.saturating_add(1);
+            failed_twice = *count >= 2;
+            state.consecutive_same_failure = Some(key);
+        } else {
+            state.consecutive_same_failure = None;
+        }
+        let output = if failed_twice {
+            // Chèn gợi ý ngay trong tool result sau 2 lần thất bại giống nhau (mục 6).
+            format!("{output}\n[Gợi ý] Hai lần gọi giống nhau đều thất bại — hãy thử cách khác.")
+        } else {
+            output
+        };
+        // (M26) Tool trả **ảnh** dùng `Message::tool_with_image`: caption vẫn
+        // đi qua đường cắt ký tự như mọi tool, còn ảnh đi kèm nguyên vẹn.
+        let result_message = match (ok, image_block) {
+            (true, Some(image)) => Message::tool_with_image(call.id.clone(), output.clone(), image),
+            (true, None) => Message::tool(call.id.clone(), output.clone()),
+            (false, _) => Message::tool_error(call.id.clone(), output.clone()),
+        };
+        append_run_message(store, session, &mut state.transcript, result_message).await?;
+        if ok
+            && call.name == "load_skill"
+            && let Some(name) = call.args.get("name").and_then(serde_json::Value::as_str)
+        {
+            state.loaded_skills.insert(name.to_string());
+        }
+        io.on_tool_end(&call.id, &call.name, ok, &output);
+        if cancelled {
+            return Ok(());
+        }
+        Ok(())
     }
 }
 
