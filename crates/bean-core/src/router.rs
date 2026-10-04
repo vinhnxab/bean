@@ -25,6 +25,9 @@ use crate::learning::{ReflectionArgs, reflect};
 use crate::run_io::{Decision, RunIo};
 use crate::store::{Store, StoreError};
 
+use confirm::{ConfirmRegistry, ConfirmRequest};
+
+mod confirm;
 mod outbox;
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;
@@ -980,20 +983,7 @@ impl Router {
                 role: active.role.clone(),
             })
             .collect();
-        let pending_confirms = state
-            .confirms
-            .iter()
-            .map(|(id, pending)| PendingConfirmInfo {
-                confirm_id: id.clone(),
-                session_id: pending.session_id,
-                run_id: pending.run_id.clone(),
-                prompt: pending.prompt.clone(),
-                risk: pending.risk,
-                allow_session_option: pending.allow_session_option,
-                timeout_seconds: pending.timeout_seconds,
-                role: pending.role.clone(),
-            })
-            .collect();
+        let pending_confirms = ConfirmRegistry::pending(&state);
         RouterSnapshot {
             running,
             pending_confirms,
@@ -1422,6 +1412,10 @@ impl Router {
     }
 
     /// Phản hồi hợp lệ đầu tiên thắng; response sau trả `ConfirmNotFound`.
+    ///
+    /// Quy tắc "ai thắng trước / đúng `actor` / chỉ `Confirm` mới được cho phép trong
+    /// phiên" nằm ở [`ConfirmRegistry`]; ở đây chỉ trả quyết định về `RunIo` đang chờ
+    /// và phát sự kiện ra ngoài.
     pub async fn resolve_confirm(
         &self,
         confirm_id: &str,
@@ -1429,31 +1423,20 @@ impl Router {
         actor: &str,
     ) -> Result<(), RouterError> {
         let id = ConfirmId::new(confirm_id);
-        let (session_id, run_id, sender) = {
+        let resolved = {
             let mut state = lock(&self.inner.state)?;
-            let pending = state
-                .confirms
-                .remove(&id)
-                .ok_or(RouterError::ConfirmNotFound)?;
-            if pending.actor != actor {
-                state.confirms.insert(id.clone(), pending);
-                return Err(RouterError::ConfirmForbidden);
-            }
-            if matches!(decision, Decision::AllowInSession) && !pending.allow_session_option {
-                state.confirms.insert(id.clone(), pending);
-                return Err(RouterError::ConfirmForbidden);
-            }
-            (pending.session_id, pending.run_id, pending.sender)
+            ConfirmRegistry::resolve(&mut state, &id, decision, actor)?
         };
-        sender
+        resolved
+            .sender
             .send(Confirmation {
                 decision,
                 actor: actor.to_string(),
             })
             .map_err(|_| RouterError::ConfirmNotFound)?;
         self.emit(RunEvent::ConfirmResolved {
-            session_id,
-            run_id,
+            session_id: resolved.session_id,
+            run_id: resolved.run_id,
             confirm_id: id,
             outcome: match decision {
                 Decision::Allow | Decision::AllowInSession => ConfirmOutcome::Allowed,
@@ -1474,54 +1457,47 @@ impl Router {
         actor: &str,
         requested_timeout: Duration,
     ) -> Result<(ConfirmId, oneshot::Receiver<Confirmation>), RouterError> {
-        let confirm_id = new_confirm_id()?;
-        let (sender, receiver) = oneshot::channel();
-        let timeout = requested_timeout.min(self.inner.options.confirm_timeout);
-        let timeout_seconds = u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX);
-        // Tra role của chính run đang chờ duyệt (không phải role resolve lại từ
-        // `actor`): `actor` là người sẽ *trả lời*, còn HUB cần biết *agent nào*
-        // đang chờ. Khi run đã kết thúc, `active` không còn ⇒ `None`, đúng như
-        // lúc đó confirm sẽ bị dọn theo `finish`.
-        let role = lock(&self.inner.state)
-            .ok()
-            .and_then(|state| state.active.get(run_id).and_then(|run| run.role.clone()));
-        lock(&self.inner.state)?.confirms.insert(
-            confirm_id.clone(),
-            PendingConfirm {
-                run_id: run_id.clone(),
-                session_id,
-                actor: actor.to_string(),
-                prompt: prompt.to_string(),
-                risk,
-                allow_session_option: allow_session,
-                timeout_seconds,
-                role: role.clone(),
-                sender,
-            },
-        );
+        let (receiver, announce) = {
+            let mut state = lock(&self.inner.state)?;
+            ConfirmRegistry::begin(
+                &mut state,
+                self.inner.options.confirm_timeout,
+                ConfirmRequest {
+                    session_id,
+                    run_id: run_id.clone(),
+                    risk,
+                    prompt: prompt.to_string(),
+                    allow_session_option: allow_session,
+                    actor: actor.to_string(),
+                    requested_timeout,
+                },
+            )?
+        };
+        // Phát đúng những gì đã lưu trong sổ (`timeout`, `role`) — không tính lại,
+        // nếu lệch thì UI đếm ngược và HUB gắn agent sẽ sai.
         self.emit(RunEvent::ConfirmRequest {
-            session_id,
-            run_id: run_id.clone(),
-            confirm_id: confirm_id.clone(),
-            prompt: prompt.to_string(),
-            risk,
-            allow_session_option: allow_session,
-            timeout_seconds,
-            role: role.clone(),
+            session_id: announce.session_id,
+            run_id: announce.run_id,
+            confirm_id: announce.confirm_id.clone(),
+            prompt: announce.prompt,
+            risk: announce.risk,
+            allow_session_option: announce.allow_session_option,
+            timeout_seconds: announce.timeout_seconds,
+            role: announce.role,
         });
-        Ok((confirm_id, receiver))
+        Ok((announce.confirm_id, receiver))
     }
 
     fn expire_confirm(&self, confirm_id: &ConfirmId, outcome: ConfirmOutcome) -> bool {
         let removed = lock(&self.inner.state)
             .ok()
-            .and_then(|mut state| state.confirms.remove(confirm_id));
-        let Some(pending) = removed else {
+            .and_then(|mut state| ConfirmRegistry::expire(&mut state, confirm_id));
+        let Some((session_id, run_id)) = removed else {
             return false;
         };
         self.emit(RunEvent::ConfirmResolved {
-            session_id: pending.session_id,
-            run_id: pending.run_id,
+            session_id,
+            run_id,
             confirm_id: confirm_id.clone(),
             outcome,
         });
