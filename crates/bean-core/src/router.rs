@@ -27,10 +27,12 @@ use crate::store::{Store, StoreError};
 
 use command::{self as slash, Command};
 use confirm::{ConfirmRegistry, ConfirmRequest};
+use learning::LearningGate;
 use queue::{Enqueued, RunQueue};
 
 mod command;
 mod confirm;
+mod learning;
 mod outbox;
 mod queue;
 
@@ -332,7 +334,8 @@ struct RouterInner {
     audit: Option<Arc<AuditLog>>,
     skills: Option<SkillCatalog>,
     skills_index: RwLock<String>,
-    learning_gate: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
+    /// Cổng cooldown của learning loop (M15): giữ chỗ cho đề xuất skill sắp tới.
+    learning_gate: LearningGate,
     options: RouterOptions,
     events: broadcast::Sender<RunEvent>,
     channels: RwLock<HashMap<String, Arc<dyn Channel>>>,
@@ -385,7 +388,7 @@ impl Router {
                 audit,
                 skills,
                 skills_index: RwLock::new(skills_index),
-                learning_gate: Mutex::new(None),
+                learning_gate: LearningGate::default(),
                 options,
                 events,
                 channels: RwLock::new(HashMap::new()),
@@ -701,7 +704,12 @@ impl Router {
                     text: outcome.text.clone(),
                     message_id: outcome.message_id,
                 });
-                if should_reflect && let Some(reservation) = self.reserve_learning(&config) {
+                if should_reflect
+                    && let Some(reservation) = self
+                        .inner
+                        .learning_gate
+                        .reserve(&config, self.inner.skills.as_ref())
+                {
                     self.spawn_reflection(queued, config, outcome, reservation);
                 }
             }
@@ -709,56 +717,6 @@ impl Router {
                 let code = agent_error_code(&error);
                 self.emit_error(&queued, code, &error.to_string());
             }
-        }
-    }
-
-    fn reserve_learning(&self, config: &Config) -> Option<chrono::DateTime<chrono::Utc>> {
-        if !config.learning.enabled {
-            return None;
-        }
-        let catalog = self.inner.skills.as_ref()?;
-        let now = chrono::Utc::now();
-        let last_proposal = match catalog.last_proposal_at() {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::warn!(error = %error, "state learning không hợp lệ; bỏ qua reflection");
-                return None;
-            }
-        };
-        if let Some(last) = last_proposal {
-            match chrono::DateTime::parse_from_rfc3339(&last) {
-                Ok(last) => {
-                    let interval = chrono::Duration::from_std(std::time::Duration::from_secs(
-                        config.learning.proposal_interval_minutes.saturating_mul(60),
-                    ))
-                    .unwrap_or(chrono::Duration::MAX);
-                    if now < last.with_timezone(&chrono::Utc) + interval {
-                        return None;
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(error = %error, "state learning có timestamp không hợp lệ");
-                    return None;
-                }
-            }
-        }
-        let mut gate = lock(&self.inner.learning_gate).ok()?;
-        let interval = chrono::Duration::from_std(std::time::Duration::from_secs(
-            config.learning.proposal_interval_minutes.saturating_mul(60),
-        ))
-        .unwrap_or(chrono::Duration::MAX);
-        if gate.is_some_and(|last| now < last + interval) {
-            return None;
-        }
-        *gate = Some(now);
-        Some(now)
-    }
-
-    fn release_learning(&self, reservation: chrono::DateTime<chrono::Utc>) {
-        if let Ok(mut gate) = self.inner.learning_gate.lock()
-            && *gate == Some(reservation)
-        {
-            *gate = None;
         }
     }
 
@@ -770,7 +728,7 @@ impl Router {
         reservation: chrono::DateTime<chrono::Utc>,
     ) {
         let Some(catalog) = self.inner.skills.clone() else {
-            self.release_learning(reservation);
+            self.inner.learning_gate.release(reservation);
             return;
         };
         let router = self.clone();
@@ -838,10 +796,10 @@ impl Router {
                         }
                     }
                 }
-                Ok(None) => router.release_learning(reservation),
+                Ok(None) => router.inner.learning_gate.release(reservation),
                 Err(error) => {
                     tracing::warn!(error = %error, "reflection M15 thất bại; run chính vẫn hoàn tất");
-                    router.release_learning(reservation);
+                    router.inner.learning_gate.release(reservation);
                 }
             }
         });
