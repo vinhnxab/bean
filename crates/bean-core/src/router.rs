@@ -31,6 +31,7 @@ use confirm::{ConfirmRegistry, ConfirmRequest};
 use io::RouterIo;
 use learning::LearningGate;
 use queue::{Enqueued, RunQueue};
+use skills::SkillCoordinator;
 
 mod alert;
 mod command;
@@ -39,6 +40,7 @@ mod io;
 mod learning;
 mod outbox;
 mod queue;
+mod skills;
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;
 const OUTBOX_BATCH_SIZE: usize = 50;
@@ -336,8 +338,8 @@ struct RouterInner {
     registry: Arc<ToolRegistry>,
     llm: Arc<dyn LlmProvider>,
     audit: Option<Arc<AuditLog>>,
-    skills: Option<SkillCatalog>,
-    skills_index: RwLock<String>,
+    /// Catalog skill + index progressive-disclosure (mục 9) và duyệt nháp (M15).
+    skills: SkillCoordinator,
     /// Cổng cooldown của learning loop (M15): giữ chỗ cho đề xuất skill sắp tới.
     learning_gate: LearningGate,
     options: RouterOptions,
@@ -390,8 +392,7 @@ impl Router {
                 registry,
                 llm,
                 audit,
-                skills,
-                skills_index: RwLock::new(skills_index),
+                skills: SkillCoordinator::new(skills, skills_index),
                 learning_gate: LearningGate::default(),
                 options,
                 events,
@@ -652,8 +653,8 @@ impl Router {
             queued.cancel.clone(),
             queued.background_allowed_tools.clone(),
         ));
-        let skills_index = match read_lock(&self.inner.skills_index) {
-            Ok(index) => index.clone(),
+        let skills_index = match self.inner.skills.index() {
+            Ok(index) => index,
             Err(error) => {
                 self.emit_error(&queued, "router_state", &error.to_string());
                 return;
@@ -707,13 +708,13 @@ impl Router {
                     text: outcome.text.clone(),
                     message_id: outcome.message_id,
                 });
-                if should_reflect
-                    && let Some(reservation) = self
-                        .inner
-                        .learning_gate
-                        .reserve(&config, self.inner.skills.as_ref())
-                {
-                    self.spawn_reflection(queued, config, outcome, reservation);
+                if should_reflect {
+                    let catalog = self.inner.skills.catalog().ok();
+                    if let Some(reservation) =
+                        self.inner.learning_gate.reserve(&config, catalog.as_ref())
+                    {
+                        self.spawn_reflection(queued, config, outcome, reservation);
+                    }
                 }
             }
             Err(error) => {
@@ -730,7 +731,7 @@ impl Router {
         outcome: RunOutcome,
         reservation: chrono::DateTime<chrono::Utc>,
     ) {
-        let Some(catalog) = self.inner.skills.clone() else {
+        let Some(catalog) = self.inner.skills.catalog().ok() else {
             self.inner.learning_gate.release(reservation);
             return;
         };
@@ -1129,7 +1130,7 @@ impl Router {
                 }
             }
             Command::Skills => {
-                let index = read_lock(&self.inner.skills_index)?.clone();
+                let index = self.inner.skills.index()?;
                 Ok(if index.trim().is_empty() {
                     "Chưa nạp skill.".into()
                 } else {
@@ -1201,19 +1202,16 @@ impl Router {
 
 impl Router {
     /// Duyệt skill nháp sau khi actor đã xác thực ở lớp channel.
+    ///
+    /// Phân quyền `actor` là việc của `Router` (danh tính người gọi); phần catalog và
+    /// đồng bộ index thuộc [`SkillCoordinator`].
     pub async fn approve_draft(
         &self,
         id: &str,
         actor: &str,
     ) -> Result<SkillDraftDecision, RouterError> {
         self.authorize_actor(actor)?;
-        let catalog = self.skills_catalog()?;
-        let draft_id = id.to_string();
-        let decision = tokio::task::spawn_blocking(move || catalog.approve_draft(&draft_id))
-            .await
-            .map_err(|error| RouterError::Internal(error.to_string()))??;
-        self.refresh_skills_index()?;
-        Ok(decision)
+        self.inner.skills.approve_draft(id).await
     }
 
     /// Bỏ skill nháp; không reload vì không có skill nào được kích hoạt.
@@ -1223,19 +1221,7 @@ impl Router {
         actor: &str,
     ) -> Result<SkillDraftDecision, RouterError> {
         self.authorize_actor(actor)?;
-        let catalog = self.skills_catalog()?;
-        let draft_id = id.to_string();
-        tokio::task::spawn_blocking(move || catalog.reject_draft(&draft_id))
-            .await
-            .map_err(|error| RouterError::Internal(error.to_string()))?
-            .map_err(Into::into)
-    }
-
-    fn skills_catalog(&self) -> Result<SkillCatalog, RouterError> {
-        self.inner
-            .skills
-            .clone()
-            .ok_or_else(|| SkillError::NotFound("skill catalog".into()).into())
+        self.inner.skills.reject_draft(id).await
     }
 
     fn authorize_actor(&self, actor: &str) -> Result<(), RouterError> {
@@ -1250,12 +1236,6 @@ impl Router {
         } else {
             Err(RouterError::Forbidden(actor.to_string()))
         }
-    }
-
-    fn refresh_skills_index(&self) -> Result<(), RouterError> {
-        let catalog = self.skills_catalog()?;
-        *write_lock(&self.inner.skills_index)? = catalog.index();
-        Ok(())
     }
 
     /// Phản hồi hợp lệ đầu tiên thắng; response sau trả `ConfirmNotFound`.
