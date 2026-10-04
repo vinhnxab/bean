@@ -25,8 +25,10 @@ use crate::learning::{ReflectionArgs, reflect};
 use crate::run_io::{Decision, RunIo};
 use crate::store::{Store, StoreError};
 
+use command::{self as slash, Command};
 use confirm::{ConfirmRegistry, ConfirmRequest};
 
+mod command;
 mod confirm;
 mod outbox;
 
@@ -1224,14 +1226,14 @@ impl Router {
         run_id: RunId,
         command: &str,
     ) -> Result<(), RouterError> {
-        let mut parts = command.split_whitespace();
-        let name = parts.next().unwrap_or_default();
-        let argument = parts.next().unwrap_or_default();
-        if parts.next().is_some() {
-            return self.command_error(session, run_id, "invalid_arguments", "Quá nhiều tham số.");
-        }
-        let result: Result<String, RouterError> = match name {
-            "/new" => {
+        let parsed = match slash::parse(command) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                return self.command_error(session, run_id, error.code(), &error.message());
+            }
+        };
+        let result: Result<String, RouterError> = match parsed {
+            Command::New => {
                 if self.session_busy(session) {
                     Err(RouterError::SessionBusy)
                 } else {
@@ -1250,34 +1252,33 @@ impl Router {
                     Ok(format!("Đã tạo phiên mới: {new_session}"))
                 }
             }
-            "/stop" => {
+            Command::Stop => {
                 self.cancel_session(session).await;
                 Ok("Đã yêu cầu dừng run hiện tại.".into())
             }
-            "/model" => {
-                if argument.is_empty() {
-                    let config = read_lock(&self.inner.config)?;
-                    Ok(format!(
-                        "Model hiện tại: {}. Cho phép: {}",
-                        config.llm.model,
-                        config.llm.effective_allowed_models().join(", ")
-                    ))
+            Command::ShowModel => {
+                let config = read_lock(&self.inner.config)?;
+                Ok(format!(
+                    "Model hiện tại: {}. Cho phép: {}",
+                    config.llm.model,
+                    config.llm.effective_allowed_models().join(", ")
+                ))
+            }
+            Command::SetModel(argument) => {
+                let mut config = write_lock(&self.inner.config)?;
+                if config
+                    .llm
+                    .effective_allowed_models()
+                    .iter()
+                    .any(|model| model == argument)
+                {
+                    config.llm.model = argument.to_string();
+                    Ok(format!("Model đổi thành: {argument}"))
                 } else {
-                    let mut config = write_lock(&self.inner.config)?;
-                    if config
-                        .llm
-                        .effective_allowed_models()
-                        .iter()
-                        .any(|model| model == argument)
-                    {
-                        config.llm.model = argument.to_string();
-                        Ok(format!("Model đổi thành: {argument}"))
-                    } else {
-                        Err(RouterError::ModelNotAllowed(argument.to_string()))
-                    }
+                    Err(RouterError::ModelNotAllowed(argument.to_string()))
                 }
             }
-            "/skills" => {
+            Command::Skills => {
                 let index = read_lock(&self.inner.skills_index)?.clone();
                 Ok(if index.trim().is_empty() {
                     "Chưa nạp skill.".into()
@@ -1285,33 +1286,29 @@ impl Router {
                     index
                 })
             }
-            "/memory" => {
-                if argument.is_empty() {
-                    Ok("Dùng: /memory <truy vấn>".into())
+            Command::MemoryUsage => Ok("Dùng: /memory <truy vấn>".into()),
+            Command::MemorySearch(query) => {
+                let hits = self.inner.store.memory_search(query).await?;
+                Ok(if hits.is_empty() {
+                    "Không tìm thấy ghi nhớ.".into()
                 } else {
-                    let hits = self.inner.store.memory_search(argument).await?;
-                    Ok(if hits.is_empty() {
-                        "Không tìm thấy ghi nhớ.".into()
-                    } else {
-                        hits.into_iter()
-                            .map(|hit| format!("- {}", hit.text))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                }
+                    hits.into_iter()
+                        .map(|hit| format!("- {}", hit.text))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
             }
-            "/tasks" => Ok("Chưa có tác vụ định kỳ.".into()),
-            "/approve" if argument.is_empty() => Ok("Dùng: /approve <id>".into()),
-            "/reject" if argument.is_empty() => Ok("Dùng: /reject <id>".into()),
-            "/approve" => self
-                .approve_draft(argument, &incoming.user_id)
+            Command::Tasks => Ok("Chưa có tác vụ định kỳ.".into()),
+            Command::ApproveDraft("") => Ok("Dùng: /approve <id>".into()),
+            Command::RejectDraft("") => Ok("Dùng: /reject <id>".into()),
+            Command::ApproveDraft(id) => self
+                .approve_draft(id, &incoming.user_id)
                 .await
                 .map(|decision| format!("Đã duyệt và kích hoạt skill `{}`.", decision.name)),
-            "/reject" => self
-                .reject_draft(argument, &incoming.user_id)
+            Command::RejectDraft(id) => self
+                .reject_draft(id, &incoming.user_id)
                 .await
                 .map(|decision| format!("Đã bỏ skill nháp `{}`.", decision.name)),
-            other => Err(RouterError::UnknownCommand(other.to_string())),
         };
         match result {
             Ok(text) => {
