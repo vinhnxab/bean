@@ -37,7 +37,7 @@ pub use ctx::{AlertSink, ToolCtx};
 pub use error::ToolError;
 pub use registry::ToolRegistry;
 pub use text::{compile_regex, strip_terminal_escapes, truncate_chars};
-pub use tool::{Tool, ToolOutput};
+pub use tool::{Tool, ToolAccess, ToolOutput};
 pub use typed::{TypedTool, deserialize_params, typed_spec};
 pub use untrusted::{
     CLOSE_TAG as UNTRUSTED_CLOSE_TAG, MAX_WRAPPED_OUTPUT_CHARS, OPEN_TAG as UNTRUSTED_OPEN_TAG,

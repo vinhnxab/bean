@@ -28,7 +28,11 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-use crate::{ToolCtx, ToolError, ToolRegistry, tool::Tool, untrusted::wrap};
+use crate::{
+    ToolCtx, ToolError, ToolRegistry,
+    tool::{Tool, ToolAccess},
+    untrusted::wrap,
+};
 
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -628,8 +632,15 @@ impl Tool for McpTool {
     /// (M22) Tag RBAC kế thừa từ `[[mcp_servers]].tool_tags`.
     ///
     /// Rỗng ⇒ mọi role đã cấp quyền đều thấy (giữ hành vi cũ cho server không gắn tag).
-    fn required_tags(&self) -> Vec<&str> {
-        self.required_tags.iter().map(String::as_str).collect()
+    ///
+    /// Khác với tool viết tay, tag ở đây đến từ **cấu hình chạy được** nên là `String`
+    /// của runtime, không phải literal `'static`. Vì vậy phải `Cow::Owned` — đây là
+    /// lý do [`ToolAccess`] dùng `Cow` thay vì `&'static [&'static str]`.
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Owned(self.required_tags.iter().map(String::as_str).collect()),
+            also_visible_to: Cow::Borrowed(&[]),
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: serde_json::Value) -> Result<String, ToolError> {

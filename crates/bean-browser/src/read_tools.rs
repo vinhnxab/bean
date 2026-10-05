@@ -9,10 +9,11 @@
 //! lượt** đó sẽ hỏi lại và mất tuỳ chọn "cho phép trong phiên" — đây chính là
 //! lớp phòng thủ chống prompt injection qua nội dung trang.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bean_tools::{ToolCtx, ToolError, ToolOutput, wrap_bounded};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolOutput, wrap_bounded};
 use bean_types::config::{DEV_READ_TAG, TEST_RUN_TAG};
 use bean_types::{ImageBlock, Risk, ToolSpec};
 use schemars::JsonSchema;
@@ -89,8 +90,11 @@ impl bean_tools::Tool for ScreenshotTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        READ_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&READ_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, _ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -245,8 +249,11 @@ impl bean_tools::Tool for ConsoleLogsTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        READ_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&READ_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -363,8 +370,11 @@ impl bean_tools::Tool for NetworkTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        READ_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&READ_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -468,8 +478,11 @@ impl bean_tools::Tool for PerformanceTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        READ_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&READ_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {

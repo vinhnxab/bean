@@ -32,10 +32,11 @@
 //! [`crate::session::SessionManager::current_origin`], giá trị được cập nhật mỗi
 //! lần navigate. Cả hai đều **fail-closed**: không xác định được origin ⇒ `Dangerous`.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bean_tools::{ToolCtx, ToolError, wrap_bounded};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, wrap_bounded};
 use bean_types::config::TEST_RUN_TAG;
 use bean_types::{Risk, ToolSpec};
 use schemars::JsonSchema;
@@ -147,8 +148,11 @@ impl bean_tools::Tool for NavigateTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        ACT_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&ACT_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -247,8 +251,11 @@ impl bean_tools::Tool for ClickTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        ACT_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&ACT_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -334,8 +341,11 @@ impl bean_tools::Tool for FillTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        ACT_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&ACT_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -415,8 +425,11 @@ impl bean_tools::Tool for PressKeyTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        ACT_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&ACT_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
@@ -518,8 +531,11 @@ impl bean_tools::Tool for EvaluateScriptTool {
         true
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        ACT_TAGS.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&ACT_TAGS[..]),
+            ..ToolAccess::default()
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {

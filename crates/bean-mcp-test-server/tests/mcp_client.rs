@@ -701,7 +701,8 @@ async fn mcp_server_without_tags_keeps_legacy_visibility() {
         registry
             .get("mcp__fixture__query_logs")
             .unwrap()
-            .required_tags()
+            .access()
+            .required_tags
             .is_empty()
     );
     runtime.close().await;

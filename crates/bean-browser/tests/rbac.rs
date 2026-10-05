@@ -121,12 +121,12 @@ fn tool_tags_match_rbac_constants() {
     let (registry, _session) = registry(&[]);
     for name in READ_TOOLS {
         let tool = registry.get(name).expect("tool tồn tại");
-        assert_eq!(tool.required_tags(), READ_TAGS.to_vec(), "{name}");
+        assert_eq!(&*tool.access().required_tags, &READ_TAGS[..], "{name}");
         assert!(tool.marks_untrusted(), "{name} phải khai marks_untrusted");
     }
     for name in ACT_TOOLS {
         let tool = registry.get(name).expect("tool tồn tại");
-        assert_eq!(tool.required_tags(), ACT_TAGS.to_vec(), "{name}");
+        assert_eq!(&*tool.access().required_tags, &ACT_TAGS[..], "{name}");
         assert!(tool.marks_untrusted(), "{name} phải khai marks_untrusted");
     }
     assert_eq!(ACT_TAGS, [TEST_RUN_TAG], "browser-act CHỈ dành cho QA");

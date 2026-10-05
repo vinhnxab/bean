@@ -1168,11 +1168,19 @@ async fn list_tools(
                 risk: risk_dto(tool.risk(&serde_json::json!({}))),
                 source: source.to_string(),
                 mcp_server,
-                required_tags: tool.required_tags().into_iter().map(String::from).collect(),
+                required_tags: {
+                    let access = tool.access();
+                    access
+                        .required_tags
+                        .iter()
+                        .map(|tag| String::from(*tag))
+                        .collect()
+                },
                 extra_tags: tool
-                    .also_visible_to()
-                    .into_iter()
-                    .map(String::from)
+                    .access()
+                    .also_visible_to
+                    .iter()
+                    .map(|tag| String::from(*tag))
                     .collect(),
                 untrusted: tool.marks_untrusted(),
             }

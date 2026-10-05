@@ -7,9 +7,10 @@
 //! Rủi ro `Confirm` (không phải `Dangerous`) vì nó chỉ ghi file trong workspace đã bị jail —
 //! người dùng có thể đọc lại, xoá được; khác với đăng bài ra ngoài.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use bean_tools::{Tool, ToolCtx, ToolError};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError};
 use bean_types::config::MARKETING_DRAFT_TAG;
 use bean_types::{Risk, ToolSpec};
 use schemars::JsonSchema;
@@ -98,8 +99,11 @@ impl Tool for MarketingDraftTool {
     }
 
     /// (M24) Chỉ role giữ tag `marketing-draft` mới thấy/cọp tool này.
-    fn required_tags(&self) -> Vec<&str> {
-        vec![MARKETING_DRAFT_TAG]
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&[MARKETING_DRAFT_TAG]),
+            ..ToolAccess::default()
+        }
     }
 
     /// Bản nháp là nội dung **do agent tự soạn** dựa trên đọc web — không phải dữ liệu

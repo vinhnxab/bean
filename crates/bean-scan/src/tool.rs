@@ -1,9 +1,10 @@
 //! Tool `security_scan` — quét cổng có kiểm soát phạm vi (Plan.md M23).
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use bean_security::{Sandbox, SandboxError};
-use bean_tools::{Tool, ToolCtx, ToolError};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError};
 use bean_types::config::INFRA_SCAN_TAG;
 use bean_types::{Alert, AlertSeverity, Risk, ToolSpec};
 use schemars::JsonSchema;
@@ -260,8 +261,11 @@ impl Tool for ScanTool {
     }
 
     /// Chỉ role giữ tag `infra-scan` mới thấy/cọp tool này (RBAC M21.4).
-    fn required_tags(&self) -> Vec<&str> {
-        vec![INFRA_SCAN_TAG]
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&[INFRA_SCAN_TAG]),
+            ..ToolAccess::default()
+        }
     }
 
     /// Output scanner là dữ liệu ngoài lõi: banner mà scanner đọc được từ target do kẻ tấn

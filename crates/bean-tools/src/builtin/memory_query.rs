@@ -210,8 +210,8 @@ mod tests {
         let tool = tool();
         assert_eq!(tool.risk(&serde_json::json!({})), Risk::Safe);
         assert_eq!(
-            tool.required_tags(),
-            vec![bean_types::config::MEMORY_READ_TAG]
+            &*tool.access().required_tags,
+            &[bean_types::config::MEMORY_READ_TAG]
         );
         // Nội dung file là dữ liệu ngoài lõi (mục 15.4) ⇒ phải báo untrusted.
         assert!(tool.marks_untrusted());

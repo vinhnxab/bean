@@ -202,7 +202,7 @@ fn only_roles_with_test_run_tag_see_the_tool() {
         .register(qa_test(catalog, sandbox))
         .expect("đăng ký tool");
     let registered = registry.get("qa_test").expect("tool tồn tại");
-    let tags = registered.required_tags();
+    let tags = registered.access().required_tags.into_owned();
 
     // Vai trò `qa` của Plan.md mục 2b: dev-read + test-run.
     let qa = role("qa", &["dev-read", "test-run"]);
@@ -255,7 +255,7 @@ fn qa_role_can_run_tests_but_never_write_code() {
             continue;
         };
         assert!(
-            !qa.allows(&tool.required_tags(), &[]),
+            !qa.allows(&tool.access().required_tags, &[]),
             "qa KHÔNG được gọi `{name}` — vi phạm four-eyes"
         );
         let visible: Vec<String> = registry

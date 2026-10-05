@@ -64,10 +64,12 @@ pub fn expose_gate(
     // 1. Tag: phải nằm trong allowlist. Hỏi cả `required_tags` **và** `also_visible_to`
     //    vì M24 cho phép mở tool untagged cho một tag cụ thể — cùng một câu hỏi "tag nào
     //    mở tool này" cho cả hai cơ chế, nên phải hỏi cả hai.
-    let mentioned = tool
-        .required_tags()
-        .into_iter()
-        .chain(tool.also_visible_to())
+    let access = tool.access();
+    let mentioned = access
+        .required_tags
+        .iter()
+        .copied()
+        .chain(access.also_visible_to.iter().copied())
         .any(|tag| MCP_EXPOSED_TAGS.contains(&tag));
     if !mentioned {
         return ExposeDecision::TagNotExposed;
@@ -113,11 +115,12 @@ pub fn visible_names(registry: &ToolRegistry, perms: &RolePermissions) -> Vec<St
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use std::borrow::Cow;
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
+    use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};
     use bean_types::{Risk, RolePermissions, ToolSpec};
 
     use super::*;
@@ -138,8 +141,11 @@ mod tests {
             self.risk
         }
 
-        fn required_tags(&self) -> Vec<&str> {
-            self.tags.clone()
+        fn access(&self) -> ToolAccess<'_> {
+            ToolAccess {
+                required_tags: Cow::Owned(self.tags.clone()),
+                ..ToolAccess::default()
+            }
         }
 
         async fn call(

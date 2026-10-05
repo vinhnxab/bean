@@ -11,10 +11,11 @@
 //! 3. **Credential riêng** — `Config::validate_marketing` từ chối trùng với key LLM /
 //!    search / Telegram, vì quyền "chỉ post" phải là credential riêng (D15.3).
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use bean_security::{SafeHttpClient, SsrfError};
-use bean_tools::{Tool, ToolCtx, ToolError};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError};
 use bean_types::config::{MARKETING_PUBLISH_TAG, MarketingConfig};
 use bean_types::{Risk, ToolSpec};
 use schemars::JsonSchema;
@@ -192,8 +193,11 @@ impl Tool for MarketingPublishTool {
     }
 
     /// (M24) Chỉ role giữ tag `marketing-publish` mới thấy/cọp tool này.
-    fn required_tags(&self) -> Vec<&str> {
-        vec![MARKETING_PUBLISH_TAG]
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&[MARKETING_PUBLISH_TAG]),
+            ..ToolAccess::default()
+        }
     }
 
     /// Phản hồi của nền tảng là dữ liệu **ngoài lõi** (mục 15.4) — bọc untrusted, kể cả

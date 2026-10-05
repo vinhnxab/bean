@@ -12,12 +12,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![forbid(unsafe_code)]
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use bean_billing::{BillingClient, billing_read_cost, stub_source};
 use bean_security::CapWorkspace;
-use bean_tools::{Tool, ToolCtx, ToolRegistry};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolRegistry};
 use bean_types::config::{BillingConfig, RoleConfig};
 use bean_types::{Config, Risk, SessionId, ToolSpec};
 use tempfile::TempDir;
@@ -78,8 +79,12 @@ impl Tool for InfraTool {
     fn risk(&self, _args: &serde_json::Value) -> Risk {
         Risk::Safe
     }
-    fn required_tags(&self) -> Vec<&str> {
-        self.tags.clone()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            // Tag đến từ cấu hình chạy được (`[[qa_suites]]`), không phải literal.
+            required_tags: Cow::Owned(self.tags.clone()),
+            ..ToolAccess::default()
+        }
     }
     async fn call(
         &self,

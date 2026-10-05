@@ -23,8 +23,9 @@ use serde_json::Value;
 
 use crate::ctx::ToolCtx;
 use crate::error::ToolError;
-use crate::tool::Tool;
+use crate::tool::{Tool, ToolAccess};
 use bean_types::{Risk, ToolSpec};
+use std::borrow::Cow;
 
 /// Sinh [`ToolSpec`] từ struct tham số `P: JsonSchema` (D6.10: schema giữ thô, provider
 /// chịu trách nhiệm chuẩn hoá `$defs`/`$ref` trước khi gửi API).
@@ -247,12 +248,11 @@ where
         self.marks_untrusted
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        self.required_tags.to_vec()
-    }
-
-    fn also_visible_to(&self) -> Vec<&str> {
-        self.also_visible_to.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&self.required_tags),
+            also_visible_to: Cow::Borrowed(&self.also_visible_to),
+        }
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {

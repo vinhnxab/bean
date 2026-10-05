@@ -14,6 +14,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![forbid(unsafe_code)]
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,7 +23,7 @@ use bean_core::{RunTurnArgs, run_turn};
 use bean_llm::{ChatRequest, LlmError, LlmProvider, LlmStream};
 use bean_memory::{MemoryStore, Store};
 use bean_security::CapWorkspace;
-use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};
 use bean_types::config::{ProjectConfig, RoleConfig};
 use bean_types::{
     Config, LlmDelta, LlmResponse, Risk, RolePermissions, SessionId, ToolCall, ToolSpec,
@@ -103,8 +104,12 @@ impl Tool for TagTool {
     fn risk(&self, _args: &serde_json::Value) -> Risk {
         Risk::Safe
     }
-    fn required_tags(&self) -> Vec<&str> {
-        self.tags.clone()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            // Tag đến từ cấu hình chạy được, không phải literal.
+            required_tags: Cow::Owned(self.tags.clone()),
+            ..ToolAccess::default()
+        }
     }
     async fn call(&self, _ctx: &ToolCtx, _args: serde_json::Value) -> Result<String, ToolError> {
         Ok("ok".into())

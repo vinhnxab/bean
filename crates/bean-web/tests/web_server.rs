@@ -1,6 +1,7 @@
 //! Black-box tests M9: HTTP auth/security and WebSocket lifecycle.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -16,7 +17,7 @@ use bean_llm::FakeProvider;
 use bean_memory::{MemoryStore, SqliteStore, Store};
 use bean_security::{AuditLog, CapWorkspace};
 use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind};
-use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};
 use bean_types::config::{McpServerConfig, RoleConfig};
 use bean_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec, Usage};
 use bean_web::{
@@ -1049,8 +1050,12 @@ impl Tool for TaggedTool {
         self.risk
     }
 
-    fn required_tags(&self) -> Vec<&str> {
-        self.tags.to_vec()
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            // Tag đến từ cấu hình chạy được, không phải literal.
+            required_tags: Cow::Owned(self.tags.to_vec()),
+            ..ToolAccess::default()
+        }
     }
 
     fn marks_untrusted(&self) -> bool {

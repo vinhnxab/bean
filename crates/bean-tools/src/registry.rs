@@ -125,7 +125,10 @@ impl ToolRegistry {
     pub fn specs_visible_to(&self, perms: &RolePermissions) -> Vec<ToolSpec> {
         self.tools
             .values()
-            .filter(|tool| perms.allows(&tool.required_tags(), &tool.also_visible_to()))
+            .filter(|tool| {
+                let access = tool.access();
+                perms.allows(&access.required_tags, &access.also_visible_to)
+            })
             .map(|tool| tool.spec())
             .collect()
     }
@@ -136,9 +139,10 @@ impl ToolRegistry {
     /// một hàm `allows`, nên không thể lệch nhau giữa lúc lọc payload và lúc chạy.
     #[must_use]
     pub fn allows(&self, name: &str, perms: &RolePermissions) -> bool {
-        self.tools
-            .get(name)
-            .is_some_and(|tool| perms.allows(&tool.required_tags(), &tool.also_visible_to()))
+        self.tools.get(name).is_some_and(|tool| {
+            let access = tool.access();
+            perms.allows(&access.required_tags, &access.also_visible_to)
+        })
     }
 
     /// Tên các tool đã đăng ký (sort).

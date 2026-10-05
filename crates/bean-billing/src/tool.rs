@@ -1,9 +1,10 @@
 //! Tool `billing_read_cost` — đọc chi phí cloud, read-only (Plan.md M22a).
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use bean_security::{SafeHttpClient, SsrfError};
-use bean_tools::{Tool, ToolCtx, ToolError};
+use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError};
 use bean_types::config::{BILLING_TAG, BillingConfig};
 use bean_types::{Risk, ToolSpec};
 use schemars::JsonSchema;
@@ -214,8 +215,11 @@ impl Tool for BillingCostTool {
     }
 
     /// (M22a) Domain tài chính: chỉ role giữ tag `billing-read` mới thấy/cọp tool này.
-    fn required_tags(&self) -> Vec<&str> {
-        vec![BILLING_TAG]
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess {
+            required_tags: Cow::Borrowed(&[BILLING_TAG]),
+            ..ToolAccess::default()
+        }
     }
 
     /// Dữ liệu chi phí là dữ liệu **ngoài lõi** (mục 15.4) — bọc `<untrusted_content>` và

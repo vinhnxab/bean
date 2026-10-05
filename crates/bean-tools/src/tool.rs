@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use bean_types::{Risk, ToolSpec};
+use std::borrow::Cow;
 
 use crate::ctx::ToolCtx;
 use crate::error::ToolError;
@@ -61,6 +62,53 @@ impl From<String> for ToolOutput {
     }
 }
 
+/// Quyền RBAC mà một tool khai báo (M21.4/M24).
+///
+/// # Vì sao là một struct, không phải hai method
+///
+/// `required_tags` và `also_visible_to` **luôn được tiêu thụ cùng nhau** — qua
+/// [`RolePermissions::allows`] — nên tách chúng ra hai method chỉ làm trait rộng thêm mà
+/// không thêm sức mạnh. Gom thành một value object còn đạt hai điều:
+///
+/// * **ISP**: trait [`Tool`] gọn đi một method;
+/// * **không cấp phát**: bản cũ trả `Vec<&str>`, nên mỗi lần
+///   `ToolRegistry::specs_visible_to` duyệt tool lại tạo `Vec` mới. Nay trả **mượn**
+///   `&'a [&'static str]` — vòng lọc này chạy mỗi lượt gọi LLM.
+///
+/// # Lưu ý phạm vi
+///
+/// Chỉ gồm **RBAC**. Cờ `marks_untrusted` là kiểm soát *an toàn nội dung* (mục 15.4)
+/// và cố ý **không** gộp vào đây: review bảo mật luôn grep nó riêng, và trộn nó vào
+/// cấu húc quyền sẽ làm mờ ranh giới giữa "ai được gọi" và "output có bị bọc
+/// `<untrusted_content>` hay không".
+///
+/// Việc kiểm tra thực hiện ở **một** chỗ duy nhất: Router resolve [`RolePermissions`]
+/// rồi lọc danh sách tool **trước** khi dựng request tới LLM (M21.5) — không có logic
+/// RBAC nào nằm trong tool/role.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolAccess<'a> {
+    /// Tag mà role phải giữ **ít nhất một** để thấy/gọi tool này (M21.4).
+    ///
+    /// Rỗng ⇒ *"không cần thẻ đặc biệt"*. **Không** đọc thành "ai cũng gọi được": role
+    /// `no-access` vẫn **không thấy tool nào**, kể cả untagged — bất biến an toàn mặc
+    /// định của `Plan.md` mục 2 (D10.2).
+    ///
+    /// Ngữ nghĩa giữa nhiều tag là **OR**: giữ một tag là đủ. Nhờ vậy `run_shell` mang
+    /// cả `dev-write` lẫn `infra-scan` mà vẫn chặn được `qa` (four-eyes).
+    pub required_tags: Cow<'a, [&'a str]>,
+
+    /// Danh sách trắng tag: cho phép một role cụ thể thấy tool này mà không cần mở
+    /// `required_tags` (M24).
+    ///
+    /// Cần vì `required_tags` là **cổng chặn**: gắn tag vào `web_fetch` sẽ *giấu nó khỏi
+    /// mọi role khác* — hồi quy cho cài đặt đang chạy. M24 đòi role `marketing` thấy
+    /// `web_fetch` mà **không** thấy `write_file`/`run_shell`; hai yêu cầu đó không thể
+    /// đúng cùng một cơ chế. Vì vậy tách domain ở phía **role**
+    /// (`RolePermissions::allowed_tool_tags` — danh sách trắng), còn trường này chỉ
+    /// *mở thêm* một lối cho tool untagged vốn bị ẩn.
+    pub also_visible_to: Cow<'a, [&'a str]>,
+}
+
 /// Một công cụ mà model gọi được.
 ///
 /// Bất biến:
@@ -100,44 +148,12 @@ pub trait Tool: Send + Sync {
         false
     }
 
-    /// Tag RBAC mà role phải giữ **ít nhất một** để thấy/gọi tool này (M21.4).
+    /// Quyền RBAC của tool này — xem [`ToolAccess`] để biết ý nghĩa từng trường.
     ///
-    /// Mặc định `&[]` ⇒ *"không cần thẻ đặc biệt"*: mọi role **đã được cấp quyền** đều thấy
-    /// (giữ hành vi cũ cho tool chat thường — M21.4 ghi rõ điều này).
-    ///
-    /// **Không** đọc ngữ nghĩa "ai cũng gọi được" theo nghĩa đen: role `no-access` (user
-    /// không có trong `agent.user_roles`) vẫn **không thấy tool nào**, kể cả untagged — đó là
-    /// bất biến an toàn mặc định của `Plan.md` mục 2, xem D10.2.
-    ///
-    /// Ngữ nghĩa giữa nhiều tag là **OR**: role giữ một tag là đủ. Nhờ vậy `run_shell` có thể
-    /// mang cả `dev-write` lẫn `infra-scan` mà vẫn chặn được `qa` (four-eyes).
-    ///
-    /// Trả `Vec<&str>` (sở hữu) thay vì `&[&str]` vì tag có thể đến từ **cấu hình chạy
-    /// được** (ví dụ `[[mcp_servers]].tool_tags`) chứ không chỉ literal trong mã.
-    ///
-    /// Việc kiểm tra thực hiện ở **một** chỗ duy nhất: Router resolve
-    /// [`RolePermissions`] rồi lọc danh sách tool **trước** khi dựng request tới LLM
-    /// (M21.5) — không có logic RBAC nào nằm trong tool/role.
-    fn required_tags(&self) -> Vec<&str> {
-        Vec::new()
-    }
-
-    /// Tag RBAC **bổ sung**: cho phép một role cụ thể thấy tool này mà không cần mở
-    /// `required_tags` (M24).
-    ///
-    /// # Vì sao cần, khi đã có `required_tags`?
-    ///
-    /// `required_tags` là **cổng chặn**: gắn tag vào `web_fetch` sẽ *giấu nó khỏi mọi role
-    /// khác* — hồi quy cho các cài đặt đang chạy. Nhưng M24 đòi role `marketing` được thấy
-    /// `web_fetch` mà **không** thấy `write_file`/`run_shell`. Hai yêu cầu đó không thể
-    /// cùng đúng với một cơ chế.
-    ///
-    /// Vì vậy tách domain làm ở phía **role** (`RolePermissions::allowed_tool_tags` — danh
-    /// sách trắng), còn method này chỉ *mở thêm* một lối cho tool untagged vốn bị ẩn.
-    ///
-    /// Mặc định `&[]` ở **mọi** tool ⇒ thêm cơ chế này không đổi hành vi cấu hình cũ nào.
-    fn also_visible_to(&self) -> Vec<&str> {
-        Vec::new()
+    /// Mặc định [`ToolAccess::default`] ⇒ *"không cần thẻ đặc biệt"*: mọi role **đã
+    /// được cấp quyền** đều thấy (giữ hành vi cũ cho tool chat thường — M21.4 ghi rõ).
+    fn access(&self) -> ToolAccess<'_> {
+        ToolAccess::default()
     }
 
     /// Thực thi tool.
