@@ -97,7 +97,7 @@ pub(super) fn parse(input: &str) -> Result<Command<'_>, ParseError> {
 
 use bean_types::{RunEvent, RunId, SessionId};
 
-use super::{Incoming, Router, lock, read_lock, router_error_code, write_lock};
+use super::{Incoming, Router, lock, read_lock, write_lock};
 
 impl Router {
     pub(super) async fn handle_command(
@@ -205,7 +205,7 @@ impl Router {
                 self.emit(RunEvent::Error {
                     session_id: session,
                     run_id,
-                    code: router_error_code(&error).into(),
+                    code: error.code().into(),
                     message: error.to_string(),
                 });
                 Ok(())

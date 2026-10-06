@@ -35,6 +35,8 @@ struct SessionQueue {
 /// Một run đang chạy (đã spawn).
 #[derive(Debug, Clone)]
 pub(super) struct ActiveRun {
+    /// Session sở hữu run — lưu kèm để `running()` không phải tra cứu ngược.
+    pub session: SessionId,
     /// Kênh sở hữu run.
     pub channel: String,
     /// Chat sở hữu run.
@@ -105,6 +107,7 @@ impl RunQueue {
         self.active.insert(
             queued.run_id.clone(),
             ActiveRun {
+                session: queued.session_id,
                 channel: queued.incoming.channel.clone(),
                 chat_id: queued.incoming.chat_id.clone(),
                 cancel: queued.cancel.clone(),
@@ -210,18 +213,18 @@ impl RunQueue {
     }
 
     /// Danh sách run đang chạy, đọc nguyên tử cho `Sync`.
+    ///
+    /// `session` đọc thẳng từ [`ActiveRun`] thay vì quét ngược `queues` để tìm session
+    /// đang giữ `run_id`. Cách cũ tốn O(số queue) cho mỗi run **và** phải có nhánh lỗi:
+    /// khi không tìm thấy thì rơi về `SessionId::new(0)` — một session **giả** lọt
+    /// thẳng ra `Sync`, khiến client gắn run của session này vào session 0. Nay
+    /// không còn nhánh lỗi vì dữ liệu nằm ngay chỗ sinh ra nó.
     pub(super) fn running(&self) -> Vec<RunningInfo> {
         self.active
             .iter()
             .map(|(run_id, active)| RunningInfo {
                 run_id: run_id.clone(),
-                session_id: self
-                    .queues
-                    .iter()
-                    .find_map(|(session, queue)| {
-                        (queue.active.as_ref() == Some(run_id)).then_some(*session)
-                    })
-                    .unwrap_or_else(|| SessionId::new(0)),
+                session_id: active.session,
                 role: active.role.clone(),
             })
             .collect()

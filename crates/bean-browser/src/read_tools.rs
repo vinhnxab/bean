@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolOutput, wrap_bounded};
+use bean_tools::{ToolAccess, ToolCtx, ToolError, ToolOutput, wrap_bounded};
 use bean_types::config::{DEV_READ_TAG, TEST_RUN_TAG};
 use bean_types::{ImageBlock, Risk, ToolSpec};
 use schemars::JsonSchema;

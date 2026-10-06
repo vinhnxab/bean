@@ -16,6 +16,7 @@ use std::time::Duration;
 use bean_types::{ConfirmOutcome, Risk, RunEvent, RunId, SessionId};
 use tokio_util::sync::CancellationToken;
 
+use super::confirm::ConfirmRequest;
 use super::{Router, RouterInner, preview, remember_actor};
 use crate::run_io::{Decision, RunIo};
 
@@ -99,15 +100,15 @@ impl RunIo for RouterIo {
         let inner = self.inner.upgrade()?;
         let router = Router { inner };
         let (confirm_id, receiver) = router
-            .begin_confirm(
-                self.session_id,
-                &self.run_id,
+            .begin_confirm(ConfirmRequest {
+                session_id: self.session_id,
+                run_id: self.run_id.clone(),
                 risk,
-                prompt,
-                allow_in_session,
-                &self.user_id,
-                timeout,
-            )
+                prompt: prompt.to_string(),
+                allow_session_option: allow_in_session,
+                actor: self.user_id.clone(),
+                requested_timeout: timeout,
+            })
             .ok()?;
         let effective_timeout = timeout.min(router.inner.options.confirm_timeout);
         let mut receiver = receiver;

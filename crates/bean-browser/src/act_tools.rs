@@ -36,7 +36,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, wrap_bounded};
+use bean_tools::{ToolAccess, ToolCtx, ToolError, wrap_bounded};
 use bean_types::config::TEST_RUN_TAG;
 use bean_types::{Risk, ToolSpec};
 use schemars::JsonSchema;

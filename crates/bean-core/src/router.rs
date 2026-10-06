@@ -20,7 +20,7 @@ use bean_types::{
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::{AgentError, RunOutcome, RunTurnArgs, run_turn_outcome};
+use crate::agent::{RunOutcome, RunTurnArgs, run_turn_outcome};
 use crate::learning::{ReflectionArgs, reflect};
 use crate::run_io::Decision;
 use crate::store::{Store, StoreError};
@@ -331,7 +331,23 @@ struct RouterState {
     policies: HashMap<SessionId, Arc<SessionPolicy>>,
 }
 
+/// Kết quả [`Router::admit`]: `run_id` + `session` đã hợp lệ, kèm khoá submit.
+///
+/// Mang khoá theo mình (tên `_guard` cố ý) để khoá **sống tới hết thân hàm gọi** —
+/// nhờ vậy `enqueue` vẫn nằm trong vùng tuần tự hoá, y như khi `submit` tự giữ khoá.
+/// Nếu chỉ trả `run_id`/`session`, khoá sẽ rơi khi hàm `admit` trả về và `enqueue`
+/// chạy ngoài vùng bảo đảm — mất đúng tính tuần tự mà khoá này sinh ra.
+struct Admission<'a> {
+    /// Giữ khoá `submission` sống cho tới khi lượt đã được xếp hàng.
+    _guard: tokio::sync::MutexGuard<'a, ()>,
+    /// Run ID vừa cấp.
+    run_id: RunId,
+    /// Session đã resolve cho lượt này.
+    session: SessionId,
+}
+
 struct RouterInner {
+    /// Cấu hình có thể đổi lúc chạy (`/model`).
     config: RwLock<Config>,
     store: Arc<dyn Store>,
     registry: Arc<ToolRegistry>,
@@ -451,28 +467,49 @@ impl Router {
         }
     }
 
-    /// Submit trả `RunId` ngay; run LLM được spawn nền.
-    pub async fn submit(&self, incoming: Incoming) -> Result<RunId, RouterError> {
-        self.authorize(&incoming)?;
-        // (M21.1) Validate project trước khi xếp hàng — lỗi trả về cho adapter, không phải
-        // giữa run.
+    /// Cổng vào chung cho mọi lượt mới: phân quyền → validate project → xếp khoá
+    /// submit → cấp `run_id` → resolve session.
+    ///
+    /// # Vì sao tách riêng
+    ///
+    /// `submit` và `submit_scheduled` trước đây lặp lại **đúng** chuỗi này; chỉ khác
+    /// ở dòng cuối cùng (slash command hay `background_allowed_tools`). Hai bản có
+    /// thể lệch nhau khi thêm một bước kiểm tra mới và chỉ sửa một trong hai.
+    ///
+    /// # Errors
+    /// [`RouterError`] từ phân quyền, project lạ, sinh `run_id` hoặc store.
+    async fn admit(&self, incoming: &Incoming) -> Result<Admission<'_>, RouterError> {
+        self.authorize(incoming)?;
+        // (M21.1) Validate project trước khi xếp hàng — lỗi trả về cho adapter, không
+        // phải giữa run.
         {
             let config = read_lock(&self.inner.config)?;
-            self.resolve_project(&incoming, &config)?;
+            self.resolve_project(incoming, &config)?;
         }
-        let _submission = self.inner.submission.lock().await;
+        let guard = self.inner.submission.lock().await;
         let run_id = new_run_id()?;
-        let session = self.resolve_session(&incoming).await?;
+        let session = self.resolve_session(incoming).await?;
+        Ok(Admission {
+            _guard: guard,
+            run_id,
+            session,
+        })
+    }
+
+    /// Submit trả `RunId` ngay; run LLM được spawn nền.
+    pub async fn submit(&self, incoming: Incoming) -> Result<RunId, RouterError> {
+        let admission = self.admit(&incoming).await?;
+        let run_id = admission.run_id;
         let text = incoming.text.trim();
         if text.starts_with('/') {
-            self.handle_command(&incoming, session, run_id.clone(), text)
+            self.handle_command(&incoming, admission.session, run_id.clone(), text)
                 .await?;
             return Ok(run_id);
         }
 
         self.enqueue(QueuedRun {
             run_id: run_id.clone(),
-            session_id: session,
+            session_id: admission.session,
             role: self.current_role(&incoming),
             incoming,
             cancel: CancellationToken::new(),
@@ -490,17 +527,11 @@ impl Router {
         incoming: Incoming,
         allowed_tools: Vec<String>,
     ) -> Result<RunId, RouterError> {
-        self.authorize(&incoming)?;
-        {
-            let config = read_lock(&self.inner.config)?;
-            self.resolve_project(&incoming, &config)?;
-        }
-        let _submission = self.inner.submission.lock().await;
-        let run_id = new_run_id()?;
-        let session = self.resolve_session(&incoming).await?;
+        let admission = self.admit(&incoming).await?;
+        let run_id = admission.run_id;
         self.enqueue(QueuedRun {
             run_id: run_id.clone(),
-            session_id: session,
+            session_id: admission.session,
             role: self.current_role(&incoming),
             incoming,
             cancel: CancellationToken::new(),
@@ -717,7 +748,7 @@ impl Router {
                 }
             }
             Err(error) => {
-                let code = agent_error_code(&error);
+                let code = error.code();
                 self.emit_error(&queued, code, &error.to_string());
             }
         }
@@ -1143,32 +1174,21 @@ impl Router {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Đăng ký một yêu cầu xác nhận và phát `RunEvent::ConfirmRequest`.
+    ///
+    /// Nhận [`ConfirmRequest`] thay vì 7 đối số rời rạc: cấu trúc này đã dùng để gọi
+    /// [`ConfirmRegistry::begin`], truyền xuyên suốt giúp không lệch định nghĩa và bỏ
+    /// được `#[allow(clippy::too_many_arguments)]` trần.
+    ///
+    /// # Errors
+    /// [`RouterError::Random`] khi OS không cấp được entropy cho `confirm_id`.
     fn begin_confirm(
         &self,
-        session_id: SessionId,
-        run_id: &RunId,
-        risk: Risk,
-        prompt: &str,
-        allow_session: bool,
-        actor: &str,
-        requested_timeout: Duration,
+        request: ConfirmRequest,
     ) -> Result<(ConfirmId, oneshot::Receiver<Confirmation>), RouterError> {
         let (receiver, announce) = {
             let mut state = lock(&self.inner.state)?;
-            ConfirmRegistry::begin(
-                &mut state,
-                self.inner.options.confirm_timeout,
-                ConfirmRequest {
-                    session_id,
-                    run_id: run_id.clone(),
-                    risk,
-                    prompt: prompt.to_string(),
-                    allow_session_option: allow_session,
-                    actor: actor.to_string(),
-                    requested_timeout,
-                },
-            )?
+            ConfirmRegistry::begin(&mut state, self.inner.options.confirm_timeout, request)?
         };
         // Phát đúng những gì đã lưu trong sổ (`timeout`, `role`) — không tính lại,
         // nếu lệch thì UI đếm ngược và HUB gắn agent sẽ sai.
@@ -1326,34 +1346,4 @@ fn write_lock<T>(lock: &RwLock<T>) -> Result<RwLockWriteGuard<'_, T>, RouterErro
 
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
-}
-
-fn agent_error_code(error: &AgentError) -> &'static str {
-    match error {
-        AgentError::Store(_) => "store",
-        AgentError::Llm(_) => "llm",
-        AgentError::Cancelled => "cancelled",
-        AgentError::RepeatFailure(_) => "loop_guard",
-    }
-}
-
-fn router_error_code(error: &RouterError) -> &'static str {
-    match error {
-        RouterError::Forbidden(_) | RouterError::InvalidIdentity { .. } => "forbidden",
-        RouterError::InvalidProject(_) => "invalid_project",
-        RouterError::Store(_) => "store",
-        RouterError::Skill(_) => "skill_draft",
-        RouterError::Internal(_) => "internal",
-        RouterError::InvalidSession => "invalid_session",
-        RouterError::SessionBusy => "session_busy",
-        RouterError::UnknownCommand(_) => "unknown_command",
-        RouterError::ModelNotAllowed(_) => "model_not_allowed",
-        RouterError::ConfirmNotFound => "confirm_not_found",
-        RouterError::ConfirmForbidden => "confirm_forbidden",
-        RouterError::DuplicateChannel(_) => "duplicate_channel",
-        RouterError::NoRuntime => "no_runtime",
-        RouterError::StatePoisoned => "router_state",
-        RouterError::Random(_) => "random_unavailable",
-        RouterError::ToolNotExposed(_) => "tool_not_exposed",
-    }
 }
