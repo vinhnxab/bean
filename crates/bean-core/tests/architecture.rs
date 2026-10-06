@@ -51,15 +51,16 @@ fn count_router_modules() -> usize {
         .count()
 }
 
-/// Trần số dòng cho **mỗi** file module trong `src/router/`.
+/// Trần số dòng cho **mỗi** file module trực tiếp trong `subdir` (vd: `src/router`).
 const MODULE_LINE_BUDGET: usize = 600;
 
-/// Không module nào trong `src/router/` được vượt trần — kể cả file mới thêm sau này.
-#[test]
-fn router_modules_stay_under_line_budget() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/router");
+/// Không module nào trong `src/{subdir}/` được vượt trần — kể cả file mới thêm sau này.
+fn assert_modules_under_budget(subdir: &str) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join(subdir);
     let entries = std::fs::read_dir(&dir)
-        .unwrap_or_else(|error| panic!("không đọc được thư mục `src/router`: {error}"));
+        .unwrap_or_else(|error| panic!("không đọc được `{}`: {error}", dir.display()));
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "rs") {
@@ -74,6 +75,16 @@ fn router_modules_stay_under_line_budget() {
             );
         }
     }
+}
+
+#[test]
+fn router_modules_stay_under_line_budget() {
+    assert_modules_under_budget("router");
+}
+
+#[test]
+fn agent_modules_stay_under_line_budget() {
+    assert_modules_under_budget("agent");
 }
 
 #[test]
@@ -97,14 +108,15 @@ fn router_keeps_its_extracted_modules() {
     );
 }
 
-/// `agent.rs` từng là một hàm ~550 dòng; nay đã tách. Giữ hạn mức để nó không quay lại.
+/// `agent.rs` từng là một hàm ~550 dòng rồi phình tiếp; nay đã tách thành
+/// `agent/{run,tool_call,error}`. Giữ hạn mức để nó không quay lại.
 #[test]
 fn agent_file_stays_under_line_budget() {
     let lines = lines_of("src/agent.rs");
     assert!(
-        lines < 1200,
-        "`src/agent.rs` đã {lines} dòng (trần 1200). \
-         Vòng lặp đã tách `TurnState` + `Agent::run_tool_call`; phần mới phải đi tiếp \
-         hướng đó, không nhét lại vào `Agent::run`."
+        lines < 400,
+        "`src/agent.rs` đã {lines} dòng (trần 400). \
+         Giữ ở đây: types + facade `run_turn` + helper dùng chung; \
+         vòng lặp vào `agent/run`, thực thi vào `agent/tool_call`, lỗi vào `agent/error`."
     );
 }

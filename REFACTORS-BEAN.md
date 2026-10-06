@@ -300,6 +300,60 @@ vẫn xanh — hàng đợi theo phiên, confirm, cancel không đổi hành vi)
 
 ---
 
+## 6. `bean-core/agent.rs` → `agent/{run,tool_call,error}` (xong)
+
+**Vấn đề.** 1070 dòng; guardrail `agent_file_stays_under_line_budget` (trần 1200)
+đang ghi *"phần mới phải đi tiếp hướng đó, không nhét lại vào `Agent::run`"*.
+
+**Cách cắt** — cùng phương pháp "Option B" đã dùng cho router (giữ type + facade
+ở file mẹ, cắt hành vi ra):
+
+```text
+agent.rs (1070 → 255)   header/consts, RunTurnArgs, Agent, Turn, TurnState,
+                        EndReason, RunOutcome, facade run_turn/run_turn_outcome,
+                        helper dùng chung append_run_message, mod + re-export
+agent/
+├─ run.rs (374)         StreamResponseBuilder + impl Agent::run + finish/budget/empty notice
+├─ tool_call.rs (436)   impl Agent::run_tool_call + record_audit/execute_tool/
+│                       truncate_output/args_preview/hash_args + truncate_tests
+└─ error.rs (40)        AgentError + impl + From<LlmError>
+```
+
+**Điểm kỹ thuật của lần này:**
+
+- **Cắt giữa một khối `impl` duy nhất** (`impl<'a> Agent<'a> { ... }` dài 575
+  dòng): `run` đóng ở 543, phần còn lại là doc + `run_tool_call`. Chia thành
+  **hai `impl` block** ở hai file — hợp lệ và giữ nguyên mọi method.
+- **Anchor verify đã cứu đúng một lần:** lần chạy đầu script báo
+  `ANCHOR FAIL run.B end: line 548 expected '    }', got '/// gọi này...'` —
+  dòng 548 vẫn là **doc comment** của `run_tool_call`, không phải đóng hàm.
+  Sửa range (đóng ở 543, doc 544–553) thay vì ép cắt. Fail-loudly đúng nghĩa.
+- `run_tool_call` nâng `pub(super)` (điều kiện duy nhất phải đổi visibility):
+  `run()` ở `run.rs` gọi nó. Các helper cùng file giữ `private`.
+- `append_run_message` do **cả hai nửa cùng gọi** → ở lại file mẹ (điểm 7 của
+  quy trình, đúc từ bài học router).
+- Test `truncate_tests` di chuyển theo `truncate_output`; import
+  `super::{MAX_TOOL_OUTPUT_CHARS, ...}` vỡ vì hằng số nằm ở **grandparent**
+  → đổi thành `super::super::MAX_TOOL_OUTPUT_CHARS` ngay trong script.
+- **Lần thứ hai liên tiếp build xanh ngay lần đầu** — 0 lỗi, 0 warning
+  (glob `use super::*` + header giữ nguyên + `pub(super)` chủ động).
+
+**Guardrail siết thêm:**
+- `agent_file_stays_under_line_budget` 1200 → **400** (file thật 255), message
+  đổi theo cấu trúc module mới.
+- Test per-module generalize: `assert_modules_under_budget(subdir)` dùng chung
+  cho `router` **và** `agent` (mỗi file < 600 dòng).
+
+**Kiểm chứng:** `cargo fmt --check` ✅ · `clippy --workspace -D warnings` ✅ ·
+`cargo test --workspace` ✅ **75 suite, 0 fail** (5/5 guardrail `bean-core`;
+suite `agent_loop` + `tests/router.rs` không đổi) · `make types` không lệch ✅ ·
+`pnpm tsc --noEmit` ✅.
+*Ghi nhận flaky có sẵn, không liên quan refactor:* `bean-scan` fail một lần ở
+`Text file busy (os error 26)` (ETXTBSY khi chạy song song full workspace) —
+crate không phụ thuộc bean-core, chạy standalone **pass 2 lần liên tiếp**.
+
+---
+
 ## Quy trình đã chốt (dùng cho các đợt tách sau)
 
 1. **Khảo sát trước, đo trước** — không đoán số dòng hay số hàm.
