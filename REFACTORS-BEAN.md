@@ -354,6 +354,163 @@ crate không phụ thuộc bean-core, chạy standalone **pass 2 lần liên ti�
 
 ---
 
+## 7. `bean-security/web.rs` → `web/{fetch,search,tests}.rs` (xong)
+
+**Vấn đề.** File 967 dòng gộp hai tool độc lập (`web_fetch` + `web_search`)
+chung một file, vi phạm SRP: sửa SSRF của fetch có thể chạm search và ngược lại.
+Logic tìm kiếm (provider Tavily/Brave/SearXNG + parse response) chiếm gần nửa file.
+
+**Cách cắt** — theo **ranh giới tool**, mỗi tool một module:
+
+```text
+web/
+├─ fetch.rs (188)    tool `web_fetch` + helpers bọc untrusted
+├─ search.rs (431)   tool `web_search` + client/provider tìm kiếm
+└─ tests.rs (328)    test tích hợp cả hai tool (`#[cfg(test)]`)
+```
+
+Facade 43 dòng: 4 hằng số trần ký tự + mod/re-export. Không đổi logic nào.
+
+**Điểm kỹ thuật của lần này:**
+
+- 4 hằng số `MAX_*_CHARS` ở lại file mẹ (điểm 7 của quy trình — cả `fetch`
+  và `search` cùng dùng, chuyển xuống con là phải `pub` ngược lên).
+- Test dời nguyên khối theo `web_fetch`/`web_search`; `use super::*` vỡ vì
+  helper nằm ở **sibling** → import tường minh từ `super::fetch`/`super::search`.
+- `web_search_with_client` là API test dùng ngoài crate → giữ `pub` + re-export
+  ở facade, không hạ thành `pub(crate)`.
+
+**Guardrail:** `bean-security/tests/architecture.rs` (3 test: facade < 100 dòng,
+`web/` ≥ 3 module, mỗi module < 600 dòng).
+
+**Kiểm chứng:** `cargo fmt --check` ✅ · `clippy -p bean-security -p bean-tools
+-D warnings` ✅ · `cargo test --workspace` ✅ **82 suite, 0 fail** ·
+`make types` + `git diff --exit-code` generated ✅.
+
+---
+
+## 8. `bean-tools/mcp.rs` → `mcp/{config,connection,runtime,tool,tests}.rs` (xong)
+
+**Vấn đề.** File 930 dòng gộp 5 trách nhiệm: timeout/error thuần, spawn/handshake,
+runtime nhiều server, wrapper `Tool`, test — sửa reconnect có thể chạm render
+response. `ClientService`/`McpCallFailure` là chi tiết nội bộ nhưng nằm chung
+với API công khai (`McpRuntime`, `McpTimeouts`).
+
+**Cách cắt** — theo **vòng đời kết nối**:
+
+```text
+mcp/
+├─ config.rs (210)       McpTimeouts + McpError + helpers thuần
+│                        (looks_sensitive, inherited_env, effective_call_timeout,
+│                        validate_spawn_config, sanitize_message)
+├─ connection.rs (184)   McpConnection: spawn/handshake/discovery/call/close
+├─ runtime.rs (132)      McpRuntime: nhiều server + register vào registry
+├─ tool.rs (251)         McpTool: wrapper Tool + risk theo trust
+└─ tests.rs (208)        unit test (hàm thuần + validate, không cần server thật)
+```
+
+Facade 16 dòng: doc + mod + re-export. Không đổi logic nào.
+
+**Điểm kỹ thuật của lần này:**
+
+- `ClientService`/`McpCallFailure` vào `config.rs` ở dạng `pub(crate)` —
+  chi tiết nội bộ nhưng 3 module cùng cần (đúc từ bài học anchor router).
+- `McpTool::new` nâng `pub(crate)` (runtime gọi); `McpError`/`McpTimeouts`
+  re-export ở facade giữ API ngoài nguyên vẹn (`bean/src/chat.rs`,
+  `bean-mcp-test-server` không phải sửa import nào).
+- Script cắt fail-loudly đúng một lần ở anchor (`struct McpConnection`
+  ở dòng 273, không phải 275 như grep báo) — sửa mốc thay vì ép cắt.
+
+**Guardrail:** `bean-tools/tests/architecture.rs` (3 test, cùng mẫu web:
+facade < 100 dòng, `mcp/` ≥ 5 module, mỗi module < 600 dòng).
+
+**Kiểm chứng:** chung đợt với mục 7 (một lần `cargo test --workspace` cho cả hai).
+
+---
+
+## 7. `bean-security/web.rs` → 4 module (xong)
+
+**Vấn đề.** File 967 dòng gộp hai tool (`web_fetch` 150 + `web_search` 390) và 328
+dòng test — sửa tool này dễ chạm tool kia, trong khi `web_fetch`/`web_search` có
+trách nhiệm khác nhau rõ rệt (fetch tải 1 URL qua `SafeHttpClient`; search điều
+phối nhiều provider + cắt output + escape thẻ đóng). Không có guardrail canh.
+
+**Cách cắt** — theo **ranh giới tool**, không chia đều số dòng:
+
+```text
+web.rs (43)                header + 4 const trần ký tự + mod + re-export
+web/
+├─ fetch.rs (188)          WebFetchParams + web_fetch + wrap helpers
+├─ search.rs (431)         WebSearchParams + SearchConfigError + web_search +
+│                          provider (tavily/brave/searxng) + truncate/escape
+└─ tests.rs (328)          test tích hợp cả hai tool (#[cfg(test)])
+```
+
+Kết quả: file mẹ **967 → 43** dòng (−96%). `pub use` giữ API ngoài nguyên vẹn
+(`WebFetchParams`, `web_fetch`, `SearchConfigError`, `WebSearchParams`,
+`web_search`). Không đổi logic nào.
+
+**Điểm kỹ thuật của lần này:**
+
+- `use super::*` vỡ vì consts nằm ở **grandparent** sau tách → đổi thành
+  `super::super::MAX_*_CHARS` ngay trong script (bài học giống `agent/`).
+- `web_search_with_client` (helper test/provider thật) nâng `pub(crate)` để
+  `tests.rs` dùng; hai test provider thật (`test_search_provider_*`, `#[ignore]`)
+  di chuyển theo `search.rs`.
+- Một lần `sed` chèn `use super::*;` trùng 2 lần → build báo duplicate; bỏ dòng
+  thừa, giữ import tường minh.
+
+**Guardrail mới** (`bean-security/tests/architecture.rs`): facade < 100 dòng,
+`web/` ≥ 3 module, mỗi module < 600 dòng.
+
+**Kiểm chứng:** `cargo fmt --check` ✅ · `clippy --workspace -D warnings` ✅ ·
+`cargo test --workspace` ✅ (guardrail `web_*` 3/3 pass) · `make types` không lệch ✅.
+
+---
+
+## 8. `bean-tools/mcp.rs` → 6 module (xong)
+
+**Vấn đề.** File 930 dòng gộp 5 trách nhiệm trong một khối: timeout/error/sanitize
+(thuần) + spawn/handshake/discovery (vòng đời 1 server) + runtime nhiều server +
+wrapper `Tool` cho tool từ xa + test. `McpTool` lại phụ thuộc ngược field private
+của `McpConnection` — cắt sai hướng là phải nâng visibility hàng loạt.
+
+**Cách cắt** — theo **trách nhiệm vòng đời**, giữ `struct` state ở file cha:
+
+```text
+mcp.rs (16)                doc + mod + re-export (McpError, McpTimeouts, McpRuntime)
+mcp/
+├─ config.rs (210)         McpTimeouts/Default + McpError + McpCallFailure +
+│                          ClientService + hàm thuần (sensitive/env/timeout/validate)
+├─ connection.rs (184)     McpConnection: spawn/handshake/discovery/call/close
+├─ runtime.rs (132)        McpRuntime: nhiều server + register vào registry
+├─ tool.rs (251)           McpTool + risk_for_trust + has_readable_text + render
+└─ tests.rs (208)          unit test (hàm thuần + validate, không cần server thật)
+```
+
+Kết quả: file mẹ **930 → 16** dòng (−98%). API ngoài giữ nguyên
+(`McpTimeouts`, `McpError`, `McpRuntime`); `effective_call_timeout` chỉ còn
+`pub(crate)` (runtime dùng nội bộ). Không đổi logic nào.
+
+**Điểm kỹ thuật của lần này:**
+
+- Chia sẻ ngang qua `config.rs`: `ClientService` + `McpCallFailure` định nghĩa
+  một lần ở `pub(crate)`, các module khác dùng — tránh vòng import.
+- `McpConnection` fields giữ private; `connection.rs` cung cấp API `pub(crate)`
+  (`name()`, `spawn()`, `discover()`, `call()`, `close()`) cho `runtime.rs`.
+- `McpTool::new` nâng `pub(crate)` duy nhất để `runtime.rs` dựng tool.
+- Script tách **fail-loudly đúng 1 lần**: anchor line 274/275 lệch 1 (doc comment
+  `/// Chuỗi...` vs `struct McpConnection`) — sửa mốc thay vì ép cắt.
+
+**Guardrail mới** (`bean-tools/tests/architecture.rs`): facade < 100 dòng,
+`mcp/` ≥ 5 module, mỗi module < 600 dòng.
+
+**Kiểm chứng:** `cargo fmt --check` ✅ · `clippy --workspace -D warnings` ✅ ·
+`cargo test --workspace` ✅ **75 suite, 0 fail** (mcp 31 test + guardrail 3/3) ·
+`make types` không lệch ✅.
+
+---
+
 ## Quy trình đã chốt (dùng cho các đợt tách sau)
 
 1. **Khảo sát trước, đo trước** — không đoán số dòng hay số hàm.
