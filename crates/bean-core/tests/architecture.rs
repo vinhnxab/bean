@@ -22,13 +22,15 @@ use std::path::Path;
 /// File lõi của điều phối — thứ dễ phình nhất trong crate.
 const ROUTER_FILE: &str = "src/router.rs";
 
-/// Trần số dòng của `router.rs`. Hiện tại ~1360; chừa biên nhỏ có chủ ý để tách
-/// một mảng mà không phải sửa hằng số.
-const ROUTER_LINE_BUDGET: usize = 1400;
+/// Trần số dòng của `router.rs`. Sau khi tách (2026-10-05) file chỉ còn **hợp đồng
+/// công khai + state + helpers (~215 dòng)**; phần intake/run/status/decision/dispatch
+/// đã nằm ở `router/{admit,run,status,decision,dispatch}.rs`. Chừa biên nhỏ có chủ ý
+/// để thêm một phương thức mới mà không phải sửa hằng số.
+const ROUTER_LINE_BUDGET: usize = 300;
 
 /// Số module tối thiểu dưới `router/`. Mỗi module là **một trách nhiệm đã tách**;
 /// gộp lại về một file là đúng hướng ngược lại.
-const MIN_ROUTER_MODULES: usize = 8;
+const MIN_ROUTER_MODULES: usize = 14;
 
 /// Đọc file và trả về số dòng (không tính dòng trống cuối cùng).
 fn lines_of(relative: &str) -> usize {
@@ -49,13 +51,38 @@ fn count_router_modules() -> usize {
         .count()
 }
 
+/// Trần số dòng cho **mỗi** file module trong `src/router/`.
+const MODULE_LINE_BUDGET: usize = 600;
+
+/// Không module nào trong `src/router/` được vượt trần — kể cả file mới thêm sau này.
+#[test]
+fn router_modules_stay_under_line_budget() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/router");
+    let entries = std::fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("không đọc được thư mục `src/router`: {error}"));
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("không đọc được `{}`: {error}", path.display()));
+            let lines = text.lines().count();
+            assert!(
+                lines < MODULE_LINE_BUDGET,
+                "`{}` đã {lines} dòng (trần {MODULE_LINE_BUDGET}). \
+                 Tách theo trách nhiệm nghiệp vụ thay vì phình thêm.",
+                path.display()
+            );
+        }
+    }
+}
+
 #[test]
 fn router_file_stays_under_line_budget() {
     let lines = lines_of(ROUTER_FILE);
     assert!(
         lines < ROUTER_LINE_BUDGET,
         "`{ROUTER_FILE}` đã {lines} dòng (trần {ROUTER_LINE_BUDGET}). \
-         Tách tiếp phần còn lại (execute / spawn_reflection / intake) ra module \
+         Tách phần mới ra module con (chỉ giữ hợp đồng, state, helpers ở đây) \
          thay vì nhét thêm vào đây."
     );
 }

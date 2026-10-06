@@ -239,6 +239,67 @@ các crate khác (`ConfigError`, `TelegramConfig`, `validate_scope_value`, ...).
 
 ---
 
+## 5. `bean-core/router.rs` → 6 module con (xong)
+
+**Vấn đề.** File 1349 dòng — sáu khối `impl Router` nằm chồng lên nhau: intake,
+vòng đời run, quan sát/điều khiển, quyết định, outbox. `tests/architecture.rs`
+của chính crate này **chỉ đích danh việc phải tách** (thông báo fail ghi rõ
+"`execute / spawn_reflection / intake`").
+
+**Cách cắt** — tách **toàn bộ khối `impl`**, không chia nhỏ method trong khối:
+
+```text
+router.rs (1349 → 211)   header, consts, Channel, state structs, helpers, re-export
+router/
+├─ types.rs (241)        Channel, Incoming, RouterError, RouterOptions/Dep, snapshot
+├─ admit.rs (222)        khởi tạo, register_channel, submit, admit, resolve session
+├─ run.rs (283)          enqueue, spawn, execute, spawn_reflection, finish
+├─ status.rs (228)       snapshot, cancel, registry, call_tool_as
+├─ decision.rs (125)     resolve_confirm, begin/expire, duyệt skill nháp
+└─ dispatch.rs (80)      notify, outbox worker, emit/emit_error
+```
+
+File lớn nhất: **1349 → 211** (−84%); `router/` từ 8 → 14 module.
+
+**Phương pháp "Option B" — khác hai lần trước có chủ ý:** thay vì chuyển struct
+theo, giữ **state structs + helpers định nghĩa ở file cha** (`QueuedRun`,
+`RouterInner`, `Router`, `lock`, `preview`...). Lý do: field/method `private`
+trong file cha **vẫn thấy được từ mọi module con** (descendant visibility) —
+cắt 6 khối impl ra riêng mà **không phải đổi một visibility field nào**. Nếu
+tách struct sang file sibling thì mọi field phải nâng `pub(super)` (thử nghiệm
+tâm lý: vài chục lỗi compiler cho một refactor không cần thiết).
+
+Chỉ riêng các **method private bị cắt khỏi file mẹ** (được `command.rs`/`io.rs`
+gọi qua `self.emit(...)`) nâng chủ động `pub(super)` ngay trong script — thay vì
+chờ compiler chỉ từng lỗi.
+
+**Anchor verify trước khi cắt:** script assert tiền tố dòng mở đầu và dòng `}`
+đóng của từng range (fail-loudly, không cắt khi lệch một ký tự) — số dòng đã
+biết trước nhờ khảo sát nên check được từng mốc.
+
+**Một lỗi suýt xảy ra:** regex `^    fn ` trong script rewrite sẽ chạm đúng
+`fn default()` của **trait impl** `impl Default for RouterOptions` — thêm
+`pub(super)` vào trait impl là lỗi compile. Script phải track `impl X for Y`
+và bỏ qua. Đã bắt trước khi chạy.
+
+**Kết quả build khác mọi lần trước:** `cargo build -p bean-core` **xanh ngay
+lần chạy đầu tiên — 0 lỗi, 0 warning** (các lần trước đều phải 2–3 đợt sửa
+import). Bài học tái sử dụng: glob `use super::*` + giữ parent imports +
+`pub(super)` chủ động = không cần iteration.
+
+**Guardrail siết lại đúng tinh thần test yêu cầu:**
+- `ROUTER_LINE_BUDGET` 1400 → **300** (file thật 211), cập nhật doc giải thích.
+- `MIN_ROUTER_MODULES` 8 → **14**.
+- Test mới `router_modules_stay_under_line_budget`: **mỗi** file trong
+  `src/router/` < 600 dòng — chặn module mới phình, không chỉ `router.rs`.
+
+**Kiểm chứng:** `cargo fmt --check` ✅ · `clippy --workspace -D warnings` ✅ ·
+`cargo test --workspace` ✅ **76 suite, 0 fail** (16 test `tests/router.rs`
+vẫn xanh — hàng đợi theo phiên, confirm, cancel không đổi hành vi) ·
+4/4 guardrail `bean-core` · `make types` không lệch ✅ · `pnpm tsc --noEmit` ✅.
+
+---
+
 ## Quy trình đã chốt (dùng cho các đợt tách sau)
 
 1. **Khảo sát trước, đo trước** — không đoán số dòng hay số hàm.
@@ -249,6 +310,10 @@ các crate khác (`ConfigError`, `TelegramConfig`, `validate_scope_value`, ...).
 5. **Test trước khi commit**, tối thiểu: `clippy --workspace -D warnings` +
    `cargo test --workspace` + `cargo fmt --check` + `make types`.
 6. **Thêm guardrail** để công việc này không phải làm lại lần nữa.
+7. **Giữ struct state ở file mẹ khi nhiều module con cùng dùng** — field private
+   của struct ở file cha thấy được từ mọi descendant; chuyển sang file sibling
+   là phải nâng `pub(super)` hàng loạt. Cắt theo **khối `impl`** khi khối đã
+   đủ trách nhiệm; nâng `pub(super)` chủ động cho method bị rời khỏi file mẹ.
 
 ## Nợ kỹ thuật còn lại (chưa làm, cần đổi chữ ký ở nhiều crate)
 
