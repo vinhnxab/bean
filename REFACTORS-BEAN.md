@@ -177,6 +177,68 @@ thêm hằng mới là thay đổi hành vi, phải tách riêng.
 
 ---
 
+## 4. `bean-types/config.rs` → 14 module (xong)
+
+**Vấn đề.** File 2372 dòng — lớn nhất workspace — trộn 16 section của `bean.toml`
+(mục 18), bốn khối `impl Config` (nạp, truy vấn, validate ~700 dòng, resolve secret)
+và mọi validator của sản phẩm. Sửa một quy tắc validate phải lội qua file chứa
+secret và RBAC.
+
+Config là **nguồn quyết định an toàn**: `validate()` chặn tổ hợp vô nghĩa trước khi
+agent chạy, `resolve_*` giữ bí mật không lọt vào prompt. Hai việc đó phải tách bạch.
+
+**Cách cắt** — theo **section `bean.toml`** (mục 18) + theo **trách nhiệm**:
+
+```text
+config/
+├─ mod.rs (229)               Config, ResolvedSecrets, 16 hằng số, bản đồ, re-export
+├─ error.rs (54)              ConfigError, invalid, expand_tilde
+├─ enums.rs (117)             enum dùng chung (LlmProviderKind, SandboxMode, ...)
+├─ agent.rs (174)             [agent] [roles] [projects] [data]
+├─ llm.rs (92)                [llm] [tools.web_search] [learning]
+├─ tools.rs (80)              [tools] [security.sandbox] [security]
+├─ channels.rs (86)           [web] [telegram]
+├─ integrations.rs (176)      [[mcp_servers]] [mcp] [browser]
+├─ products.rs (260)          [billing] [scan] [marketing] [qa]
+├─ load.rs (73)               load / load_or_default / validate
+├─ access.rs (127)            accessor rbac / role / mcp / project
+├─ validate.rs (466)          validate lõi + validator free fn
+├─ validate_integrations.rs (395) validate tích hợp
+└─ secrets.rs (193)           resolve_* từ biến môi trường
+```
+
+File sản phẩm lớn nhất: **2372 → 466** dòng (−80%).
+
+**Lần đầu dùng script hóa** (2372 dòng lớn hơn mọi lần trước): Python parse item theo
+cột 0 → chia từng method trong `impl Config` → gán vào file theo bảng, fail-loudly khi
+có item chưa khớp. Ba bug của chính script, bắt được trước khi xoá bản gốc:
+
+1. Comment/attr dẫn dắt item phải gộp **vào item sau**, không phải item trước.
+2. `end` của method k phải là `start` của method k+1 (sau khi lùi qua comment dẫn dắt);
+   lấy dòng `fn` của k+1 thì comment bị **nhân đôi** ở hai đầu.
+3. Lùi `-1` mù để tìm `}` đóng impl trượt khi block có dòng trắng cuối → thừa `}`.
+   Cách đúng: tìm dòng `}` ở cột 0.
+
+**Không đổi hành vi.** `validate()` ở bản gốc gọi `validate_mcp_servers()` **hai lần**
+(dòng 1225–1226) — giữ nguyên; tách file là refactor thuần, sửa hành vi là việc khác.
+
+**Visibility học được:** `use super::*` chỉ thấy mục `pub` được `mod.rs` re-export.
+Helper nội bộ dùng giữa các module con (`invalid`, `expand_tilde`,
+`validate_origin_pattern`, ...) phải là `pub(super)` **và** import tường minh
+(`use super::error::invalid;`); method validator của `Config` cũng nâng lên
+`pub(super)` vì `load.rs` gọi `validate_core` nằm ở file khác.
+
+**Guardrail mới** `crates/bean-types/tests/architecture.rs` (4 test): trần 600 dòng/file,
+tối thiểu 12 module, doc `mod.rs` nhắc đủ 13 file, và re-export đủ hợp đồng API với
+các crate khác (`ConfigError`, `TelegramConfig`, `validate_scope_value`, ...).
+
+**Kiểm chứng:** `cargo fmt --check` ✅ · `clippy --workspace -D warnings` ✅ ·
+`cargo test --workspace` ✅ **75/75 suite** (thêm 1 suite guardrail) ·
+`tests/config.rs` 44/44 · 4/4 guardrail · `make types` không lệch ✅ ·
+`pnpm tsc --noEmit` ✅.
+
+---
+
 ## Quy trình đã chốt (dùng cho các đợt tách sau)
 
 1. **Khảo sát trước, đo trước** — không đoán số dòng hay số hàm.
@@ -192,5 +254,4 @@ thêm hằng mới là thay đổi hành vi, phải tách riêng.
 
 - `trait Store` (bean-memory) vẫn gộp 8 nhóm nghiệp vụ — vi phạm ISP.
 - `bean-tools/src/registry.rs` giữ workspace + project workspace trong một struct.
-- `bean-channels/src/telegram.rs` 1992 dòng — chưa tách, chưa có guardrail.
 - `bean-llm/src/openai_compat.rs` 636 dòng — chưa tách.
