@@ -28,8 +28,8 @@ use super::types::{
     ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
 };
 
-// TODO: Uncomment after completing trait segregation in solid-store/traits.rs
-// pub use crate::store::solid_store::traits::*;
+// TODO: Uncomment after completing trait segregation in store_traits/traits.rs
+// pub use crate::store::store_traits::traits::*;
 
 #[async_trait::async_trait]
 pub trait Store: Send + Sync {
