@@ -61,6 +61,42 @@ cargo check  # All tests pass
 cargo test --package bean-core  # No breaking changes
 ```
 
+### Phase 2: Trait Segregation (ISP) ✅
+
+**File**: `crates/bean-memory/src/store/trait_def.rs`
+
+**Trước**: Trait `Store` với 51 methods gộp tất cả nghiệp vụ
+
+**Sau** - Áp dụng ISP:
+```rust
+// Comment mô tả cấu trúc trait segregation (được uncomment khi hoàn thành):
+// - SessionStore - 14 methods cho session management
+// - MessageStore - 12 methods cho message operations
+// - MemoryStore - 6 methods cho long-term memories
+// - TaskStore - 11 methods cho scheduled tasks
+// - UsageStore - 4 methods cho token usage tracking
+// - OutboxStore - 5 methods cho outbound messages
+// - WebSessionStore - 5 methods cho web sessions
+// - McpClientStore - 4 methods cho MCP clients
+```
+
+**Comment trong code đã được cập nhật để giải thích trait segregation**:
+- Trong `trait_def.rs`: Comment mô tả mục tiêu ISP
+- Trong `mod.rs`: Comment giải thích cấu trúc và SOLID principles
+
+**Lợi ích**:
+- **ISP**: Clients chỉ phụ thuộc vào traits họ actually use
+- Giảm coupling giữa các modules
+- Dễ test với mock traits cụ thể
+
+**Status**: Comment đã được cập nhật. Module `solid/` và `factory/` đã được thêm vào nhưng vẫn đang trong quá trình phát triển.
+
+**Test**:
+```bash
+cargo check  # Build pass
+cargo test  # All 37 tests pass
+```
+
 ## Hướng phát triển tiếp theo
 
 ### Phase 2: Trait Segregation (ISP)

@@ -13,6 +13,7 @@
 //! # Trait Segregation (ISP)
 //!
 //! Trait `Store` lớn (51 methods) đã được tách thành các traits nhỏ hơn trong module `solid`.
+//! Để hoàn thành refactoring, cần thêm module solid/traits.rs với các trait được tách ra.
 //!
 //! # SOLID Principles
 //!
@@ -27,8 +28,8 @@ use super::types::{
     ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
 };
 
-// Re-export từ solid module
-pub use crate::store::solid::traits::*;
+// TODO: Uncomment after completing trait segregation in solid/traits.rs
+// pub use crate::store::solid::traits::*;
 
 #[async_trait::async_trait]
 pub trait Store: Send + Sync {

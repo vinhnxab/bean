@@ -63,7 +63,6 @@ mod budget;
 mod compaction;
 mod memory;
 mod shared;
-mod solid;
 mod sqlite;
 mod trait_def;
 mod types;
@@ -104,5 +103,5 @@ pub use types::{
     WebSessionInfo,
 };
 
-// Re-export từ solid module
-pub use solid::traits::*;
+// TODO: Re-export từ solid module khi trait segregation được hoàn thành
+// pub use solid::traits::*;
