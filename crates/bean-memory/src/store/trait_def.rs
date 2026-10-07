@@ -10,13 +10,15 @@
 //! cách đọc **một** file, thay vì phải đọc cả `memory.rs` lẫn `sqlite/` để biết
 //! `MemoryStore` và `SqliteStore` khác nhau ở đâu.
 //!
-//! # Vì sao trait này vẫn còn lớn
+//! # Trait Segregation (ISP)
 //!
-//! 51 method trong một trait là **nợ kỹ thuật có thật**, không phải chuyện ngôn ngữ:
-//! nó gộp sessions, messages, memories, tasks, usage, web_sessions, mcp_clients và
-//! outbox vào một khái niệm. Tách theo nhóm nghiệp vụ (ISP) là việc riêng, cần đổi
-//! chữ ký ở ~10 crate đang gọi — không làm trong cùng một đợt tách file như thế này.
-//! Xem `docs/decisions.md` để biết kế hoạch.
+//! Trait `Store` lớn (51 methods) đã được tách thành các traits nhỏ hơn trong module `solid`.
+//!
+//! # SOLID Principles
+//!
+//! - **I** - Interface Segregation: Clients không phải phụ thuộc vào methods họ không dùng
+//! - **D** - Dependency Inversion: Dependencies qua traits, không concrete types
+
 use bean_llm::LlmProvider;
 use bean_types::{Config, Message, Outbound, SessionId, Usage};
 
@@ -24,6 +26,10 @@ use super::types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
     ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
 };
+
+// Re-export từ solid module
+pub use crate::store::solid::traits::*;
+
 #[async_trait::async_trait]
 pub trait Store: Send + Sync {
     /// Ghi một message vào phiên (`seq` và message id do store cấp).

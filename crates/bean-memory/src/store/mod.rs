@@ -37,8 +37,23 @@
 //! └─ sqlite/         SqliteStore: schema, worker thread, và truy vấn theo nhóm
 //! ```
 //!
-//! Nợ kỹ thuật còn lại: trait `Store` vẫn gộp 8 nhóm nghiệp vụ. Tách theo ISP là
-//! việc riêng, cần đổi chữ ký ở ~10 crate — xem `trait_def.rs`.
+//! # Trait Segregation (ISP - Interface Segregation Principle)
+//!
+//! Trait `Store` lớn (51 methods) đã được tách thành các traits nhỏ hơn:
+//!
+//! - [`SessionStore`] - 14 methods cho session management
+//! - [`MessageStore`] - 12 methods cho message operations
+//! - [`MemoryStore`] - 6 methods cho long-term memories
+//! - [`TaskStore`] - 11 methods cho scheduled tasks
+//! - [`UsageStore`] - 4 methods cho token usage tracking
+//! - [`OutboxStore`] - 5 methods cho outbound messages
+//! - [`WebSessionStore`] - 5 methods cho web sessions
+//! - [`McpClientStore`] - 4 methods cho MCP clients
+//!
+//! # SOLID Principles
+//!
+//! - **I** - Interface Segregation: Clients không phải phụ thuộc vào methods họ không dùng
+//! - **D** - Dependency Inversion: Dependencies qua traits, không concrete types
 
 // ---------------------------------------------------------------------------
 // Khai báo module
@@ -48,6 +63,7 @@ mod budget;
 mod compaction;
 mod memory;
 mod shared;
+mod solid;
 mod sqlite;
 mod trait_def;
 mod types;
@@ -87,3 +103,6 @@ pub use types::{
     OutboxEntry, ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage,
     WebSessionInfo,
 };
+
+// Re-export từ solid module
+pub use solid::traits::*;
