@@ -1,7 +1,8 @@
+import gsap from "gsap";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
-
 import { useI18n } from "@/i18n";
+import { Enter, useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
 
 /** Chiều cao tối đa trước khi khung bắt đầu cuộn bên trong. */
@@ -44,6 +45,22 @@ export function Composer({
 }: ComposerProps) {
   const { t } = useI18n();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const actionRef = useRef<HTMLButtonElement>(null);
+
+  // Gửi ↔ Dừng là hai nút khác nhau (hai nhánh JSX), nên mỗi lần đổi là một
+  // phần tử mới mount: bung nhẹ vào để mắt thấy cuộc trao đổi trạng thái, thay
+  // vì nút "đột nhiên" đổi hình.
+  useGsapAnimate(() => {
+    const element = actionRef.current;
+    if (!element) return;
+    gsap.from(element, {
+      opacity: 0,
+      scale: 0.6,
+      duration: 0.35,
+      ease: "back.out(2.2)",
+      clearProps: "opacity,transform",
+    });
+  }, [canStop]);
 
   /**
    * Tự giãn theo nội dung.
@@ -111,6 +128,7 @@ export function Composer({
           />
           {canStop ? (
             <button
+              ref={actionRef}
               type="button"
               onClick={onStop}
               disabled={stopping}
@@ -122,6 +140,7 @@ export function Composer({
             </button>
           ) : (
             <button
+              ref={actionRef}
               type="submit"
               disabled={!canSend}
               aria-label={t("chat.send")}
@@ -135,9 +154,11 @@ export function Composer({
           )}
         </div>
         {sendError ? (
-          <p className="mt-2 text-sm text-alert" role="alert">
-            {t("chat.sendError")}
-          </p>
+          <Enter kind="shake">
+            <p className="mt-2 text-sm text-alert" role="alert">
+              {t("chat.sendError")}
+            </p>
+          </Enter>
         ) : (
           // Gợi ý phím tắt ở độ mờ thấp, chỉ đọc được khi người dùng chủ động
           // tìm — không phải dòng chữ cạnh tranh với lời cuội.

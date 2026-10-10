@@ -37,6 +37,35 @@ beforeAll(() => {
 });
 
 /**
+ * jsdom KHÔNG có `window.matchMedia` (kiểm chứng được: `typeof matchMedia ===
+ * "undefined"`), mà GSAP (`gsap.matchMedia`) gọi nó khi mount. Polyfill tối
+ * giản, có chủ đích theo truy vấn:
+ *
+ * - `(prefers-reduced-motion: no-preference)` → `true`: đường animate CHẠY thật
+ *   trong test, nên lỗi API GSAP sai sẽ lộ ra ngay thay vì bị che.
+ * - `(prefers-reduced-motion: reduce)` → `false`: test riêng có thể override
+ *   window.matchMedia để kiểm hành vi giảm chuyển động.
+ *
+ * Listener chỉ no-op: không test nào đổi cài đặt giữa chừng.
+ */
+beforeAll(() => {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList => ({
+      matches: query.includes("no-preference"),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+});
+
+/**
  * Radix (dropdown, dialog) khi đóng một lớp phủ sẽ đặt
  * `document.body { pointer-events: none }` rồi **chỉ gỡ khi lớp phủ mở lại**.
  * Nếu test kết thúc đúng lúc menu đang đóng, thuộc tính này còn sót lại trên

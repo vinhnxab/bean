@@ -1,3 +1,4 @@
+import gsap from "gsap";
 import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
@@ -6,6 +7,7 @@ import { BeanMark } from "@/components/brand/BeanMark";
 import { Composer } from "@/components/chat/Composer";
 import { ConfirmCard } from "@/components/chat/ConfirmCard";
 import { MessageRow } from "@/components/chat/MessageRow";
+import { QueuePill, StreamingCaret, ThinkingIndicator } from "@/components/chat/RunStatus";
 import { ToolCard } from "@/components/chat/ToolCard";
 import { SafeMarkdown } from "@/components/markdown/SafeMarkdown";
 import {
@@ -19,7 +21,15 @@ import {
 import { useSessionMessages } from "@/features/chat/queries";
 import { useRealtime } from "@/features/chat/RealtimeProvider";
 import { useI18n } from "@/i18n";
+import { Enter, type ScrollTween, tweenToBottom, useGsapAnimate } from "@/lib/anim";
 import { useChatStore } from "@/store/chat";
+
+/** Trạng thái "lịch sử nào đã sẵn có khi mở phiên" — reset theo `sessionId`. */
+type SeedState = { sessionId: number; done: boolean; ids: Set<number> };
+
+function seedTracker(sessionId: number): SeedState {
+  return { sessionId, done: false, ids: new Set<number>() };
+}
 
 export function ChatPage() {
   const { sessionId: rawSessionId } = useParams();
@@ -53,22 +63,101 @@ function ChatSession({ sessionId }: { sessionId: number }) {
     [allConfirms, sessionId],
   );
 
-  const scrollKey = `${messages.length}:${run?.streamText ?? ""}:${Object.keys(run?.liveTools ?? {}).length}`;
+  const liveToolCount = liveToolIds.size;
+  const confirmCount = confirms.length;
+
+  // --- Hoạt ảnh "tin mới" --------------------------------------------------
+  // Lịch sử sẵn có khi mở phiên KHÔNG animate: mở một phiên dài mà mỗi tin lại
+  // trượt vào một lần là một cascade hỗn loạn. Chỉ tin xuất hiện SAU lần hydrate
+  // đầu mới animate (`isNew`). Component này không unmount khi đổi hội thoại
+  // (cùng vị trí route), nên state theo phiên phải reset ngay tại render.
+  const seeded = useRef<SeedState | null>(null);
+  // Khối lượng nội dung để effect cuộn biết có thứ mới được CHÈN vào.
+  const volume = useRef({ messages: 0, tools: 0, confirms: 0, hydrated: false });
+  const scrollTween = useRef<ScrollTween | null>(null);
+  // Đặt khi người dùng bấm nút xuống đáy: effect kế tiếp phải nhả tay để tween
+  // trượt nốt, không đè xuống nhảy tức thì.
+  const manualScroll = useRef(false);
+  if (seeded.current === null || seeded.current.sessionId !== sessionId) {
+    seeded.current = seedTracker(sessionId);
+    volume.current = { messages: 0, tools: 0, confirms: 0, hydrated: false };
+    manualScroll.current = false;
+    scrollTween.current?.kill();
+    scrollTween.current = null;
+  }
+
+  // Ghi nhận lịch sử sẵn có sau lần tải đầu: những tin này là "nền cũ", không
+  // hoạt ảnh. Chờ cả `isFetching` để không chốt giữa hai trang của cùng lần tải.
+  useEffect(() => {
+    const state = seeded.current;
+    if (!state || state.done || history.isPending || history.isFetching) return;
+    state.done = true;
+    for (const message of messages) state.ids.add(message.id);
+  }, [history.isPending, history.isFetching, messages]);
+
+  // Đổi hội thoại: về đáy và dọn tween còn treo — phiên mới mở đúng chỗ bắt đầu,
+  // không vướng vị trí cuộn của phiên trước.
+  useEffect(() => {
+    void sessionId; // dependency kích hoạt có chủ đích — thân effect không đọc giá trị này
+    setAtBottom(true);
+    scrollTween.current?.kill();
+    scrollTween.current = null;
+  }, [sessionId]);
+
+  function isNew(id: number): boolean {
+    const state = seeded.current;
+    return state?.done === true && !state.ids.has(id);
+  }
+
+  const scrollKey = `${messages.length}:${run?.streamText ?? ""}:${liveToolCount}:${confirmCount}`;
 
   useEffect(() => {
     void scrollKey;
     const element = scrollRef.current;
     if (!element) return;
+    const before = volume.current;
+    const appended =
+      messages.length > before.messages || liveToolCount > before.tools || confirmCount > before.confirms;
+    // Lần vẽ đầu là lần đầu thấy lịch sử THẬT (đã hydrate), không phải lần effect
+    // đầu với danh sách còn rỗng khi request còn pending.
+    const firstPaint = !before.hydrated;
+    before.messages = messages.length;
+    before.tools = liveToolCount;
+    before.confirms = confirmCount;
+    before.hydrated = before.hydrated || !history.isPending;
+
     if (previousHeight.current !== null) {
+      // Tải trang cũ hơn: giữ nguyên chiều cao khung cũ để cuộn không nhảy.
       element.scrollTop = element.scrollHeight - previousHeight.current;
       previousHeight.current = null;
       return;
     }
-    // Chỉ cuộn theo khi người dùng **đang ở đáy**. Họ cuộn lên để đọc lại một
-    // đoạn nào đó thì tin nhắm mới (scheduler, tin chủ động) không được giật
-    // màn hình họ ra khỏi chỗ đang đọc.
-    if (atBottom) element.scrollTop = element.scrollHeight;
-  }, [atBottom, scrollKey]);
+    if (manualScroll.current) {
+      manualScroll.current = false;
+      return;
+    }
+    if (!atBottom) {
+      // Chỉ cuộn theo khi người dùng **đang ở đáy**. Họ cuộn lên để đọc lại một
+      // đoạn nào đó thì tin nhắm mới (scheduler, tin chủ động) không được giật
+      // màn hình họ ra khỏi chỗ đang đọc.
+      scrollTween.current?.kill();
+      return;
+    }
+    if (scrollTween.current?.isActive()) {
+      // Đang trượt xuống vì khối mới: delta streaming tới nơi cũng để tween bám
+      // đáy nốt — hai luồng cùng giành `scrollTop` mới chính là giật.
+      return;
+    }
+    if (appended && !firstPaint) {
+      // Khối mới (tin, thẻ tool, thẻ xác nhận) được CHÈN vào danh sách: trượt
+      // mượt xuống thay vì nhảy tức thì.
+      scrollTween.current?.kill();
+      scrollTween.current = tweenToBottom(element);
+    } else {
+      // Delta streaming / lần vẽ đầu: bám tức thì để chữ chạy tới đâu thấy tới đó.
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [atBottom, scrollKey, history.isPending, messages.length, liveToolCount, confirmCount]);
 
   /** Người dùng tự cuộn: biết mình đang ở đâu để quyết định có cuộn theo không. */
   function onScroll() {
@@ -80,7 +169,10 @@ function ChatSession({ sessionId }: { sessionId: number }) {
 
   function scrollToBottom() {
     const element = scrollRef.current;
-    if (element) element.scrollTop = element.scrollHeight;
+    if (!element) return;
+    scrollTween.current?.kill();
+    manualScroll.current = true;
+    scrollTween.current = tweenToBottom(element, 0.35);
     setAtBottom(true);
   }
 
@@ -147,69 +239,91 @@ function ChatSession({ sessionId }: { sessionId: number }) {
             ) : null}
             {!history.isPending && messages.length === 0 ? <EmptyChat onPick={setText} /> : null}
             <div className="space-y-1">
-              {messages.map((message) => (
-                <HistoryMessage
-                  key={message.id}
-                  dto={message}
-                  toolResults={toolResults}
-                  liveToolIds={liveToolIds}
-                />
-              ))}
+              {messages.map((message) => {
+                // `HistoryMessage` tự trả `null` cho vài trường hợp; bọc `<Enter>`
+                // trực tiếp sẽ để lại div rỗng, làm hở dòng do `space-y-1` — nên
+                // lọc trước khi bọc.
+                const parsed = parseStoredMessage(message);
+                const orphanTool = parsed?.role === "tool" && !toolResults.get(parsed.toolCallId ?? "");
+                if (!parsed || orphanTool) return null;
+                return (
+                  <Enter key={message.id} when={isNew(message.id)} kind="rise">
+                    <HistoryMessage dto={message} toolResults={toolResults} liveToolIds={liveToolIds} />
+                  </Enter>
+                );
+              })}
               {Object.values(run?.liveTools ?? {})
                 .filter((tool) => !toolResults.has(tool.id))
                 .map((tool) => (
-                  <ToolCard
-                    key={`${tool.runId}:${tool.id}`}
-                    name={tool.tool}
-                    summary={tool.summary}
-                    argsPreview={tool.argsPreview}
-                    outputPreview={tool.outputPreview}
-                    status={tool.status}
-                  />
+                  // Thẻ tool của run hiện tại luôn animate khi sinh ra: đó là
+                  // lúc người dùng đang theo dõi, mỗi thẻ mới là một mốc tiến trình.
+                  <Enter key={`${tool.runId}:${tool.id}`} kind="rise">
+                    <ToolCard
+                      name={tool.tool}
+                      summary={tool.summary}
+                      argsPreview={tool.argsPreview}
+                      outputPreview={tool.outputPreview}
+                      status={tool.status}
+                    />
+                  </Enter>
                 ))}
               {run?.streamText ? (
-                <MessageRow author="assistant" headingId="stream-text">
-                  <SafeMarkdown>{run.streamText}</SafeMarkdown>
-                </MessageRow>
+                <Enter kind="rise">
+                  <MessageRow author="assistant" headingId="stream-text">
+                    <SafeMarkdown>{run.streamText}</SafeMarkdown>
+                    {run.status === "running" || run.status === "stopping" ? <StreamingCaret /> : null}
+                  </MessageRow>
+                </Enter>
               ) : null}
               {confirms.map((confirm) => (
-                <ConfirmCard
-                  key={confirm.confirm_id}
-                  confirm={confirm}
-                  onDecision={(decision) => decide(confirm.confirm_id, decision)}
-                  onExpire={expire}
-                />
+                <Enter key={confirm.confirm_id} kind="pop">
+                  <ConfirmCard
+                    confirm={confirm}
+                    onDecision={(decision) => decide(confirm.confirm_id, decision)}
+                    onExpire={expire}
+                  />
+                </Enter>
               ))}
             </div>
             {run?.status === "queued" ? (
-              <p className="mt-4 text-center text-sm text-need" role="status">
-                {t("chat.queued")} · #{run.queuePosition}
-              </p>
+              <Enter kind="pop" className="mt-4 flex justify-center">
+                <QueuePill position={run.queuePosition} />
+              </Enter>
             ) : null}
-            {run?.status === "running" ? (
-              <p className="mt-4 text-center text-sm text-live" role="status">
-                {t("chat.running")}
-              </p>
+            {/* "Đang suy nghĩ" hiện cả khi vừa gửi (`submitting`) để có phản hồi
+                tức thì, và khi run chạy mà chưa có chữ streaming. Khi chữ đã bắt
+                đầu tới thì chính nó (kèm chỏ nháy) là tín hiệu sống — thêm ba
+                chấm nữa chỉ là nhiễu. */}
+            {run && (run.status === "submitting" || run.status === "running") && !run.streamText ? (
+              <Enter kind="rise" className="mt-4 flex justify-center">
+                <ThinkingIndicator />
+              </Enter>
             ) : null}
             {run?.error ? (
-              <p className="mt-4 rounded-lg bg-alert/10 p-3 text-sm text-alert" role="alert">
-                {run.error}
-              </p>
+              <Enter kind="shake" className="mt-4">
+                <p className="rounded-lg bg-alert/10 p-3 text-sm text-alert" role="alert">
+                  {run.error}
+                </p>
+              </Enter>
             ) : null}
           </div>
         </div>
         {/* Nút tròn nổi lên khi lệch khỏi đáy — theo mẫu Open WebUI. Chỉ hiện
             khi thực sự cần, không chiếm chỗ khi đang ở đáy. */}
         {atBottom ? null : (
-          <button
-            type="button"
-            onClick={scrollToBottom}
-            aria-label={t("chat.scrollToBottom")}
-            title={t("chat.scrollToBottom")}
-            className="absolute bottom-4 left-1/2 z-10 flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-rule bg-surface-raised text-ink shadow-md transition-colors hover:bg-surface-hover"
-          >
-            <ChevronDownIcon className="size-4" />
-          </button>
+          // `Enter` giữ tọa độ tuyệt đối; nút tự dịch tâm nên GSAP scale trên
+          // wrapper không đụng tới `-translate-x-1/2` của nút.
+          <Enter kind="pop" className="absolute bottom-4 left-1/2 z-10">
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              aria-label={t("chat.scrollToBottom")}
+              title={t("chat.scrollToBottom")}
+              className="flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-rule bg-surface-raised text-ink shadow-md transition-colors hover:bg-surface-hover"
+            >
+              <ChevronDownIcon className="size-4" />
+            </button>
+          </Enter>
         )}
       </div>
       <Composer
@@ -236,6 +350,32 @@ function ChatSession({ sessionId }: { sessionId: number }) {
  */
 function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
   const { t } = useI18n();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Stagger chào mừng: mascot → tiêu đề → hint → từng thẻ gợi ý. Chạy một lần
+  // khi màn hình rỗng mở ra; không có nó thì mọi thứ bật sẵn cũng không sao.
+  useGsapAnimate(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    gsap.from(Array.from(root.children), {
+      opacity: 0,
+      y: 16,
+      duration: 0.45,
+      ease: "power2.out",
+      stagger: 0.08,
+      clearProps: "opacity,transform",
+    });
+    gsap.from(root.querySelectorAll("li"), {
+      opacity: 0,
+      y: 12,
+      duration: 0.4,
+      ease: "power2.out",
+      stagger: 0.06,
+      delay: 0.2,
+      clearProps: "opacity,transform",
+    });
+  }, []);
+
   const suggestions = [
     t("chat.suggestion.plan"),
     t("chat.suggestion.explore"),
@@ -243,7 +383,7 @@ function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
     t("chat.suggestion.summarize"),
   ];
   return (
-    <div className="flex flex-col items-center px-2 py-16 text-center">
+    <div ref={rootRef} className="flex flex-col items-center px-2 py-16 text-center">
       <BeanMark size={56} className="mb-4 text-brand" title={t("app.title")} />
       <h2 className="text-2xl font-semibold tracking-tight">
         {t("chat.greeting")} <span className="text-brand">Bean</span>
@@ -268,6 +408,15 @@ function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
 
 function ConnectionBadge({ status }: { status: "idle" | "connecting" | "connected" | "reconnecting" }) {
   const { t } = useI18n();
+  const dotRef = useRef<HTMLSpanElement>(null);
+
+  // Chấm "đã kết nối" đập nhẹ — sống khác với chấm đứng yên báo mất kết nối.
+  useGsapAnimate(() => {
+    const dot = dotRef.current;
+    if (!dot || status !== "connected") return;
+    gsap.to(dot, { scale: 1.4, opacity: 0.5, duration: 0.7, ease: "sine.inOut", yoyo: true, repeat: -1 });
+  }, [status]);
+
   const label =
     status === "connected"
       ? t("chat.connected")
@@ -279,7 +428,7 @@ function ConnectionBadge({ status }: { status: "idle" | "connecting" | "connecte
       className={`inline-flex items-center gap-1 text-xs ${status === "connected" ? "text-live" : "text-need"}`}
       role="status"
     >
-      <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
+      <span ref={dotRef} className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
       {label}
     </span>
   );

@@ -77,7 +77,7 @@ export const vi = {
   "chat.stop": "Dừng",
   "chat.stopping": "Đang dừng…",
   "chat.queued": "Đang chờ",
-  "chat.running": "Đang xử lý",
+  "chat.thinking": "Đang suy nghĩ…",
   "chat.loadingOlder": "Tải tin cũ hơn",
   "chat.noMore": "Đã hiển thị toàn bộ tin nhắn",
   "chat.connected": "Đã kết nối",
