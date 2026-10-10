@@ -109,7 +109,10 @@ function ChatSession({ sessionId }: { sessionId: number }) {
     return state?.done === true && !state.ids.has(id);
   }
 
-  const scrollKey = `${messages.length}:${run?.streamText ?? ""}:${liveToolCount}:${confirmCount}`;
+  // Trạng thái run cũng nằm trong khóa: gửi tin nhắn là chủ đích "xem câu trả
+  // lời mới nhất", nên suy nghĩ/xếp hàng phải nằm trong khung nhìn ngay sau commit
+  // render — không được chờ tới delta đầu tiên mới nhảy xuống.
+  const scrollKey = `${messages.length}:${run?.streamText ?? ""}:${liveToolCount}:${confirmCount}:${run?.status ?? "idle"}:${run?.queuePosition ?? ""}`;
 
   useEffect(() => {
     void scrollKey;
@@ -196,6 +199,14 @@ function ChatSession({ sessionId }: { sessionId: number }) {
     }
     setText("");
     setSendError(false);
+    // Gửi tin nghĩa là muốn xem **câu trả lời mới nhất**: đưa khung về đáy ngay,
+    // bất kể đang đọc lại chỗ nào (khác với tin nhắm mới — tin nhắm không được
+    // giật người dùng ra khỏi chỗ đang đọc). Bước nhảy thật do effect chạy sau
+    // commit render (lúc thẻ "Đang suy nghĩ" đã nằm trong DOM để đo
+    // `scrollHeight` cho đúng); ở đây chỉ cần chốt điều kiện `atBottom` cho lần
+    // effect kế tiếp — `run.status` đổi từ `markSubmitting` sẽ đánh thức effect
+    // ngay cả khi `atBottom` vốn đã đúng.
+    setAtBottom(true);
   }
 
   function loadOlder() {
