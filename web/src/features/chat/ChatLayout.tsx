@@ -49,6 +49,7 @@ import {
 } from "@/features/sessions/queries";
 import { type Lang, useI18n } from "@/i18n";
 import type { MessageKey } from "@/i18n/vi";
+import { Enter, Stagger } from "@/lib/anim";
 import { useSidebarCollapsed } from "@/lib/sidebar";
 
 /**
@@ -94,6 +95,10 @@ export function ChatLayout() {
   // Trang chủ (HUB) không cần danh sách hội thoại: hội thoại là ngữ cảnh của
   // trang chat, đặt cạnh sơ đồ hệ thống chỉ làm loãng và tốn nửa màn hình.
   const showSessions = location.pathname !== "/";
+  // Cơ sở route cho hoạt ảnh chuyển màn: đổi `/sessions/1 → /sessions/2` KHÔNG
+  // phải là "chuyển trang" (cùng khung chat, chỉ đổi ngữ cảnh) — remount cả khung
+  // sẽ phá cuộn và trạng thái phiên đang chạy, nên gộp hai pathname về một khoá.
+  const routeBase = location.pathname.replace(/\/sessions\/\d+$/, "/sessions");
   const createSession = useCreateSession();
   const logout = useLogout();
   const [actionError, setActionError] = useState(false);
@@ -408,7 +413,12 @@ export function ChatLayout() {
             sidebar vẫn đứng yên. Bọc ở ngoài sẽ làm cả khung giao diện biến mất rồi
             nhảy lại, nhấp nháy rõ rệt khi bấm chuyển màn trên mạng chậm. */}
         <Suspense fallback={<RouteFallback />}>
-          <Outlet />
+          {/* Chuyển màn: nội dung mới trượt nhẹ lên để mắt theo được quãng đường
+              điều hướng — còn đổi phiên trong cùng `/sessions/:id` thì không
+              (cùng `routeBase`, không remount): khung chat đã có nhịp riêng. */}
+          <Enter key={routeBase} kind="rise" className="flex min-h-0 flex-1 flex-col">
+            <Outlet />
+          </Enter>
         </Suspense>
       </main>
       {showSessions ? (
@@ -499,25 +509,30 @@ function SessionList({
             {search ? t("sessions.noResults") : t("chat.noSessions")}
           </p>
         ) : null}
-        {groups.map((group) => (
-          <div key={group.key} className="mb-1">
-            {/* Nhãn nhóm: nhỏ, đậm, chữ thường (không IN HOA — `uppercase`
-                làm tiếng Việt có dấu nhảy dấu và khó đọc hơn). */}
-            <h3 className="px-3 pb-1 pt-3 text-xs font-semibold text-muted-foreground">
-              {t(groupLabelKey(group.key))}
-            </h3>
-            <ul className="space-y-0.5">
-              {group.sessions.map((session) => (
-                <SessionRow
-                  key={session.id}
-                  session={session}
-                  onDeleted={() => onDeleted(session.id)}
-                  onNavigate={onNavigate}
-                />
-              ))}
-            </ul>
-          </div>
-        ))}
+        {/* `Stagger` bọc ngoài `ul` (không bọc trong): `ul` phải giữ đúng con là
+            `li` — wrapper nội bộ sẽ làm hỏng cấu trúc danh sách. Selector `li`
+            chọn từng dòng dù chúng nằm trong nhiều nhóm. */}
+        <Stagger item="li" className="pb-2">
+          {groups.map((group) => (
+            <div key={group.key} className="mb-1">
+              {/* Nhãn nhóm: nhỏ, đậm, chữ thường (không IN HOA — `uppercase`
+                  làm tiếng Việt có dấu nhảy dấu và khó đọc hơn). */}
+              <h3 className="px-3 pb-1 pt-3 text-xs font-semibold text-muted-foreground">
+                {t(groupLabelKey(group.key))}
+              </h3>
+              <ul className="space-y-0.5">
+                {group.sessions.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    onDeleted={() => onDeleted(session.id)}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </Stagger>
       </nav>
     </>
   );

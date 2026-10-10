@@ -1,7 +1,10 @@
+import gsap from "gsap";
 import type { ReactNode } from "react";
+import { useRef } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
+import { useGsapAnimate } from "@/lib/anim";
 
 export function PageShell({
   title,
@@ -12,8 +15,25 @@ export function PageShell({
   description: string;
   children: ReactNode;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  // Trang management vào theo nhịp: tiêu đề trước, các khối nội dung lần lượt
+  // theo sau — thay vì cả trang "đổ" ra một cục. Chạy một lần khi trang mount.
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    gsap.from(Array.from(element.children), {
+      opacity: 0,
+      y: 12,
+      duration: 0.4,
+      ease: "power2.out",
+      stagger: 0.07,
+      clearProps: "opacity,transform",
+    });
+  }, []);
+
   return (
     <section
+      ref={ref}
       className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 pt-20 sm:px-6 md:pb-10 md:pt-8"
       aria-labelledby="page-title"
     >

@@ -1,6 +1,9 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
+import gsap from "gsap";
 import type * as React from "react";
+import { useRef } from "react";
 
+import { useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,9 +26,24 @@ function DropdownMenuContent({
   sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Menu bung xuống nhẹ thay vì "nháy" ra: Radix mount content tức thì khi mở,
+  // GSAP cho nó một nhịp vào 150ms rồi để CSS lo hover/focus.
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    gsap.from(element, {
+      opacity: 0,
+      y: 4,
+      duration: 0.15,
+      ease: "power2.out",
+      clearProps: "opacity,transform",
+    });
+  }, []);
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
+        ref={ref}
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(

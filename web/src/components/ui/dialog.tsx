@@ -1,7 +1,10 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import gsap from "gsap";
 import { XIcon } from "lucide-react";
 import type * as React from "react";
+import { useRef } from "react";
 
+import { useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,8 +27,17 @@ function DialogClose(props: React.ComponentProps<typeof DialogPrimitive.Close>) 
 }
 
 function DialogOverlay({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Lớp phủ mờ dần vào thay vì nháy đen: phản hồi "màn hình đã chặn lại" mềm
+  // hơn cho mắt, nhất là với hộp thoại xác nhận hành động nguy hiểm.
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    gsap.from(element, { opacity: 0, duration: 0.18, ease: "power1.out" });
+  }, []);
   return (
     <DialogPrimitive.Overlay
+      ref={ref}
       data-slot="dialog-overlay"
       className={cn(
         // Không dùng class `animate-in`/`fade-in` của tw-animate-css: dự án không
@@ -45,10 +57,36 @@ function DialogContent({
   showClose = true,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { showClose?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    // Hai hướng vào cho hai hình khối: hộp thoại bung ra giữa màn hình; flyout
+    // lịch sử (`data-slot="history-flyout"`) là ngăn kéo trượt từ mép trái.
+    if (element.dataset.slot === "history-flyout") {
+      gsap.from(element, {
+        opacity: 0,
+        x: -24,
+        duration: 0.22,
+        ease: "power2.out",
+        clearProps: "opacity,transform",
+      });
+    } else {
+      gsap.from(element, {
+        opacity: 0,
+        y: 10,
+        scale: 0.97,
+        duration: 0.22,
+        ease: "back.out(1.4)",
+        clearProps: "opacity,transform",
+      });
+    }
+  }, []);
   return (
     <DialogPrimitive.Portal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={ref}
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-popover p-6 text-popover-foreground shadow-lg",

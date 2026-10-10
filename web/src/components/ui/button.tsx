@@ -1,7 +1,10 @@
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
+import gsap from "gsap";
 import type * as React from "react";
+import { useRef } from "react";
 
+import { useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
 
 /**
@@ -43,7 +46,42 @@ function Button({
   ...props
 }: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
   const Comp = asChild ? Slot : "button";
-  return <Comp data-slot="button" className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+  const ref = useRef<HTMLButtonElement>(null);
+
+  // Cảm giác bấm: thu nhẹ khi nhấn, nảy về khi thả — thứ `transition-colors`
+  // không cho được và là phản hồi xúc giác duy nhất của giao diện web. Nút
+  // `disabled` có `pointer-events-none` nên tự loại khỏi hiệu ứng này.
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    const scaleTo = (value: number) =>
+      gsap.to(element, {
+        scale: value,
+        duration: value === 1 ? 0.25 : 0.12,
+        ease: value === 1 ? "back.out(2)" : "power2.out",
+        overwrite: true,
+        ...(value === 1 ? { clearProps: "transform" } : {}),
+      });
+    const down = () => {
+      scaleTo(0.96);
+    };
+    const up = () => {
+      scaleTo(1);
+    };
+    element.addEventListener("pointerdown", down);
+    element.addEventListener("pointerup", up);
+    element.addEventListener("pointerleave", up);
+    element.addEventListener("pointercancel", up);
+  }, []);
+
+  return (
+    <Comp
+      ref={ref}
+      data-slot="button"
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  );
 }
 
 export { Button, buttonVariants };

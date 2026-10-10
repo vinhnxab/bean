@@ -1,6 +1,9 @@
 import { cva, type VariantProps } from "class-variance-authority";
+import gsap from "gsap";
 import type * as React from "react";
+import { useRef } from "react";
 
+import { useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,19 +51,35 @@ function StatusDot({
   tone: "idle" | "working" | "awaiting" | "danger";
   className?: string;
 }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  // Trạng thái SỐNG (đang chạy / đang chờ bạn duyệt) đập nhẹ để mắt bắt được,
+  // thay vì một chấm tĩnh bị lẫn vào nền. Ba trạng thái còn lại đứng yên —
+  // "rảnh" và "nguy hiểm" mà nhấp nháy sẽ thành nhiễu hoặc thành giả báo động.
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element || (tone !== "working" && tone !== "awaiting")) return;
+    gsap.to(element, {
+      scale: 1.35,
+      opacity: 0.55,
+      duration: 0.7,
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1,
+    });
+  }, [tone]);
+
   const base = "size-2 shrink-0";
-  if (tone === "working") {
-    return <span aria-hidden className={cn(base, "rounded-full bg-live", className)} />;
-  }
-  if (tone === "awaiting") {
-    // Vòng tròn rỗng to hơn: "đang chờ" phải nổi hơn "đang chạy" về mặt hình khối.
-    return <span aria-hidden className={cn(base, "rounded-full border-2 border-need", className)} />;
-  }
-  if (tone === "danger") {
-    return <span aria-hidden className={cn(base, "rounded-sm bg-alert", className)} />;
-  }
-  // Rảnh: chỉ một chấm nhở màu, đúng nghĩa "không có gì đang chạy".
-  return <span aria-hidden className={cn(base, "rounded-full bg-rule", className)} />;
+  const shape =
+    tone === "working"
+      ? "rounded-full bg-live"
+      : tone === "awaiting"
+        ? // Vòng tròn rỗng to hơn: "đang chờ" phải nổi hơn "đang chạy" về mặt hình khối.
+          "rounded-full border-2 border-need"
+        : tone === "danger"
+          ? "rounded-sm bg-alert"
+          : // Rảnh: chỉ một chấm nhở màu, đúng nghĩa "không có gì đang chạy".
+            "rounded-full bg-rule";
+  return <span ref={ref} aria-hidden className={cn(base, shape, className)} />;
 }
 
 export { Badge, badgeVariants, StatusDot };

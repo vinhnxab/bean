@@ -1,7 +1,10 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
+import gsap from "gsap";
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
+import { useRef } from "react";
 
+import { useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
 
 /**
@@ -68,9 +71,19 @@ function SelectContent({
   position = "popper",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Fade nhẹ, KHÔNG đụng transform: `popper` đang neo bằng các class
+  // `data-[side=…]:translate-*` — một `gsap.from` có `y` sẽ ghi đè transform
+  // và phá vị trí của danh sách so với trigger.
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    gsap.from(element, { opacity: 0, duration: 0.14, ease: "power1.out" });
+  }, []);
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
+        ref={ref}
         data-slot="select-content"
         // `popper` đo theo trigger ⇒ danh sách ngôn ngữ không tràn khỏi sidebar
         // hẹp, và vẫn đọc được sau khi người dùng đổi khung cửa sổ.

@@ -156,3 +156,50 @@ export function Enter({ when = true, kind = "rise", className, children }: Enter
     </div>
   );
 }
+
+export type StaggerProps = {
+  /**
+   * Selector chọn item cần animate trong container (vd `"li"`). Bỏ trống thì
+   * animate các con trực tiếp.
+   */
+  item?: string;
+  /** Delay trước khi bắt đầu chuỗi (để phần tử khác vào trước). */
+  delay?: number;
+  className?: string;
+  children: ReactNode;
+};
+
+/**
+ * Cho các phần tử trong một nhóm LỚN vào lần lượt — hiệu ứng "dữ liệu vừa về"
+ * cho danh sách management (sidebar phiên, feed hoạt động, khối trang).
+ *
+ * Chạy **đúng một lần khi mount**: item thêm sau đó hiện ngay, không animate —
+ * refetch dữ liệu không được re-trigger chuỗi (mỗi lần lọc/search là một trận
+ * nhấp nháy). Thời gian dồn stagger bị cap ~0.45s: một list 30 hàng không được
+ * biến thành hai giây chờ đợi, phần đuôi vào gần như cùng lúc.
+ */
+export function Stagger({ item, delay = 0, className, children }: StaggerProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useGsapAnimate(() => {
+    const element = ref.current;
+    if (!element) return;
+    const targets = item ? Array.from(element.querySelectorAll(item)) : Array.from(element.children);
+    if (targets.length === 0) return;
+    gsap.from(targets, {
+      opacity: 0,
+      y: 10,
+      duration: 0.4,
+      ease: "power2.out",
+      delay,
+      stagger: Math.min(0.06, 0.45 / targets.length),
+      clearProps: "opacity,transform",
+    });
+  }, [item, delay]);
+
+  return (
+    <div ref={ref} className={className}>
+      {children}
+    </div>
+  );
+}

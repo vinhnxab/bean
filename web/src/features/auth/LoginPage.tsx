@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { useLogin } from "@/features/auth/queries";
 import { useI18n } from "@/i18n";
+import { Enter } from "@/lib/anim";
 
 export function LoginPage() {
   const { t } = useI18n();
@@ -40,43 +41,46 @@ export function LoginPage() {
       {/* Nút chủ đề đặt ở góc màn hình: màn đăng nhập là nơi người dùng hay đổi
           chủ đề lần đầu, không nên bắt họ đăng nhập mới đổi được. */}
       <ThemeToggle className="absolute top-4 right-4" />
-      <Card className="w-full max-w-sm gap-7 py-7">
-        <CardHeader>
-          <BeanAvatar size={56} className="mb-3" title={t("login.title")} />
-          <CardTitle className="text-2xl tracking-tight">{t("login.title")}</CardTitle>
-          <CardDescription>{t("login.subtitle")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
-            <label className="block text-sm font-medium" htmlFor="password">
-              {t("login.password")}
-            </label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="h-11"
-              required
-              disabled={login.isPending}
-            />
-            {error ? (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
-                {error.code === "rate_limited" ? t("login.rateLimited") : t("login.invalid")}
-              </p>
-            ) : null}
-            <Button
-              type="submit"
-              disabled={login.isPending}
-              className="h-11 w-full bg-brand text-brand-ink hover:bg-brand-strong"
-            >
-              {login.isPending ? t("common.loading") : t("login.submit")}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {/* Thẻ đăng nhập trượt lên khi vào màn: chào đón thay vì "đã có sẵn". */}
+      <Enter kind="rise">
+        <Card className="w-full max-w-sm gap-7 py-7">
+          <CardHeader>
+            <BeanAvatar size={56} className="mb-3" title={t("login.title")} />
+            <CardTitle className="text-2xl tracking-tight">{t("login.title")}</CardTitle>
+            <CardDescription>{t("login.subtitle")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submit} className="space-y-4">
+              <label className="block text-sm font-medium" htmlFor="password">
+                {t("login.password")}
+              </label>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="h-11"
+                required
+                disabled={login.isPending}
+              />
+              {error ? (
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+                  {error.code === "rate_limited" ? t("login.rateLimited") : t("login.invalid")}
+                </p>
+              ) : null}
+              <Button
+                type="submit"
+                disabled={login.isPending}
+                className="h-11 w-full bg-brand text-brand-ink hover:bg-brand-strong"
+              >
+                {login.isPending ? t("common.loading") : t("login.submit")}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </Enter>
     </main>
   );
 }
