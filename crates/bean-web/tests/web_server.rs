@@ -14,6 +14,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use bean_core::{Router, RouterDeps};
 use bean_llm::FakeProvider;
+use bean_memory::traits::*;
 use bean_memory::{MemoryStore, SqliteStore, Store};
 use bean_security::{AuditLog, CapWorkspace};
 use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind};

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use bean_memory::traits::{McpClientStore, SessionStore, TaskStore};
 use bean_memory::{MemoryStore, NewScheduledTask, SqliteStore, Store};
 
 fn input() -> NewScheduledTask {

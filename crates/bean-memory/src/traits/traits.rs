@@ -19,22 +19,11 @@
 //! └── McpClientStore (4 methods)  - MCP client management
 //! ```
 
-use std::sync::Arc;
-
-use crate::store::types::StoreError;
-use crate::store::types::SessionInfo;
-use crate::store::types::SessionSummary;
-use crate::store::types::ScheduledTask;
-use crate::store::types::MemoryRecord;
-use crate::store::types::MemorySearchHit;
-use crate::store::types::MessageRecord;
-use crate::store::types::NewScheduledTask;
-use crate::store::types::OutboxEntry;
-use crate::store::types::StoredMessage;
-use crate::store::types::WebSessionInfo;
-use crate::store::types::McpClientInfo;
-use crate::store::types::Usage;
-use bean_types::{Message, Outbound, SessionId};
+use crate::store::{
+    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
+    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+};
+use bean_types::{Message, Outbound, SessionId, Usage};
 
 // ============================================================================ //
 // SESSION STORE - Single Responsibility: Session management

@@ -12,7 +12,8 @@ use bean_core::{
     Channel, FixedClock, Router, RouterDeps, RouterOptions, Scheduler, next_run_after,
 };
 use bean_llm::FakeProvider;
-use bean_memory::{NewScheduledTask, Store};
+use bean_memory::NewScheduledTask;
+use bean_memory::traits::*;
 use bean_security::CapWorkspace;
 use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use bean_types::{Config, LlmResponse, Outbound, OutboundKind, Risk, ToolCall, ToolSpec};

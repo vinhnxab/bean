@@ -234,7 +234,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{MAX_MEMORY_FILE_CHARS, MEMORY_FILE, USER_FILE, build, trim_history};
-    use crate::store::{MemoryStore, Store};
+    use crate::store::MemoryStore;
+    use bean_memory::traits::{MessageStore, SessionStore};
 
     fn workspace(dir: &TempDir) -> CapWorkspace {
         CapWorkspace::open(dir.path().to_path_buf()).unwrap()

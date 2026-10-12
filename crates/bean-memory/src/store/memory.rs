@@ -31,6 +31,7 @@ use super::types::{
     WebSessionInfo,
 };
 use super::{MEMORY_HIT_PREVIEW_CHARS, MEMORY_SEARCH_LIMIT, Store};
+use crate::traits::traits::*;
 /// Một phiên trong bản in-memory.
 #[derive(Debug, Clone)]
 struct MemorySession {
@@ -110,7 +111,7 @@ impl MemoryStore {
 }
 
 #[async_trait::async_trait]
-impl Store for MemoryStore {
+impl MessageStore for MemoryStore {
     async fn append(&self, session: SessionId, msg: Message) -> Result<i64, StoreError> {
         let message_id = {
             let mut next = self.next_message_id.write().await;
@@ -183,6 +184,88 @@ impl Store for MemoryStore {
         Ok(())
     }
 
+    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError> {
+        let sessions = self.sessions.read().await;
+        for session in sessions.iter() {
+            for (index, message) in session.messages.iter().enumerate() {
+                if session.message_ids.get(index).copied() == Some(id) {
+                    return Ok(Some(MessageRecord {
+                        id,
+                        session_id: session.id,
+                        seq: index as u64 + 1,
+                        message: message.clone(),
+                        created_at: String::new(),
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn list_message_records(
+        &self,
+        session_id: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>, StoreError> {
+        let sessions = self.sessions.read().await;
+        let Some(session) = sessions.iter().find(|item| item.id == session_id) else {
+            return Ok(Vec::new());
+        };
+        let upper = seq_to_index(before_seq, session.messages.len());
+        let start = slice_start(upper, limit);
+        Ok(session
+            .messages
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(upper.saturating_sub(start))
+            .map(|(index, message)| MessageRecord {
+                id: session.message_ids.get(index).copied().unwrap_or_default(),
+                session_id,
+                seq: index as u64 + 1,
+                message: message.clone(),
+                created_at: String::new(),
+            })
+            .collect())
+    }
+
+    async fn list_messages(
+        &self,
+        session: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<StoredMessage>, StoreError> {
+        let sessions = self.sessions.read().await;
+        let Some(s) = sessions.iter().find(|s| s.id == session) else {
+            return Ok(Vec::new());
+        };
+        let upper = seq_to_index(before_seq, s.messages.len());
+        let start = slice_start(upper, limit);
+        Ok(s.messages[start..upper]
+            .iter()
+            .enumerate()
+            .map(|(offset, message)| StoredMessage {
+                seq: (start + offset) as u64 + 1,
+                message: message.clone(),
+            })
+            .collect())
+    }
+
+    async fn delete_before(&self, session: SessionId, before_seq: u64) -> Result<(), StoreError> {
+        let mut sessions = self.sessions.write().await;
+        if let Some(s) = sessions.iter_mut().find(|s| s.id == session) {
+            let keep_from = (before_seq.saturating_sub(1) as usize).min(s.messages.len());
+            s.messages.drain(0..keep_from);
+            let remove_ids = keep_from.min(s.message_ids.len());
+            s.message_ids.drain(0..remove_ids);
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStore for MemoryStore {
     async fn session_info(&self, session: SessionId) -> Result<Option<SessionInfo>, StoreError> {
         let sessions = self.sessions.read().await;
         Ok(sessions
@@ -406,52 +489,13 @@ impl Store for MemoryStore {
         Ok(result)
     }
 
-    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError> {
-        let sessions = self.sessions.read().await;
-        for session in sessions.iter() {
-            for (index, message) in session.messages.iter().enumerate() {
-                if session.message_ids.get(index).copied() == Some(id) {
-                    return Ok(Some(MessageRecord {
-                        id,
-                        session_id: session.id,
-                        seq: index as u64 + 1,
-                        message: message.clone(),
-                        created_at: String::new(),
-                    }));
-                }
-            }
-        }
-        Ok(None)
+    async fn list_tasks(&self) -> Result<Vec<ScheduledTask>, StoreError> {
+        Ok(self.tasks.read().await.clone())
     }
+}
 
-    async fn list_message_records(
-        &self,
-        session_id: SessionId,
-        before_seq: Option<u64>,
-        limit: usize,
-    ) -> Result<Vec<MessageRecord>, StoreError> {
-        let sessions = self.sessions.read().await;
-        let Some(session) = sessions.iter().find(|item| item.id == session_id) else {
-            return Ok(Vec::new());
-        };
-        let upper = seq_to_index(before_seq, session.messages.len());
-        let start = slice_start(upper, limit);
-        Ok(session
-            .messages
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(upper.saturating_sub(start))
-            .map(|(index, message)| MessageRecord {
-                id: session.message_ids.get(index).copied().unwrap_or_default(),
-                session_id,
-                seq: index as u64 + 1,
-                message: message.clone(),
-                created_at: String::new(),
-            })
-            .collect())
-    }
-
+#[async_trait::async_trait]
+impl crate::traits::traits::MemoryStore for MemoryStore {
     async fn list_memories(
         &self,
         query: Option<&str>,
@@ -489,10 +533,43 @@ impl Store for MemoryStore {
         Ok(true)
     }
 
-    async fn list_tasks(&self) -> Result<Vec<ScheduledTask>, StoreError> {
-        Ok(self.tasks.read().await.clone())
+    async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
+        let mut memories = self.memories.write().await;
+        let mut next = self.next_memory_id.write().await;
+        let id = *next;
+        *next += 1;
+        memories.push(MemoryEntry {
+            id,
+            text: text.to_string(),
+            tags: tags.to_string(),
+            created_at: now_rfc3339(),
+        });
+        Ok(id)
     }
 
+    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError> {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        let memories = self.memories.read().await;
+        Ok(memories
+            .iter()
+            .filter(|e| {
+                e.text.to_lowercase().contains(&needle) || e.tags.to_lowercase().contains(&needle)
+            })
+            .take(MEMORY_SEARCH_LIMIT)
+            .map(|e| MemorySearchHit {
+                score: 1.0,
+                text: truncate_chars(&e.text, MEMORY_HIT_PREVIEW_CHARS),
+                source: MemorySource::Memories,
+            })
+            .collect())
+    }
+}
+
+#[async_trait::async_trait]
+impl TaskStore for MemoryStore {
     async fn list_tasks_for_session(
         &self,
         session: SessionId,
@@ -618,7 +695,10 @@ impl Store for MemoryStore {
         task.last_status = status.to_string();
         Ok(true)
     }
+}
 
+#[async_trait::async_trait]
+impl UsageStore for MemoryStore {
     async fn add_usage(&self, day: &str, usage: Usage) -> Result<(), StoreError> {
         let mut values = self.usage.write().await;
         let current = values.entry(day.to_string()).or_default();
@@ -661,159 +741,10 @@ impl Store for MemoryStore {
             .copied()
             .unwrap_or_default())
     }
+}
 
-    async fn create_web_session(
-        &self,
-        token_hash: Vec<u8>,
-        user_id: &str,
-        created_at: &str,
-        expires_at: &str,
-    ) -> Result<(), StoreError> {
-        self.web_sessions.write().await.push((
-            token_hash,
-            WebSessionInfo {
-                user_id: user_id.to_string(),
-                created_at: created_at.to_string(),
-                expires_at: expires_at.to_string(),
-            },
-        ));
-        Ok(())
-    }
-
-    async fn get_web_session(
-        &self,
-        token_hash: &[u8],
-        now: &str,
-    ) -> Result<Option<WebSessionInfo>, StoreError> {
-        Ok(self
-            .web_sessions
-            .read()
-            .await
-            .iter()
-            .find(|(hash, info)| hash == token_hash && info.expires_at.as_str() > now)
-            .map(|(_, info)| info.clone()))
-    }
-
-    async fn touch_web_session(&self, token_hash: &[u8], _now: &str) -> Result<bool, StoreError> {
-        let sessions = self.web_sessions.read().await;
-        Ok(sessions.iter().any(|(hash, _)| hash == token_hash))
-    }
-
-    async fn delete_web_session(&self, token_hash: &[u8]) -> Result<bool, StoreError> {
-        let mut sessions = self.web_sessions.write().await;
-        let before = sessions.len();
-        sessions.retain(|(hash, _)| hash != token_hash);
-        Ok(sessions.len() != before)
-    }
-
-    async fn delete_all_web_sessions(&self) -> Result<(), StoreError> {
-        self.web_sessions.write().await.clear();
-        Ok(())
-    }
-
-    /// (M25) Cấp token client MCP — chỉ lưu hash, giống `web_sessions`.
-    ///
-    /// Cấp lại cho cùng một tên ⇒ xoá bản ghi cũ trước, nên không tồn tại hai token
-    /// cùng lúc cho một client (tránh việc thu hồi "token mới" nhưng token cũ vẫn sống).
-    async fn create_mcp_client(
-        &self,
-        token_hash: &str,
-        name: &str,
-        role: &str,
-        created_at: &str,
-        expires_at: &str,
-    ) -> Result<(), StoreError> {
-        let info = McpClientInfo {
-            name: name.to_string(),
-            role: role.to_string(),
-            created_at: created_at.to_string(),
-            expires_at: expires_at.to_string(),
-        };
-        let mut clients = self.mcp_clients.write().await;
-        // Xoá theo **tên** (khớp SQL `DELETE ... WHERE name = ?1`): cấp lại cho cùng một
-        // client phải làm token cũ mất hiệu lực, nếu không sẽ tồn tại hai token cùng
-        // lúc và `revoke` chỉ xoá được một. Đây đúng là loại lệch hành vi K7 cảnh báo.
-        clients.retain(|(hash, info)| hash != token_hash && info.name != name);
-        clients.push((token_hash.to_string(), info));
-        Ok(())
-    }
-
-    /// (M25) `expires_at` rỗng ⇒ không hết hạn; ngược lại phải còn hạn tới `now`.
-    async fn get_mcp_client(
-        &self,
-        token_hash: &str,
-        now: &str,
-    ) -> Result<Option<McpClientInfo>, StoreError> {
-        Ok(self
-            .mcp_clients
-            .read()
-            .await
-            .iter()
-            .find(|(hash, info)| {
-                hash == token_hash && (info.expires_at.is_empty() || info.expires_at.as_str() > now)
-            })
-            .map(|(_, info)| info.clone()))
-    }
-
-    /// (M25) Sắp xếp theo thời điểm cấp rồi tên để `list` có thứ tự ổn định.
-    async fn list_mcp_clients(&self) -> Result<Vec<McpClientInfo>, StoreError> {
-        let mut list: Vec<McpClientInfo> = self
-            .mcp_clients
-            .read()
-            .await
-            .iter()
-            .map(|(_, info)| info.clone())
-            .collect();
-        list.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        Ok(list)
-    }
-
-    /// (M25) Thu hồi token của client theo tên.
-    async fn delete_mcp_client(&self, name: &str) -> Result<bool, StoreError> {
-        let mut clients = self.mcp_clients.write().await;
-        let before = clients.len();
-        clients.retain(|(_, info)| info.name != name);
-        Ok(clients.len() != before)
-    }
-
-    async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
-        let mut memories = self.memories.write().await;
-        let mut next = self.next_memory_id.write().await;
-        let id = *next;
-        *next += 1;
-        memories.push(MemoryEntry {
-            id,
-            text: text.to_string(),
-            tags: tags.to_string(),
-            created_at: now_rfc3339(),
-        });
-        Ok(id)
-    }
-
-    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError> {
-        let needle = query.trim().to_lowercase();
-        if needle.is_empty() {
-            return Ok(Vec::new());
-        }
-        let memories = self.memories.read().await;
-        Ok(memories
-            .iter()
-            .filter(|e| {
-                e.text.to_lowercase().contains(&needle) || e.tags.to_lowercase().contains(&needle)
-            })
-            .take(MEMORY_SEARCH_LIMIT)
-            .map(|e| MemorySearchHit {
-                score: 1.0,
-                text: truncate_chars(&e.text, MEMORY_HIT_PREVIEW_CHARS),
-                source: MemorySource::Memories,
-            })
-            .collect())
-    }
-
+#[async_trait::async_trait]
+impl OutboxStore for MemoryStore {
     async fn enqueue_outbound(
         &self,
         channel: &str,
@@ -879,40 +810,124 @@ impl Store for MemoryStore {
         }
         Ok(())
     }
+}
 
-    async fn list_messages(
+#[async_trait::async_trait]
+impl WebSessionStore for MemoryStore {
+    async fn create_web_session(
         &self,
-        session: SessionId,
-        before_seq: Option<u64>,
-        limit: usize,
-    ) -> Result<Vec<StoredMessage>, StoreError> {
-        let sessions = self.sessions.read().await;
-        let Some(s) = sessions.iter().find(|s| s.id == session) else {
-            return Ok(Vec::new());
-        };
-        let upper = seq_to_index(before_seq, s.messages.len());
-        let start = slice_start(upper, limit);
-        Ok(s.messages[start..upper]
-            .iter()
-            .enumerate()
-            .map(|(offset, message)| StoredMessage {
-                seq: (start + offset) as u64 + 1,
-                message: message.clone(),
-            })
-            .collect())
-    }
-
-    async fn delete_before(&self, session: SessionId, before_seq: u64) -> Result<(), StoreError> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(s) = sessions.iter_mut().find(|s| s.id == session) {
-            let keep_from = (before_seq.saturating_sub(1) as usize).min(s.messages.len());
-            s.messages.drain(0..keep_from);
-            let remove_ids = keep_from.min(s.message_ids.len());
-            s.message_ids.drain(0..remove_ids);
-        }
+        token_hash: Vec<u8>,
+        user_id: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError> {
+        self.web_sessions.write().await.push((
+            token_hash,
+            WebSessionInfo {
+                user_id: user_id.to_string(),
+                created_at: created_at.to_string(),
+                expires_at: expires_at.to_string(),
+            },
+        ));
         Ok(())
     }
 
+    async fn get_web_session(
+        &self,
+        token_hash: &[u8],
+        now: &str,
+    ) -> Result<Option<WebSessionInfo>, StoreError> {
+        Ok(self
+            .web_sessions
+            .read()
+            .await
+            .iter()
+            .find(|(hash, info)| hash == token_hash && info.expires_at.as_str() > now)
+            .map(|(_, info)| info.clone()))
+    }
+
+    async fn touch_web_session(&self, token_hash: &[u8], _now: &str) -> Result<bool, StoreError> {
+        let sessions = self.web_sessions.read().await;
+        Ok(sessions.iter().any(|(hash, _)| hash == token_hash))
+    }
+
+    async fn delete_web_session(&self, token_hash: &[u8]) -> Result<bool, StoreError> {
+        let mut sessions = self.web_sessions.write().await;
+        let before = sessions.len();
+        sessions.retain(|(hash, _)| hash != token_hash);
+        Ok(sessions.len() != before)
+    }
+
+    async fn delete_all_web_sessions(&self) -> Result<(), StoreError> {
+        self.web_sessions.write().await.clear();
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl McpClientStore for MemoryStore {
+    async fn create_mcp_client(
+        &self,
+        token_hash: &str,
+        name: &str,
+        role: &str,
+        created_at: &str,
+        expires_at: &str,
+    ) -> Result<(), StoreError> {
+        let info = McpClientInfo {
+            name: name.to_string(),
+            role: role.to_string(),
+            created_at: created_at.to_string(),
+            expires_at: expires_at.to_string(),
+        };
+        let mut clients = self.mcp_clients.write().await;
+        clients.retain(|(hash, info)| hash != token_hash && info.name != name);
+        clients.push((token_hash.to_string(), info));
+        Ok(())
+    }
+
+    async fn get_mcp_client(
+        &self,
+        token_hash: &str,
+        now: &str,
+    ) -> Result<Option<McpClientInfo>, StoreError> {
+        Ok(self
+            .mcp_clients
+            .read()
+            .await
+            .iter()
+            .find(|(hash, info)| {
+                hash == token_hash && (info.expires_at.is_empty() || info.expires_at.as_str() > now)
+            })
+            .map(|(_, info)| info.clone()))
+    }
+
+    async fn list_mcp_clients(&self) -> Result<Vec<McpClientInfo>, StoreError> {
+        let mut list: Vec<McpClientInfo> = self
+            .mcp_clients
+            .read()
+            .await
+            .iter()
+            .map(|(_, info)| info.clone())
+            .collect();
+        list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        Ok(list)
+    }
+
+    async fn delete_mcp_client(&self, name: &str) -> Result<bool, StoreError> {
+        let mut clients = self.mcp_clients.write().await;
+        let before = clients.len();
+        clients.retain(|(_, info)| info.name != name);
+        Ok(clients.len() != before)
+    }
+}
+
+#[async_trait::async_trait]
+impl Store for MemoryStore {
     async fn compact(
         &self,
         session: SessionId,

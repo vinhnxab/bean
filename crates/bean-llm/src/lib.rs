@@ -39,9 +39,10 @@ pub use retry::{MAX_RETRIES, retry_with_backoff};
 pub use anthropic::{
     build_request_body as build_anthropic_body, parse_response as parse_anthropic_response,
 };
-pub use openai_compat::{
-    build_request_body as build_openai_body, parse_response as parse_openai_response,
+pub use openai_compat::builder::{
+    build_request_body as build_openai_body, ensure_non_empty as ensure_openai_non_empty,
 };
+pub use openai_compat::parser::parse_response as parse_openai_response;
 
 use std::fmt;
 use std::pin::Pin;

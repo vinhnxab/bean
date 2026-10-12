@@ -18,6 +18,7 @@
 pub mod memory_tool;
 pub mod safe_cut;
 pub mod store;
+pub mod traits;
 
 pub use memory_tool::memory_tools;
 pub use safe_cut::{

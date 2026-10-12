@@ -9,9 +9,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bean_core::agent::AgentError;
 use bean_core::run_io::{Decision, RunIo};
-use bean_core::store::{MemoryStore, Store};
+use bean_core::store::MemoryStore;
 use bean_core::{RunTurnArgs, run_turn};
 use bean_llm::{ChatRequest, LlmError, LlmProvider};
+use bean_memory::traits::*;
 use bean_security::CapWorkspace;
 use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use bean_types::{

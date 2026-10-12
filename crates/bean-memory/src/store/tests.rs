@@ -27,6 +27,10 @@ use super::sqlite::migration::configure;
 use super::sqlite::schema::SCHEMA_SQL;
 use super::{MemorySearchHit, MemorySource, MemoryStore, SqliteStore, Store};
 use crate::safe_cut::check_no_orphan_result;
+// Refactor tách trait `Store` thành các sub-trait (traits/traits.rs). Method gọi trực tiếp trên
+// struct cụ thể (`SqliteStore`/`MemoryStore`) cần sub-trait tương ứng trong scope. `MemoryStore as _`
+// tránh đụng tên struct in-memory `MemoryStore` khi vẫn đưa trait vào scope cho method resolution.
+use crate::traits::{MemoryStore as _, MessageStore, OutboxStore, SessionStore, UsageStore};
 
 fn db_path(dir: &TempDir) -> PathBuf {
     dir.path().join("bean.db")

@@ -103,5 +103,7 @@ pub use types::{
     WebSessionInfo,
 };
 
-// TODO: Re-export từ solid module khi trait segregation được hoàn thành
-// pub use solid::traits::*;
+pub use crate::traits::traits::{
+    McpClientStore, MemoryStore as MemoryOpsStore, MessageStore, OutboxStore, SessionStore,
+    TaskStore, UsageStore, WebSessionStore,
+};

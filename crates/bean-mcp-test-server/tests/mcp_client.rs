@@ -12,11 +12,12 @@ use std::{
 };
 
 use async_trait::async_trait;
+use bean_core::store::*;
 use bean_core::{
     RunTurnArgs,
     run_io::{Decision, RunIo},
     run_turn,
-    store::{MemoryStore, Store},
+    store::MemoryStore,
 };
 use bean_llm::FakeProvider;
 use bean_security::CapWorkspace;

@@ -9,3 +9,10 @@ pub use bean_memory::store::{
     self, MemoryRecord, MemorySearchHit, MemorySource, MemoryStore, MessageRecord, OutboxEntry,
     SessionInfo, SessionSummary, SqliteStore, Store, StoreError, StoredMessage, WebSessionInfo,
 };
+// Sub-trait (ISP, xem `bean_memory::traits`) re-export để consumer đi qua facade
+// `bean_core::store` không phải phụ thuộu trực tiếp `bean_memory::traits`. Trait `MemoryStore`
+// trùng tên struct in-memory `MemoryStore` nên alias `MemoryStoreTrait`.
+pub use bean_memory::traits::{
+    McpClientStore, MemoryStore as MemoryStoreTrait, MessageStore, OutboxStore, SessionStore,
+    TaskStore, UsageStore, WebSessionStore,
+};

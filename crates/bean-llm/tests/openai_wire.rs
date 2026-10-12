@@ -11,7 +11,7 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use bean_llm::{
     ChatRequest, LlmError, LlmProvider, OpenAiCompatProvider, build_openai_body,
-    parse_openai_response,
+    ensure_openai_non_empty, parse_openai_response,
 };
 use bean_types::llm::StopReason;
 use bean_types::{LlmDelta, Message, ToolCall, ToolSpec};
@@ -50,7 +50,7 @@ fn body_shape_and_tool_arguments_are_string() {
         assistant,
         Message::tool("c1", "nội dung"),
     ];
-    let body = build_openai_body(&request(&messages, &[]), "mo-hinh-test").unwrap();
+    let body = build_openai_body(request(&messages, &[]), "mo-hinh-test", false);
     assert_eq!(body["model"], "mo-hinh-test");
     assert_eq!(body["max_tokens"], 256);
     let wire = body["messages"].as_array().unwrap();
@@ -93,7 +93,7 @@ fn body_tools_use_parameters_and_sanitize() {
         }),
     )];
     let messages = [Message::user("x")];
-    let body = build_openai_body(&request(&messages, &tools), "m").unwrap();
+    let body = build_openai_body(request(&messages, &tools), "m", false);
     let function = &body["tools"][0]["function"];
     assert_eq!(function["name"], "read_file");
     assert_eq!(function["description"], "Đọc file");
@@ -106,7 +106,7 @@ fn body_tools_use_parameters_and_sanitize() {
 #[test]
 fn body_empty_messages_is_config_error() {
     let empty: [Message; 0] = [];
-    let err = build_openai_body(&request(&empty, &[]), "m").unwrap_err();
+    let err = ensure_openai_non_empty(&request(&empty, &[])).unwrap_err();
     assert!(matches!(err, LlmError::Config(_)), "{err:?}");
 }
 

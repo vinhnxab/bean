@@ -9,17 +9,63 @@ use crate::error::ToolError;
 use crate::tool::Tool;
 use crate::workspace::WorkspaceFs;
 
-/// Registry lưu `Arc<dyn Tool>` theo tên; `specs()` trả về **đã sort theo tên** để
-/// prompt/schema gửi model ổn định giữa các lượt (không nhảy thứ tự ngẫu nhiên).
-pub struct ToolRegistry {
-    tools: BTreeMap<String, Arc<dyn Tool>>,
-    /// Workspace dùng cho tool (M4: `CapWorkspace` trên cap-std — bean-security).
+/// Quản lý workspace và project profiles (M21.1).
+#[derive(Default, Clone)]
+pub struct WorkspaceRegistry {
+    /// Workspace gốc dùng cho tool (M4: `CapWorkspace` trên cap-std — bean-security).
     workspace: Option<Arc<dyn WorkspaceFs>>,
-    /// Workspace theo project profile (M21.1), tra cứu theo tên project.
+    /// Workspace theo project profile, tra cứu theo tên project.
     ///
     /// Rỗng ⇒ mọi project dùng chung [`Self::workspace`]. Có dữ liệu ⇒ mỗi project có
     /// thư mục riêng (và `MEMORY.md`/`USER.md` riêng), nên hai project không lẫn bộ nhớ.
     project_workspaces: BTreeMap<String, Arc<dyn WorkspaceFs>>,
+}
+
+impl WorkspaceRegistry {
+    /// Registry rỗng.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Tạo registry với workspace gốc.
+    #[must_use]
+    pub fn with_workspace(workspace: Arc<dyn WorkspaceFs>) -> Self {
+        Self {
+            workspace: Some(workspace),
+            project_workspaces: BTreeMap::new(),
+        }
+    }
+
+    /// Gắn workspace cho một project profile (M21.1).
+    pub fn set_project_workspace(&mut self, project: &str, workspace: Arc<dyn WorkspaceFs>) {
+        self.project_workspaces
+            .insert(project.to_string(), workspace);
+    }
+
+    /// Workspace của một project profile (M21.1).
+    ///
+    /// `None` chỉ khi registry không gắn workspace **và** project cũng không có riêng.
+    #[must_use]
+    pub fn workspace_for(&self, project: &str) -> Option<Arc<dyn WorkspaceFs>> {
+        self.project_workspaces
+            .get(project)
+            .cloned()
+            .or_else(|| self.workspace.clone())
+    }
+
+    /// Trả về workspace gốc (`None` khi chưa gắn).
+    #[must_use]
+    pub fn workspace_opt(&self) -> Option<Arc<dyn WorkspaceFs>> {
+        self.workspace.clone()
+    }
+}
+
+/// Registry lưu `Arc<dyn Tool>` theo tên; `specs()` trả về **đã sort theo tên** để
+/// prompt/schema gửi model ổn định giữa các lượt (không nhảy thứ tự ngẫu nhiên).
+pub struct ToolRegistry {
+    tools: BTreeMap<String, Arc<dyn Tool>>,
+    workspaces: WorkspaceRegistry,
 }
 
 impl std::fmt::Debug for ToolRegistry {
@@ -42,8 +88,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: BTreeMap::new(),
-            workspace: None,
-            project_workspaces: BTreeMap::new(),
+            workspaces: WorkspaceRegistry::new(),
         }
     }
 
@@ -52,34 +97,38 @@ impl ToolRegistry {
     pub fn with_workspace(workspace: Arc<dyn WorkspaceFs>) -> Self {
         Self {
             tools: BTreeMap::new(),
-            workspace: Some(workspace),
-            project_workspaces: BTreeMap::new(),
+            workspaces: WorkspaceRegistry::with_workspace(workspace),
         }
+    }
+
+    /// Trả về tham chiếu đến quản lý workspace.
+    #[must_use]
+    pub fn workspaces(&self) -> &WorkspaceRegistry {
+        &self.workspaces
+    }
+
+    /// Trả về tham chiếu mutable đến quản lý workspace.
+    pub fn workspaces_mut(&mut self) -> &mut WorkspaceRegistry {
+        &mut self.workspaces
     }
 
     /// Gắn workspace cho một project profile (M21.1).
     ///
-    /// Project không có trong map thì rơi về [`Self::workspace`] (project `default`).
+    /// Project không có trong map thì rơi về workspace gốc (project `default`).
     pub fn set_project_workspace(&mut self, project: &str, workspace: Arc<dyn WorkspaceFs>) {
-        self.project_workspaces
-            .insert(project.to_string(), workspace);
+        self.workspaces.set_project_workspace(project, workspace);
     }
 
     /// Workspace của một project profile (M21.1).
-    ///
-    /// `None` chỉ khi registry không gắn workspace **và** project cũng không có riêng.
     #[must_use]
     pub fn workspace_for(&self, project: &str) -> Option<Arc<dyn WorkspaceFs>> {
-        self.project_workspaces
-            .get(project)
-            .cloned()
-            .or_else(|| self.workspace.clone())
+        self.workspaces.workspace_for(project)
     }
 
-    /// Trả về workspace liên kết với registry (`None` khi registry rỗng / chưa gắn).
+    /// Trả về workspace gốc (`None` khi chưa gắn).
     #[must_use]
     pub fn workspace_opt(&self) -> Option<Arc<dyn WorkspaceFs>> {
-        self.workspace.clone()
+        self.workspaces.workspace_opt()
     }
 
     /// Trả về workspace liên kết với registry.

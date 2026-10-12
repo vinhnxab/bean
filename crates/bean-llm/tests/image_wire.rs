@@ -111,15 +111,15 @@ fn anthropic_keeps_plain_tool_result_as_string() {
 fn openai_sends_image_as_a_separate_user_message() {
     let messages = history();
     let body = build_openai_body(
-        &ChatRequest {
+        ChatRequest {
             system: "",
             messages: &messages,
             tools: &[],
             max_tokens: 256,
         },
         "gpt-test",
-    )
-    .expect("dựng body được");
+        false,
+    );
 
     let msgs = body["messages"].as_array().expect("messages là mảng");
     // Message `tool` phải GIỮ content chuỗi (bắt buộc theo spec OpenAI).
@@ -155,15 +155,15 @@ fn openai_sends_image_as_a_separate_user_message() {
 fn openai_image_message_follows_its_tool_result() {
     let messages = history();
     let body = build_openai_body(
-        &ChatRequest {
+        ChatRequest {
             system: "",
             messages: &messages,
             tools: &[],
             max_tokens: 256,
         },
         "gpt-test",
-    )
-    .expect("dựng body được");
+        false,
+    );
     let msgs = body["messages"].as_array().expect("messages là mảng");
     let tool_index = msgs
         .iter()
@@ -214,15 +214,15 @@ fn unknown_media_type_falls_back_instead_of_being_sent() {
     );
 
     let openai = build_openai_body(
-        &ChatRequest {
+        ChatRequest {
             system: "",
             messages: &messages,
             tools: &[],
             max_tokens: 256,
         },
         "gpt-test",
-    )
-    .expect("dựng body được");
+        false,
+    );
     let raw = serde_json::to_string(&openai).expect("serialize được");
     assert!(
         !raw.contains("svg+xml"),

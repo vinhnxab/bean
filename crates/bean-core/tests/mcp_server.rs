@@ -27,6 +27,7 @@ use bean_core::mcp_server::{
 };
 use bean_core::{Router, RouterDeps};
 use bean_llm::FakeProvider;
+use bean_memory::traits::*;
 use bean_memory::{MemoryStore, Store};
 use bean_security::CapWorkspace;
 use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};

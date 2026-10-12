@@ -19,7 +19,10 @@
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
 
-use crate::store::{Store, StoreError};
+// Glob re-export facade (mục đích: đưa cả các sub-trait ISP vào scope cho method resolution
+// trên struct cụ thể trong test; `unused_imports` có false-positive với trait method resolution
+// qua composite `Store`, nên glob an toàn hơn liệt kê tường minh ở đây).
+use crate::store::*;
 
 /// Số byte token MCP (256 bit) — cùng cấp với token phiên web.
 pub const MCP_TOKEN_BYTES: usize = 32;

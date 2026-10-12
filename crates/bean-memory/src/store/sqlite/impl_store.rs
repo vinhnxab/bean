@@ -20,8 +20,9 @@ use crate::store::types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
     ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
 };
+use crate::traits::traits::*;
 #[async_trait::async_trait]
-impl Store for SqliteStore {
+impl MessageStore for SqliteStore {
     async fn append(&self, session: SessionId, msg: Message) -> Result<i64, StoreError> {
         self.request(move |reply| DbCommand::Append {
             session,
@@ -56,6 +57,53 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError> {
+        self.request(move |reply| DbCommand::MessageById { id, reply })
+            .await
+    }
+
+    async fn list_message_records(
+        &self,
+        session: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<MessageRecord>, StoreError> {
+        self.request(move |reply| DbCommand::ListMessageRecords {
+            session,
+            before_seq,
+            limit,
+            reply,
+        })
+        .await
+    }
+
+    async fn list_messages(
+        &self,
+        session: SessionId,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<StoredMessage>, StoreError> {
+        self.request(move |reply| DbCommand::ListMessages {
+            session,
+            before_seq,
+            limit,
+            reply,
+        })
+        .await
+    }
+
+    async fn delete_before(&self, session: SessionId, before_seq: u64) -> Result<(), StoreError> {
+        self.request(move |reply| DbCommand::DeleteBefore {
+            session,
+            before_seq,
+            reply,
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionStore for SqliteStore {
     async fn session_info(&self, session: SessionId) -> Result<Option<SessionInfo>, StoreError> {
         self.request(move |reply| DbCommand::SessionInfo { session, reply })
             .await
@@ -150,6 +198,26 @@ impl Store for SqliteStore {
             .await
     }
 
+    async fn find_active_session(
+        &self,
+        channel: &str,
+        chat_id: &str,
+    ) -> Result<Option<SessionId>, StoreError> {
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
+        self.request(move |reply| DbCommand::FindActiveSession {
+            channel,
+            chat_id,
+            reply,
+        })
+        .await
+    }
+
+    async fn list_tasks(&self) -> Result<Vec<ScheduledTask>, StoreError> {
+        self.request(move |reply| DbCommand::ListTasks { reply })
+            .await
+    }
+
     async fn update_session(
         &self,
         session: SessionId,
@@ -197,27 +265,10 @@ impl Store for SqliteStore {
         })
         .await
     }
+}
 
-    async fn message_by_id(&self, id: i64) -> Result<Option<MessageRecord>, StoreError> {
-        self.request(move |reply| DbCommand::MessageById { id, reply })
-            .await
-    }
-
-    async fn list_message_records(
-        &self,
-        session: SessionId,
-        before_seq: Option<u64>,
-        limit: usize,
-    ) -> Result<Vec<MessageRecord>, StoreError> {
-        self.request(move |reply| DbCommand::ListMessageRecords {
-            session,
-            before_seq,
-            limit,
-            reply,
-        })
-        .await
-    }
-
+#[async_trait::async_trait]
+impl crate::traits::traits::MemoryStore for SqliteStore {
     async fn list_memories(
         &self,
         query: Option<&str>,
@@ -237,25 +288,22 @@ impl Store for SqliteStore {
             .await
     }
 
-    async fn find_active_session(
-        &self,
-        channel: &str,
-        chat_id: &str,
-    ) -> Result<Option<SessionId>, StoreError> {
-        let channel = channel.to_string();
-        let chat_id = chat_id.to_string();
-        self.request(move |reply| DbCommand::FindActiveSession {
-            channel,
-            chat_id,
-            reply,
-        })
-        .await
+    async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
+        let text = text.to_string();
+        let tags = tags.to_string();
+        self.request(move |reply| DbCommand::MemorySave { text, tags, reply })
+            .await
     }
 
-    async fn list_tasks(&self) -> Result<Vec<ScheduledTask>, StoreError> {
-        self.request(|reply| DbCommand::ListTasks { reply }).await
+    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError> {
+        let query = query.to_string();
+        self.request(move |reply| DbCommand::MemorySearch { query, reply })
+            .await
     }
+}
 
+#[async_trait::async_trait]
+impl TaskStore for SqliteStore {
     async fn list_tasks_for_session(
         &self,
         session: SessionId,
@@ -326,7 +374,10 @@ impl Store for SqliteStore {
         self.request(move |reply| DbCommand::SetTaskStatus { id, status, reply })
             .await
     }
+}
 
+#[async_trait::async_trait]
+impl UsageStore for SqliteStore {
     async fn add_usage(&self, day: &str, usage: Usage) -> Result<(), StoreError> {
         let day = day.to_string();
         self.request(move |reply| DbCommand::AddUsage { day, usage, reply })
@@ -362,7 +413,62 @@ impl Store for SqliteStore {
         self.request(move |reply| DbCommand::UsageByRole { day, role, reply })
             .await
     }
+}
 
+#[async_trait::async_trait]
+impl OutboxStore for SqliteStore {
+    async fn enqueue_outbound(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        payload: &Outbound,
+        next_attempt_at: &str,
+    ) -> Result<u64, StoreError> {
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
+        let payload = payload.clone();
+        let next_attempt_at = next_attempt_at.to_string();
+        self.request(move |reply| DbCommand::Outbound {
+            channel,
+            chat_id,
+            payload,
+            next_attempt_at,
+            reply,
+        })
+        .await
+    }
+
+    async fn due_outbox(&self, now: &str, limit: usize) -> Result<Vec<OutboxEntry>, StoreError> {
+        let now = now.to_string();
+        self.request(move |reply| DbCommand::DueOutbox { now, limit, reply })
+            .await
+    }
+
+    async fn complete_outbox(&self, id: u64) -> Result<(), StoreError> {
+        self.request(move |reply| DbCommand::CompleteOutbox { id, reply })
+            .await
+    }
+
+    async fn retry_outbox(
+        &self,
+        id: u64,
+        next_attempt_at: &str,
+        last_error: &str,
+    ) -> Result<(), StoreError> {
+        let next_attempt_at = next_attempt_at.to_string();
+        let last_error = last_error.to_string();
+        self.request(move |reply| DbCommand::RetryOutbox {
+            id,
+            next_attempt_at,
+            last_error,
+            reply,
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl WebSessionStore for SqliteStore {
     async fn create_web_session(
         &self,
         token_hash: Vec<u8>,
@@ -416,10 +522,13 @@ impl Store for SqliteStore {
     }
 
     async fn delete_all_web_sessions(&self) -> Result<(), StoreError> {
-        self.request(|reply| DbCommand::DeleteAllWebSessions { reply })
+        self.request(move |reply| DbCommand::DeleteAllWebSessions { reply })
             .await
     }
+}
 
+#[async_trait::async_trait]
+impl McpClientStore for SqliteStore {
     async fn create_mcp_client(
         &self,
         token_hash: &str,
@@ -460,7 +569,7 @@ impl Store for SqliteStore {
     }
 
     async fn list_mcp_clients(&self) -> Result<Vec<McpClientInfo>, StoreError> {
-        self.request(|reply| DbCommand::ListMcpClients { reply })
+        self.request(move |reply| DbCommand::ListMcpClients { reply })
             .await
     }
 
@@ -469,93 +578,10 @@ impl Store for SqliteStore {
         self.request(move |reply| DbCommand::DeleteMcpClient { name, reply })
             .await
     }
+}
 
-    async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError> {
-        let text = text.to_string();
-        let tags = tags.to_string();
-        self.request(move |reply| DbCommand::MemorySave { text, tags, reply })
-            .await
-    }
-
-    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError> {
-        let query = query.to_string();
-        self.request(move |reply| DbCommand::MemorySearch { query, reply })
-            .await
-    }
-
-    async fn enqueue_outbound(
-        &self,
-        channel: &str,
-        chat_id: &str,
-        payload: &Outbound,
-        next_attempt_at: &str,
-    ) -> Result<u64, StoreError> {
-        let channel = channel.to_string();
-        let chat_id = chat_id.to_string();
-        let payload = payload.clone();
-        let next_attempt_at = next_attempt_at.to_string();
-        self.request(move |reply| DbCommand::Outbound {
-            channel,
-            chat_id,
-            payload,
-            next_attempt_at,
-            reply,
-        })
-        .await
-    }
-
-    async fn due_outbox(&self, now: &str, limit: usize) -> Result<Vec<OutboxEntry>, StoreError> {
-        let now = now.to_string();
-        self.request(move |reply| DbCommand::DueOutbox { now, limit, reply })
-            .await
-    }
-
-    async fn complete_outbox(&self, id: u64) -> Result<(), StoreError> {
-        self.request(move |reply| DbCommand::CompleteOutbox { id, reply })
-            .await
-    }
-
-    async fn retry_outbox(
-        &self,
-        id: u64,
-        next_attempt_at: &str,
-        last_error: &str,
-    ) -> Result<(), StoreError> {
-        let next_attempt_at = next_attempt_at.to_string();
-        let last_error = last_error.to_string();
-        self.request(move |reply| DbCommand::RetryOutbox {
-            id,
-            next_attempt_at,
-            last_error,
-            reply,
-        })
-        .await
-    }
-
-    async fn list_messages(
-        &self,
-        session: SessionId,
-        before_seq: Option<u64>,
-        limit: usize,
-    ) -> Result<Vec<StoredMessage>, StoreError> {
-        self.request(move |reply| DbCommand::ListMessages {
-            session,
-            before_seq,
-            limit,
-            reply,
-        })
-        .await
-    }
-
-    async fn delete_before(&self, session: SessionId, before_seq: u64) -> Result<(), StoreError> {
-        self.request(move |reply| DbCommand::DeleteBefore {
-            session,
-            before_seq,
-            reply,
-        })
-        .await
-    }
-
+#[async_trait::async_trait]
+impl Store for SqliteStore {
     async fn compact(
         &self,
         session: SessionId,
