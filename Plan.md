@@ -275,6 +275,7 @@ make check xanh.
 
 ## 6. Backlog — chưa có số milestone, chờ quyết định thêm
 
+- **Nhà thông minh / loa thông minh**: domain mới, tag riêng (ví dụ `home-control`), **không** mở rộng quyền của kênh `voice`. Bắt buộc: (1) danh sách thiết bị khai báo **fail-closed** — rỗng = từ chối mọi thứ, theo mẫu `[[infra_scope]]`; (2) hành động vật lý luôn `Dangerous`, không có tuỳ chọn "trong phiên"; (3) xác thực mạnh bước hai (WebAuthn/passkey) cho bước duyệt; (4) token riêng cho từng thiết bị, theo mẫu `auth mcp-token` (`D16.3`). Chỉ làm sau khi `voice` và quản lý thiết bị đã ổn định.
 - **Bảo vệ vật lý**: domain hoàn toàn mới (camera, kiểm soát ra vào) — không dùng tag `infra-*`
   đã đặt cho server/network, thiết kế khi cần.
 - **Kiến trúc B** (nhiều tiến trình): chỉ cân nhắc khi A đã chạy ổn và có nhu cầu cách ly mạnh
