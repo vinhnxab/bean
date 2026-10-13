@@ -132,7 +132,7 @@ async fn sqlite_outbox_retry_lifecycle_survives_restart() {
     let payload = Outbound {
         session_id: SessionId::new(7),
         message_id: 42,
-        text: "tin chủ động 🦀".into(),
+        text: "tin chủ động 🧸".into(),
         kind: OutboundKind::Notification,
         action: None,
     };

@@ -46,7 +46,7 @@ async fn read_write_and_grep_roundtrip() {
     call(
         &reg,
         "write_file",
-        serde_json::json!({"path": "hello.txt", "content": "Xin chào 🦀\nDòng thứ hai ツ\n"}),
+        serde_json::json!({"path": "hello.txt", "content": "Xin chào 🧸\nDòng thứ hai ツ\n"}),
     )
     .await
     .unwrap();
@@ -59,7 +59,7 @@ async fn read_write_and_grep_roundtrip() {
     .await
     .unwrap();
     assert!(got.contains("Xin chào"));
-    assert!(got.contains("🦀"));
+    assert!(got.contains("🧸"));
 
     let hits = call(
         &reg,

@@ -242,7 +242,7 @@ async fn chat_stream_parses_sse_text_usage_and_finish() {
         "event: content_block_delta\n",
         "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Xin\"}}\n\n",
         "event: content_block_delta\n",
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" chào 🦀\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" chào 🧸\"}}\n\n",
         "event: content_block_stop\n",
         "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
         "event: message_delta\n",
@@ -271,7 +271,7 @@ async fn chat_stream_parses_sse_text_usage_and_finish() {
             _ => None,
         })
         .collect::<String>();
-    assert_eq!(text, "Xin chào 🦀");
+    assert_eq!(text, "Xin chào 🧸");
     assert!(deltas.iter().any(|delta| matches!(
         delta,
         LlmDelta::Usage { usage } if usage.input_tokens == 3 && usage.output_tokens == 2

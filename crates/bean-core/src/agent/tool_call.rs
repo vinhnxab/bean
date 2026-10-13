@@ -441,16 +441,16 @@ mod truncate_tests {
     #[test]
     fn truncate_respects_utf8_boundaries() {
         // Tiếng Việt + emoji (ký tự đa byte) — cắt không được panic và không cắt giữa ký tự.
-        let vi = "Xin chào thế giới 🦀 — dấu ệ ư ơ đ 🎏".repeat(1500);
+        let vi = "Xin chào thế giới 🧸 — dấu ệ ư ơ đ 🎏".repeat(1500);
         let out = truncate_output(&vi);
         assert!(out.contains("đã cắt"));
         assert!(out.chars().count() <= MAX_TOOL_OUTPUT_CHARS + 80);
 
         // Dưới ngưỡng: nguyên vẹn.
-        assert_eq!(truncate_output("ngắn 🦀"), "ngắn 🦀");
+        assert_eq!(truncate_output("ngắn 🧸"), "ngắn 🧸");
 
         // Chuỗi toàn emoji 4 byte: phải cắt đúng tại ranh giới ký tự.
-        let emoji = "🦀".repeat(MAX_TOOL_OUTPUT_CHARS + 7);
+        let emoji = "🧸".repeat(MAX_TOOL_OUTPUT_CHARS + 7);
         let out = truncate_output(&emoji);
         assert!(out.chars().count() >= MAX_TOOL_OUTPUT_CHARS);
         // Phần thân (trước ghi chú) phải parse được thành String hợp lệ (không panic).

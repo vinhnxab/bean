@@ -805,7 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn cap_stream_cuts_on_utf8_boundary() {
-        let long = "Tiếng Việt 🦀 ".repeat(5000);
+        let long = "Tiếng Việt 🧸 ".repeat(5000);
         let capped = cap_stream(long.clone());
         assert!(capped.chars().count() < long.chars().count());
         assert!(capped.contains("đã cắt"));

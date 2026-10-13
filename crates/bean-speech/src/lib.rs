@@ -179,9 +179,9 @@ mod tests {
     fn truncate_utf8_is_char_boundary_safe() {
         assert_eq!(truncate_utf8("xin chào", 100), "xin chào");
         assert_eq!(truncate_utf8("Xin chào các bạn", 4), "Xin ");
-        let emoji = "🦀🦀🦀 crab";
+        let emoji = "🧸🧸🧸 teddy";
         let cut = truncate_utf8(emoji, 3);
-        assert_eq!(cut, "🦀🦀🦀");
+        assert_eq!(cut, "🧸🧸🧸");
         assert!(cut.is_char_boundary(cut.len()));
     }
 }

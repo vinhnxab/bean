@@ -114,9 +114,9 @@ fn read_write_edit_roundtrip_and_utf8() {
     let ws = ws_in(&dir);
     ws.write_text("sub/a.txt", "hello\n").unwrap();
     assert_eq!(ws.read_text("sub/a.txt").unwrap(), "hello\n");
-    ws.edit_unique("sub/a.txt", "hello", "xin chào 🦀").unwrap();
+    ws.edit_unique("sub/a.txt", "hello", "xin chào 🧸").unwrap();
     // Giữ nguyên phần còn lại của file (ngoài chuỗi được thay).
-    assert_eq!(ws.read_text("sub/a.txt").unwrap(), "xin chào 🦀\n");
+    assert_eq!(ws.read_text("sub/a.txt").unwrap(), "xin chào 🧸\n");
     // edit không duy nhất / không tồn tại → lỗi.
     assert!(ws.edit_unique("sub/a.txt", "không-có", "x").is_err());
     ws.write_text("f.txt", "ab ab").unwrap();
@@ -144,7 +144,7 @@ fn glob_and_grep_walk_tree() {
     ws.write_text("src/main.rs", "fn main() {}\n").unwrap();
     ws.write_text("src/lib/deep.rs", "const HÈ: &str = \"việt\";\n")
         .unwrap();
-    ws.write_text("notes.md", "tìm em 🦀\n").unwrap();
+    ws.write_text("notes.md", "tìm em 🧸\n").unwrap();
 
     let rs = ws.glob("**/*.rs", 50).unwrap();
     assert_eq!(rs, vec!["src/lib/deep.rs", "src/main.rs"]);

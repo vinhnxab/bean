@@ -166,11 +166,11 @@ async fn run_shell_wraps_and_flags() {
         Arc::clone(&seen),
     );
     let output = tool
-        .call(&ctx, serde_json::json!({"command": "echo 'xin chào 🦀'"}))
+        .call(&ctx, serde_json::json!({"command": "echo 'xin chào 🧸'"}))
         .await
         .unwrap();
     assert_wrapped_and_flagged("run_shell", &output, &seen);
-    assert!(output.contains("xin chào 🦀"), "{output}");
+    assert!(output.contains("xin chào 🧸"), "{output}");
 }
 
 /// 1f. Tool **không** đọc ngoài lõi thì KHÔNG được bọc — tránh bọc thừa làm loãng
@@ -201,9 +201,9 @@ async fn write_file_output_is_not_wrapped() {
 #[tokio::test]
 async fn long_vietnamese_emoji_output_keeps_valid_wrapper() {
     let dir = tempfile::tempdir().unwrap();
-    // Nhiều ký tự nhiều byte: 'ệ' 2 byte, '🦀' 4 byte — cắt theo byte sẽ sinh chuỗi
+    // Nhiều ký tự nhiều byte: 'ệ' 2 byte, '🧸' 4 byte — cắt theo byte sẽ sinh chuỗi
     // UTF-8 hỏng nếu thuật toán cắt không dừng ở ranh giới codepoint.
-    let big = "Tiếng Việt có dấu 🦀 hả 🐙 ệảâ ".repeat(900);
+    let big = "Tiếng Việt có dấu 🧸 hả 🐙 ệảâ ".repeat(900);
     std::fs::write(dir.path().join("lon.md"), &big).unwrap();
     let reg = files_registry(&dir);
     let (out, seen) = call(
@@ -215,7 +215,7 @@ async fn long_vietnamese_emoji_output_keeps_valid_wrapper() {
     let output = out.unwrap();
     assert_wrapped_and_flagged("read_file (nhiều byte)", &output, &seen);
     // Nội dung đa byte phải được giữ nguyên — không cắt giữa emoji/dấu tiếng Việt.
-    assert!(output.contains("Tiếng Việt có dấu 🦀"), "{output}");
+    assert!(output.contains("Tiếng Việt có dấu 🧸"), "{output}");
     // Không có byte thay thế (U+FFFD) — dấu hiệu UTF-8 bị cắt đứt.
     assert!(
         !output.contains('\u{FFFD}'),
@@ -229,7 +229,7 @@ async fn long_vietnamese_emoji_output_keeps_valid_wrapper() {
 async fn huge_output_stays_bounded_and_keeps_single_close_tag() {
     let dir = tempfile::tempdir().unwrap();
     // Ghi file lớn hơn trần 8.000 mặc định, yêu cầu limit lớn để tới `wrap_bounded`.
-    std::fs::write(dir.path().join("huge.md"), "a🦀".repeat(60_000)).unwrap();
+    std::fs::write(dir.path().join("huge.md"), "a🧸".repeat(60_000)).unwrap();
     let reg = files_registry(&dir);
     let (out, seen) = call(
         &reg,

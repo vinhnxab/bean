@@ -839,7 +839,7 @@ mod tests {
     /// **S2**: output bình thường của cùng tool untrusted phải giữ nguyên **y hệt**.
     #[test]
     fn untrusted_tool_plain_output_is_unchanged() {
-        let plain = "3 tests passed\ncargo build ok\ttôi là tiếng Việt 🦀\nC:\\a\\b";
+        let plain = "3 tests passed\ncargo build ok\ttôi là tiếng Việt 🧸\nC:\\a\\b";
         let printed = render(tool_end("run_shell", plain), &["run_shell"]);
         assert!(
             printed.contains(plain),

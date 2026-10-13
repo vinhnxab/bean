@@ -294,7 +294,7 @@ fn confirmation_message_id(command: &Command) -> i32 {
 
 #[test]
 fn split_text_preserves_utf8_and_utf16_limit() {
-    let text = format!("{}{}", "Việt Nam 🦀 ".repeat(1_000), "😀".repeat(10));
+    let text = format!("{}{}", "Việt Nam 🧸 ".repeat(1_000), "😀".repeat(10));
     let parts = split_text(&text, 4_096);
     assert!(
         parts

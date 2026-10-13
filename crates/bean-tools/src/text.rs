@@ -11,7 +11,7 @@ use crate::error::ToolError;
 /// `(phần_giữ_lại, số_ký_tự_đã_cắt)`.
 ///
 /// ```ignore
-/// let s = "tiếng Việt 🦀";
+/// let s = "tiếng Việt 🧸";
 /// let (kept, cut) = truncate_chars(s, 10).expect("dài hơn 10 ký tự");
 /// assert_eq!(kept.chars().count(), 10);
 /// assert_eq!(cut, s.chars().count() - 10);
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn cuts_at_char_boundary_with_vietnamese_and_emoji() {
-        let s = "Tiếng Việt có dấu: ệảâ 🦀🦀🦀";
+        let s = "Tiếng Việt có dấu: ệảâ 🧸🧸🧸";
         let total = s.chars().count();
         let max = total - 3;
         let (kept, cut) = truncate_chars(s, max).expect("phải cắt");
@@ -173,9 +173,9 @@ mod tests {
 
     #[test]
     fn emoji_are_four_bytes_but_count_as_one_char() {
-        let s = "🦀".repeat(10); // 40 byte, 10 ký tự
+        let s = "🧸".repeat(10); // 40 byte, 10 ký tự
         let (kept, cut) = truncate_chars(s.as_str(), 4).expect("phải cắt");
-        assert_eq!(kept, "🦀🦀🦀🦀");
+        assert_eq!(kept, "🧸🧸🧸🧸");
         assert_eq!(cut, 6);
     }
 
@@ -216,7 +216,7 @@ mod tests {
         for plain in [
             "",
             "Đã ghi xong file.",
-            "Tiếng Việt có dấu: tiếng 🦀 emoji",
+            "Tiếng Việt có dấu: tiếng 🧸 emoji",
             "C:\\Users\\test\\file.txt",
             "dòng 1\ndòng 2\n\tthụt lề",
             "kết quả: 3/3 PASS, thời gian 1.2s",

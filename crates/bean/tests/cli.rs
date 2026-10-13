@@ -304,7 +304,7 @@ async fn chat_pipe_confirm_for_write_file_does_not_deadlock() {
         &script,
         concat!(
             r#"{"responses":[{"tool_calls":[{"id":"c1","name":"write_file","#,
-            r#""args":{"path":"kiem-tra.txt","content":"nội dung 🦀"}}],"stop":"tool_use"},"#,
+            r#""args":{"path":"kiem-tra.txt","content":"nội dung 🧸"}}],"stop":"tool_use"},"#,
             r#"{"text":"Đã ghi xong","stop":"end_turn"}]}"#
         ),
     )

@@ -708,7 +708,7 @@ async fn truncate_output_utf8_safe_viet_emoji() {
         }
     }
     let (_ws, reg) = registry_with(Arc::new(Big {
-        body: "hả🦀ệ".repeat(6000),
+        body: "hả🧸ệ".repeat(6000),
     })); // 24_000 ký tự
     let io = TestIo::new(None);
     let store = MemoryStore::new();
