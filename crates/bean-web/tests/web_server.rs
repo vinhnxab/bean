@@ -22,7 +22,8 @@ use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};
 use bean_types::config::{McpServerConfig, RoleConfig};
 use bean_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec, Usage};
 use bean_web::{
-    AuthService, WebState, build_router, set_password, set_password_and_revoke_sessions,
+    AuthService, WebState, WebStateDeps, build_router, set_password,
+    set_password_and_revoke_sessions,
 };
 use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
@@ -124,15 +125,16 @@ async fn make_state_with(
         skills: Some(skills.clone()),
     }));
     let auth = AuthService::load(&config, store_dyn.clone()).unwrap();
-    let state = WebState::new(
+    let state = WebState::new(WebStateDeps {
         config,
-        store_dyn,
+        store: store_dyn,
         router,
         auth,
-        None,
+        audit: None,
         skills,
-        Some(workspace),
-    )
+        workspace: Some(workspace),
+        speech: None,
+    })
     .unwrap();
     (build_router(state.clone()), state)
 }

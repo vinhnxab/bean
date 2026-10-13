@@ -28,6 +28,8 @@ bean-scan.workspace = true
 bean-qa.workspace = true
 bean-llm.workspace = true
 bean-types.workspace = true
+# M27: dựng provider STT/TTS (whisper/piper local hoặc ElevenLabs) cho `serve`.
+bean-speech.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 async-trait.workspace = true

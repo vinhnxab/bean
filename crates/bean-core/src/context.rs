@@ -86,7 +86,15 @@ pub async fn build(
     session: SessionId,
     workspace: Option<&dyn WorkspaceFs>,
 ) -> Result<TurnContext, StoreError> {
-    build_with_skills(store, config, session, workspace, "").await
+    build_with_skills(
+        store,
+        config,
+        session,
+        workspace,
+        "",
+        config.agent.context_budget_tokens,
+    )
+    .await
 }
 
 /// Dựng context có kèm index skill cho progressive disclosure.
@@ -96,18 +104,42 @@ pub async fn build_with_skills(
     session: SessionId,
     workspace: Option<&dyn WorkspaceFs>,
     skills_index: &str,
+    context_budget: u32,
 ) -> Result<TurnContext, StoreError> {
     build_full(
         store,
         config,
         session,
-        workspace,
-        skills_index,
-        config.agent.context_budget_tokens,
-        // Không có role ở đường cũ ⇒ không chèn hướng dẫn riêng nào.
-        "",
+        BuildContextOptions {
+            workspace,
+            skills_index,
+            context_budget,
+            role: "",
+            voice: false,
+        },
     )
     .await
+}
+
+/// Input của [`build_full`] / [`build_for_project`].
+///
+/// # Vì sao là struct chứ không phải tham số rời
+///
+/// Trước đây `workspace` và `skills_index` được truyền **hai lần** (một lần rời, một
+/// lần trong struct này) nên hai bản có thể lệch nhau mà không compiler nào bắt. Gom
+/// hết vào một struct vừa xoá bản sao đó, vừa giữ số tham số dưới ngưỡng
+/// `clippy::too_many_arguments` (`Cargo.toml` cấm `#[allow]` trần).
+pub struct BuildContextOptions<'a> {
+    /// Workspace của project (xem [`ToolRegistry::workspace_for`]).
+    pub workspace: Option<&'a dyn WorkspaceFs>,
+    /// Index skill cho progressive disclosure (rỗng nếu nhóm `skills` tắt).
+    pub skills_index: &'a str,
+    /// Ngân sách token cho lịch sử; role có thể có ngân sách riêng (M21.7).
+    pub context_budget: u32,
+    /// Tên role sau resolve RBAC (rỗng ⇒ không chèn hướng dẫn domain).
+    pub role: &'a str,
+    /// Lượt là push-to-talk (M27) ⇒ chèn [`crate::prompt::VOICE_GUIDANCE`].
+    pub voice: bool,
 }
 
 /// Dựng context cho project profile cụ thể (M21.1).
@@ -115,25 +147,14 @@ pub async fn build_with_skills(
 /// `workspace` phải là workspace **của project đó** (xem
 /// [`ToolRegistry::workspace_for`]) ⇒ `MEMORY.md`/`USER.md` của hai project không lẫn nhau.
 /// `context_budget` cho phép áp ngân sách riêng theo role (M21.7).
+/// `voice` (`true` khi lượt là push-to-talk, M27) chèn [`crate::prompt::VOICE_GUIDANCE`].
 pub async fn build_for_project(
     store: &dyn Store,
     config: &Config,
     session: SessionId,
-    workspace: Option<&dyn WorkspaceFs>,
-    skills_index: &str,
-    context_budget: u32,
-    role: &str,
+    options: BuildContextOptions<'_>,
 ) -> Result<TurnContext, StoreError> {
-    build_full(
-        store,
-        config,
-        session,
-        workspace,
-        skills_index,
-        context_budget,
-        role,
-    )
-    .await
+    build_full(store, config, session, options).await
 }
 
 /// Thân chung của các hàm `build*`.
@@ -141,17 +162,24 @@ async fn build_full(
     store: &dyn Store,
     config: &Config,
     session: SessionId,
-    workspace: Option<&dyn WorkspaceFs>,
-    skills_index: &str,
-    context_budget: u32,
-    role: &str,
+    options: BuildContextOptions<'_>,
 ) -> Result<TurnContext, StoreError> {
-    let memory_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, MEMORY_FILE));
-    let user_md = workspace.map_or_else(String::new, |ws| read_memory_file(ws, USER_FILE));
+    let memory_md = options
+        .workspace
+        .map_or_else(String::new, |ws| read_memory_file(ws, MEMORY_FILE));
+    let user_md = options
+        .workspace
+        .map_or_else(String::new, |ws| read_memory_file(ws, USER_FILE));
     let summary = store.summary(session).await?.unwrap_or_default();
 
-    let mut system =
-        crate::prompt::system_prompt(&config.agent, skills_index, &memory_md, &user_md, role);
+    let mut system = crate::prompt::system_prompt(
+        &config.agent,
+        options.skills_index,
+        &memory_md,
+        &user_md,
+        options.role,
+        options.voice,
+    );
     // (K1, `D9.7`) Summary **phải** nằm trong `<untrusted_content>`. Nó do LLM sinh từ
     // lịch sử đã chạy qua — trong đó có thể có nội dung web/MCP/file mà kẻ tấn công
     // kiểm soát — nên chèn thẳng vào system prompt là biến *dữ liệu* thành *chỉ dẫn
@@ -167,7 +195,7 @@ async fn build_full(
     }
 
     let history = store.history(session, None, 0).await?;
-    let messages = trim_history(&history, context_budget);
+    let messages = trim_history(&history, options.context_budget);
     Ok(TurnContext {
         system,
         messages,

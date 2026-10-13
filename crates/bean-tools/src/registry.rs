@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use bean_types::{RolePermissions, ToolSpec};
+use bean_types::{Risk, RolePermissions, ToolSpec};
 
 use crate::error::ToolError;
 use crate::tool::Tool;
@@ -170,12 +170,20 @@ impl ToolRegistry {
     ///
     /// Đây là *áp dụng* quyết định RBAC đã resolve ở Router, không phải chỗ ra quyết định:
     /// toàn bộ ngữ nghĩa nằm trong [`bean_types::RolePermissions::allows`].
+    ///
+    /// (M27) Với lượt voice (`perms.safe_only`), mọi tool có mức rủi ro cơ bản lớn hơn
+    /// `Safe` bị ẩn khỏi payload model — model không wasting lượt gọi thứ bị chặn ở tầng
+    /// thực thi. Dùng `risk(&Value::Null)` (mức khởi điểm) đúng như `ToolDto`, nhất quán
+    /// với `gate::expose_gate`.
     #[must_use]
     pub fn specs_visible_to(&self, perms: &RolePermissions) -> Vec<ToolSpec> {
         self.tools
             .values()
             .filter(|tool| {
                 let access = tool.access();
+                if perms.safe_only && tool.risk(&serde_json::Value::Null) != Risk::Safe {
+                    return false;
+                }
                 perms.allows(&access.required_tags, &access.also_visible_to)
             })
             .map(|tool| tool.spec())

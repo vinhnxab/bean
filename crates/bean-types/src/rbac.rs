@@ -60,6 +60,13 @@ pub struct RolePermissions {
     /// untagged sẽ làm mất chúng cho **mọi** role khác (hồi quy) — nên tách domain phải
     /// làm ở phía *role*, không phải phía tool (D15.1).
     pub allowed_tool_tags: BTreeSet<String>,
+    /// (M27) Chỉ cho phép tool `Risk::Safe` trong lượt này (push-to-talk voice).
+    ///
+    /// Không phải role riêng mà là một **ràng buộc bổ sung** Router áp khi `Incoming.voice`:
+    /// lượt bắt nguồn từ giọng nói phải chạy được ngay mà không chờ xác nhận trực quan, nên
+    /// mọi tool `Confirm`/`Dangerous` bị chặn ở tầng thực thi. `false` với mọi role thường.
+    #[serde(default)]
+    pub safe_only: bool,
 }
 
 /// Tag RBAC của domain marketing (M24) — đọc web (dùng chung `web_fetch`/`web_search`).
@@ -80,6 +87,7 @@ impl RolePermissions {
             tags: BTreeSet::new(),
             deny_all: true,
             allowed_tool_tags: BTreeSet::new(),
+            safe_only: false,
         }
     }
 
@@ -93,6 +101,7 @@ impl RolePermissions {
             tags,
             deny_all: false,
             allowed_tool_tags: BTreeSet::new(),
+            safe_only: false,
         }
     }
 
@@ -108,6 +117,7 @@ impl RolePermissions {
             tags,
             deny_all: false,
             allowed_tool_tags: BTreeSet::new(),
+            safe_only: false,
         }
     }
 
@@ -126,7 +136,19 @@ impl RolePermissions {
             tags,
             deny_all: false,
             allowed_tool_tags,
+            safe_only: false,
         }
+    }
+
+    /// (M27) Giới hạn thêm lượt này **chỉ chạy được tool `Risk::Safe`** (voice push-to-talk).
+    ///
+    /// Đây là ràng buộc bổ sung chứ không phải role mới: giữ nguyên role/tags để hiển thị
+    /// và ngân sách, chỉ bật cờ để tầng thực thi và lọc payload tool bỏ qua mọi tool nguy
+    /// hiểm. Router gọi khi `Incoming.voice = true`.
+    #[must_use]
+    pub fn restrict_to_safe_only(mut self) -> Self {
+        self.safe_only = true;
+        self
     }
 
     /// Role này có thấy mọi tool không?

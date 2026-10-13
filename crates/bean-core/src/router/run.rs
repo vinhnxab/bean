@@ -100,6 +100,14 @@ impl Router {
         // tool (payload và tầng thực thi) đều dùng **cùng** struct này nên không thể lệch nhau,
         // và không logic RBAC nào nằm rải trong tool/role (ràng buộc `Plan.md` mục 4.3).
         let permissions: RolePermissions = config.permissions_for(&queued.incoming.user_id);
+        // (M27) Lượt giọng nói push-to-talk chỉ được chạy tool `Risk::Safe`. Áp ở đúng
+        // điểm resolve quyền duy nhất (M21.3) để cả lọc payload lẫn tầng thực thi dùng
+        // chung một struct — không có logic RBAC thứ hai rải rác.
+        let permissions = if queued.incoming.voice {
+            permissions.restrict_to_safe_only()
+        } else {
+            permissions
+        };
         // (M21.1) Project của lượt; `execute` chỉ chạy sau khi `submit` đã validate qua
         // `resolve_project`, nên ở đây dùng `unwrap_or(default)` là lưới an toàn.
         let project = queued

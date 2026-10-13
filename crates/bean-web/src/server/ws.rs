@@ -142,7 +142,7 @@ async fn run_socket(
                             Ok(ClientMsg::Ping) => {
                                 if send_msg(&mut socket, &ServerMsg::Pong).await.is_err() { break; }
                             }
-                            Ok(ClientMsg::Start { session_id, text }) => {
+                            Ok(ClientMsg::Start { session_id, text, voice }) => {
                                 if text.len() > MAX_WS_MESSAGE_BYTES {
                                     let _ = send_msg(&mut socket, &ServerMsg::Error {
                                         session_id: Some(session_id),
@@ -150,7 +150,7 @@ async fn run_socket(
                                         code: "text_too_large".into(),
                                         message: "nội dung vượt giới hạn".into(),
                                     }).await;
-                                } else if handle_start(&state, &user_id, session_id, text).await.is_err() {
+                                } else if handle_start(&state, &user_id, session_id, text, voice).await.is_err() {
                                     let _ = send_msg(&mut socket, &ServerMsg::Error {
                                         session_id: Some(session_id),
                                         run_id: None,
@@ -222,6 +222,7 @@ async fn handle_start(
     user_id: &str,
     session_id: i64,
     text: String,
+    voice: bool,
 ) -> Result<(), ()> {
     let info = state
         .store
@@ -235,7 +236,9 @@ async fn handle_start(
     state
         .router
         .submit(
-            Incoming::new("web", user_id, user_id, text).with_session(SessionId::new(session_id)),
+            Incoming::new("web", user_id, user_id, text)
+                .with_session(SessionId::new(session_id))
+                .with_voice(voice),
         )
         .await
         .map_err(|_| ())?;
@@ -441,12 +444,13 @@ fn map_run_event(event: RunEvent) -> Option<ServerMsg> {
         RunEvent::Final {
             session_id,
             run_id,
+            text,
             message_id,
-            ..
         } => ServerMsg::Final {
             session_id: session_id.get(),
             run_id: run_id.as_str().into(),
             message_id: message_id.unwrap_or_default(),
+            text,
         },
         RunEvent::Error {
             session_id,

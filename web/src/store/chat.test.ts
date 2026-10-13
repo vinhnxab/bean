@@ -28,9 +28,13 @@ describe("chat event state", () => {
       ok: true,
       output_preview: "ok",
     });
-    const final = useChatStore
-      .getState()
-      .applyServerMessage({ type: "final", session_id: 1, run_id: "run-1", message_id: 99 });
+    const final = useChatStore.getState().applyServerMessage({
+      type: "final",
+      session_id: 1,
+      run_id: "run-1",
+      message_id: 99,
+      text: "xong",
+    });
 
     expect(queued).toBeNull();
     expect(started?.sessionId).toBe(1);
@@ -38,9 +42,13 @@ describe("chat event state", () => {
     expect(final).toEqual({ sessionId: 1, messageId: 99, runId: "run-1" });
     expect(useChatStore.getState().runsBySession[1]?.status).toBe("idle");
     expect(
-      useChatStore
-        .getState()
-        .applyServerMessage({ type: "final", session_id: 1, run_id: "run-1", message_id: 99 }),
+      useChatStore.getState().applyServerMessage({
+        type: "final",
+        session_id: 1,
+        run_id: "run-1",
+        message_id: 99,
+        text: "xong",
+      }),
     ).toBeNull();
   });
 
@@ -100,9 +108,13 @@ describe("chat event state", () => {
     });
     expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Lần sau");
 
-    const final = useChatStore
-      .getState()
-      .applyServerMessage({ type: "final", session_id: 1, run_id: "run-1", message_id: 42 });
+    const final = useChatStore.getState().applyServerMessage({
+      type: "final",
+      session_id: 1,
+      run_id: "run-1",
+      message_id: 42,
+      text: "xong",
+    });
     expect(final).toEqual({ sessionId: 1, messageId: 42, runId: "run-1" });
     expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("");
   });

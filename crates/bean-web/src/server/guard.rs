@@ -59,8 +59,11 @@ pub async fn security_headers(request: Request, next: Next) -> Response {
     let headers = response.headers_mut();
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
+        // `media-src 'self' blob:` (M27): TTS trả audio rồi phát bằng object URL của
+        // `Blob` (blob: cùng nguồn gốc). Không nới `script-src`/`default-src`; `data:`
+        // cho media vẫn bị chặn nên ảnh/âm thanh nhúng dữ liệu không lọt qua được.
         HeaderValue::from_static(
-            "default-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; style-src 'self' 'unsafe-inline'",
+            "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; style-src 'self' 'unsafe-inline'",
         ),
     );
     headers.insert(

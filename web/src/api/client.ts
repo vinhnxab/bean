@@ -31,6 +31,11 @@ import type {
   ToolListResponse,
   UpdateSessionRequest,
   UsageListResponse,
+  VoiceStatusResponse,
+  VoiceSynthesizeRequest,
+  VoiceSynthesizeResponse,
+  VoiceTranscribeRequest,
+  VoiceTranscribeResponse,
 } from "@/api/bindings";
 import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
 
@@ -256,4 +261,18 @@ export const api = {
     requestJson<AuditListResponse>(withQuery("/api/audit", { before, limit }), { signal }),
 
   status: (signal?: AbortSignal) => requestJson<StatusResponse>("/api/status", { signal }),
+
+  /**
+   * Trạng thái voice (M27). UI gọi một lần để quyết định có hiện nút mic.
+   * Voice tắt vẫn trả 200 với `enabled: false` — không phải lỗi.
+   */
+  voiceStatus: (signal?: AbortSignal) => requestJson<VoiceStatusResponse>("/api/voice", { signal }),
+
+  /** STT: audio base64 trong JSON (xem `VoiceTranscribeRequest`). */
+  transcribe: (request: VoiceTranscribeRequest) =>
+    requestJson<VoiceTranscribeResponse>("/api/voice/transcribe", { method: "POST", body: request }),
+
+  /** TTS: trả audio base64 để client dựng `Blob` và phát. */
+  synthesize: (request: VoiceSynthesizeRequest) =>
+    requestJson<VoiceSynthesizeResponse>("/api/voice/synthesize", { method: "POST", body: request }),
 };

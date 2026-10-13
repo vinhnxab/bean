@@ -38,12 +38,15 @@ fn absolute_workspace(workspace: &Path) -> PathBuf {
 /// * `user_md` — nội dung file `USER.md` (workspace). Để trống nếu chưa có.
 /// * `role` — tên role sau khi resolve RBAC (M24). Dùng để chèn hướng dẫn riêng cho
 ///   domain; rỗng/không khớp thì không chèn gì.
+/// * `voice` — lượt này bắt nguồn từ giọng nói push-to-talk (M27). `true` ⇒ chèn
+///   [`VOICE_GUIDANCE`] yêu cầu model trả lời bằng một câu ngắn để TTS đọc được.
 pub fn system_prompt(
     config: &AgentConfig,
     skills_index: &str,
     memory_md: &str,
     user_md: &str,
     role: &str,
+    voice: bool,
 ) -> String {
     let mut prompt = format!(
         r#"You are {name}, a personal AI assistant running on the user's own machine.
@@ -98,8 +101,23 @@ Current time: {now} ({timezone})."#,
         prompt.push_str("\n\n");
         prompt.push_str(guidance);
     }
+    if voice {
+        prompt.push_str("\n\n");
+        prompt.push_str(VOICE_GUIDANCE);
+    }
     prompt
 }
+
+/// Hướng dẫn riêng cho lượt voice push-to-talk (M27 mục 9.5).
+///
+/// Model phải trả lời bằng **một câu ngắn** (≤ ~40 ký tự) vì đầu ra sẽ được TTS đọc thành
+/// tiếng. Nêu bằng tiếng Anh để model tuân thủ tốt, giống phần còn lại của system prompt.
+const VOICE_GUIDANCE: &str = r#"# Voice reply (push-to-talk)
+- This turn arrived as spoken audio. Your final text reply will be read aloud by TTS.
+- Reply with ONE short spoken sentence, at most ~40 characters, in the user's language.
+- Do not use markdown, lists, code, links, or emojis. Speak naturally, as to a person.
+- You may still use Safe tools (read/list/grep/search) to find the answer, but keep the
+  spoken reply itself to a single brief sentence."#;
 
 /// Hướng dẫn riêng cho vai trò marketing (M24 mục 5).
 ///
@@ -134,7 +152,7 @@ mod tests {
     use std::path::Path;
 
     fn prompt_for(role: &str) -> String {
-        system_prompt(&AgentConfig::default(), "", "", "", role)
+        system_prompt(&AgentConfig::default(), "", "", "", role, false)
     }
 
     /// M24 mục 5: vai trò marketing phải được nhắc **không bịa số liệu/testimonial** và
@@ -165,6 +183,21 @@ mod tests {
                 "vai trò `{role}` không được nhận hướng dẫn marketing"
             );
         }
+    }
+
+    /// Lượt voice (push-to-talk, M27) phải nhận hướng dẫn trả lời ngắn để TTS đọc được.
+    #[test]
+    fn voice_turn_gets_short_reply_guidance() {
+        let prompt = system_prompt(&AgentConfig::default(), "", "", "", "", true);
+        assert!(prompt.contains("# Voice reply"), "{prompt}");
+        assert!(prompt.contains("ONE short spoken sentence"), "{prompt}");
+    }
+
+    /// Lượt thường không nhận hướng dẫn voice.
+    #[test]
+    fn normal_turn_gets_no_voice_guidance() {
+        let prompt = prompt_for("");
+        assert!(!prompt.contains("# Voice reply"), "{prompt}");
     }
 
     /// Hướng dẫn nối **sau** phần `# Environment`, không chen giữa các mục cũ.
@@ -225,7 +258,7 @@ mod tests {
             workspace: Path::new("./workspace").to_path_buf(),
             ..AgentConfig::default()
         };
-        let prompt = system_prompt(&config, "", "", "", "");
+        let prompt = system_prompt(&config, "", "", "", "", false);
 
         assert!(prompt.contains("absolute path"), "{prompt}");
         // Đường dẫn tuyệt đối phải nằm trong prompt (chứ không chỉ mẹo "absolute path").

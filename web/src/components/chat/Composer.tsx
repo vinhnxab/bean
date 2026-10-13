@@ -1,6 +1,7 @@
 import gsap from "gsap";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
+import { VoiceButton } from "@/components/chat/VoiceButton";
 import { useI18n } from "@/i18n";
 import { Enter, useGsapAnimate } from "@/lib/anim";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,10 @@ export type ComposerProps = {
   stopping: boolean;
   disabled: boolean;
   sendError: boolean;
+  /** Bật nút mic push-to-talk (M27) — chỉ khi server đã bật voice. */
+  voiceEnabled?: boolean;
+  /** Kết quả STT được gửi thẳng như một lượt voice (Safe-only + trả lời ngắn). */
+  onVoice?: (text: string) => void;
 };
 
 export function Composer({
@@ -42,6 +47,8 @@ export function Composer({
   stopping,
   disabled,
   sendError,
+  voiceEnabled = false,
+  onVoice,
 }: ComposerProps) {
   const { t } = useI18n();
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -108,6 +115,7 @@ export function Composer({
             sendError ? "border-alert" : "border-rule",
           )}
         >
+          {voiceEnabled && onVoice ? <VoiceButton disabled={disabled} onResult={onVoice} /> : null}
           <textarea
             ref={ref}
             value={value}

@@ -18,7 +18,7 @@ import {
   type StoredToolCall,
   textFromDto,
 } from "@/features/chat/messages";
-import { useSessionMessages } from "@/features/chat/queries";
+import { useSessionMessages, useVoiceStatus } from "@/features/chat/queries";
 import { useRealtime } from "@/features/chat/RealtimeProvider";
 import { useI18n } from "@/i18n";
 import { Enter, type ScrollTween, tweenToBottom, useGsapAnimate } from "@/lib/anim";
@@ -41,6 +41,7 @@ export function ChatPage() {
 function ChatSession({ sessionId }: { sessionId: number }) {
   const { t } = useI18n();
   const history = useSessionMessages(sessionId);
+  const voice = useVoiceStatus();
   const { status, sendStart, sendCancel, sendConfirm } = useRealtime();
   const run = useChatStore((state) => state.runsBySession[sessionId]);
   const allConfirms = useChatStore((state) => state.confirmsById);
@@ -209,6 +210,27 @@ function ChatSession({ sessionId }: { sessionId: number }) {
     setAtBottom(true);
   }
 
+  /**
+   * Gửi một lượt voice (M27): văn bản đến từ mic được đánh dấu `voice = true` để
+   * Router giới hạn tool ở mức `Safe` và yêu cầu model trả lời một câu ngắn cho TTS.
+   */
+  const sendVoice = useCallback(
+    (recognized: string) => {
+      const value = recognized.trim();
+      if (!value || status !== "connected") {
+        setSendError(true);
+        return;
+      }
+      if (!sendStart(sessionId, value, true)) {
+        setSendError(true);
+        return;
+      }
+      setSendError(false);
+      setAtBottom(true);
+    },
+    [sendStart, sessionId, status],
+  );
+
   function loadOlder() {
     const element = scrollRef.current;
     if (element) previousHeight.current = element.scrollHeight;
@@ -346,6 +368,8 @@ function ChatSession({ sessionId }: { sessionId: number }) {
         stopping={run?.status === "stopping"}
         disabled={status !== "connected"}
         sendError={sendError}
+        voiceEnabled={voice.data?.enabled === true}
+        onVoice={sendVoice}
       />
     </div>
   );

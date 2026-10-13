@@ -62,6 +62,7 @@ impl Config {
         self.validate_marketing()?;
         self.validate_infra_scope()?;
         self.validate_qa()?;
+        self.validate_voice()?;
         self.validate_projects()?;
         self.validate_web_and_channels()?;
         self.validate_browser()?;

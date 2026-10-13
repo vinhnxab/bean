@@ -306,6 +306,13 @@ export const vi = {
   "markdown.expandCode": "Mở rộng khối mã",
   "markdown.plainText": "văn bản thuần",
   "markdown.hiddenLines": "{count} dòng ẩn",
+  // --- Voice push-to-talk (M27) --------------------------------------------
+  "chat.voice.start": "Bắt đầu ghi âm",
+  "chat.voice.stop": "Dừng ghi âm",
+  "chat.voice.transcribing": "Đang nhận dạng giọng nói…",
+  "chat.voice.error": "Không nhận dạng được giọng nói. Thử lại.",
+  "chat.voice.denied": "Trình duyệt chưa được cấp quyền micro.",
+  "chat.voice.unsupported": "Trình duyệt không hỗ trợ ghi âm.",
 } as const;
 
 export type MessageKey = keyof typeof vi;

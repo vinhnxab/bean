@@ -31,6 +31,12 @@ pub struct Incoming {
     pub session_id: Option<SessionId>,
     /// Project profile muốn dùng (M21.1); `None` ⇒ project mặc định.
     pub project: Option<String>,
+    /// Lượt này bắt nguồn từ giọng nói push-to-talk (M27).
+    ///
+    /// `true` ⇒ Router giới hạn lượt chỉ chạy tool `Risk::Safe` (xem
+    /// [`bean_types::RolePermissions::restrict_to_safe_only`]) và chèn hướng dẫn trả lời
+    /// ngắn vào system prompt. Adapter web đặt cờ này khi tin nhắn đến từ nút mic.
+    pub voice: bool,
 }
 
 impl Incoming {
@@ -49,6 +55,7 @@ impl Incoming {
             text: text.into(),
             session_id: None,
             project: None,
+            voice: false,
         }
     }
 
@@ -63,6 +70,13 @@ impl Incoming {
     #[must_use]
     pub fn with_project(mut self, project: impl Into<String>) -> Self {
         self.project = Some(project.into());
+        self
+    }
+
+    /// Đánh dấu lượt là giọng nói push-to-talk (M27).
+    #[must_use]
+    pub fn with_voice(mut self, voice: bool) -> Self {
+        self.voice = voice;
         self
     }
 }

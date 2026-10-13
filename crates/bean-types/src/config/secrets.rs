@@ -85,6 +85,27 @@ impl Config {
     }
 }
 impl Config {
+    /// Đọc credential ElevenLabs của `[voice]` (M27).
+    ///
+    /// Trả `None` khi voice tắt hoặc chế độ `local` (không cần key). Khi voice **bật** ở
+    /// chế độ `api` mà biến chưa đặt thì báo lỗi lúc khởi động — người vận hành cần biết
+    /// ngay là chưa có key thay vì tưởng TTS/STT sẽ chạy được.
+    ///
+    /// # Errors
+    /// [`ConfigError::MissingEnv`] kể voice bật chế độ `api` mà `api_key_env` thiếu/rỗng.
+    pub fn resolve_voice_api_key(&self) -> Result<Option<SecretString>, ConfigError> {
+        if !self.voice.enabled || self.voice.provider != SpeechProviderKind::Api {
+            return Ok(None);
+        }
+        let key = read_required(
+            &|name: &str| std::env::var(name).ok(),
+            "voice.api_key_env",
+            &self.voice.api_key_env,
+        )?;
+        Ok(Some(key))
+    }
+}
+impl Config {
     /// Read optional API key for `web_search` from biến môi trường được cấu hình.
     ///
     /// Trả `None` khi nhóm `web` tắt, provider không cần key (SearXNG), hoặc biến chưa

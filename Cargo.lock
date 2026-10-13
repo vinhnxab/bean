@@ -303,6 +303,7 @@ dependencies = [
  "bean-scan",
  "bean-security",
  "bean-skills",
+ "bean-speech",
  "bean-tools",
  "bean-types",
  "bean-web",
@@ -577,6 +578,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bean-speech"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bean-types",
+ "reqwest 0.13.5",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "bean-tools"
 version = "0.1.0"
 dependencies = [
@@ -616,11 +635,13 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-extra",
+ "base64 0.22.1",
  "bean-core",
  "bean-llm",
  "bean-memory",
  "bean-security",
  "bean-skills",
+ "bean-speech",
  "bean-tools",
  "bean-types",
  "chrono",
@@ -2993,6 +3014,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -3003,6 +3025,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",

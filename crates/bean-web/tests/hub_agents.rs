@@ -25,7 +25,7 @@ use bean_skills::SkillCatalog;
 use bean_tools::ToolRegistry;
 use bean_types::config::RoleConfig;
 use bean_types::{Config, LlmResponse};
-use bean_web::{AuthService, WebState, build_router, set_password};
+use bean_web::{AuthService, WebState, WebStateDeps, build_router, set_password};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -100,7 +100,17 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         skills: Some(skills.clone()),
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
-    let state = WebState::new(config, store, router, auth, None, skills, Some(workspace)).unwrap();
+    let state = WebState::new(WebStateDeps {
+        config,
+        store,
+        router,
+        auth,
+        audit: None,
+        skills,
+        workspace: Some(workspace),
+        speech: None,
+    })
+    .unwrap();
     (tempfile::tempdir().unwrap(), build_router(state))
 }
 

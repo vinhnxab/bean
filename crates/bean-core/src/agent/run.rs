@@ -145,10 +145,13 @@ impl<'a> Agent<'a> {
                 store,
                 config,
                 session,
-                workspace.as_deref(),
-                skills_index,
-                config.context_budget_for(permissions),
-                &permissions.role,
+                crate::context::BuildContextOptions {
+                    workspace: workspace.as_deref(),
+                    skills_index,
+                    context_budget: config.context_budget_for(permissions),
+                    role: &permissions.role,
+                    voice: permissions.safe_only,
+                },
             )
             .await?;
             let system = ctx.system;

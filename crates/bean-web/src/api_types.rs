@@ -541,6 +541,9 @@ pub enum ClientMsg {
     Start {
         session_id: i64,
         text: String,
+        /// (M27) Lượt bắt nguồn từ nút mic push-to-talk — Router sẽ giới hạn Safe-only.
+        #[serde(default)]
+        voice: bool,
     },
     Cancel {
         session_id: i64,
@@ -612,6 +615,8 @@ pub enum ServerMsg {
         session_id: i64,
         run_id: String,
         message_id: i64,
+        /// (M27) Văn bản câu trả lời cuối — client dùng để gọi TTS khi lượt là voice.
+        text: String,
     },
     Error {
         session_id: Option<i64>,
@@ -871,4 +876,69 @@ pub struct SystemResponse {
     pub mcp_clients: usize,
     /// Tool browser (M26) có bật không.
     pub browser_enabled: bool,
+}
+
+// ──────────────────────── Voice: push-to-talk STT/TTS (M27) ──────────────────
+
+/// `GET /api/voice` — trạng thái tính năng voice để UI quyết định có hiện nút mic.
+///
+/// Không lộ secret: chỉ trả **có bật hay không**, provider, ngôn ngữ và trần ký tự
+/// TTS. Tên biến môi trường của API key cũng không cần thiết cho UI.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VoiceStatusResponse {
+    /// Voice có bật trong cấu hình không (`[voice].enabled`).
+    pub enabled: bool,
+    /// Nhà cung cấp STT/TTS (`local` | `api`).
+    pub provider: String,
+    /// Mã ngôn ngữ ISO gửi cho STT/TTS (`vi`, `en`...).
+    pub language: String,
+    /// Trần ký tự gửi đi TTS.
+    pub max_speak_chars: u32,
+}
+
+/// `POST /api/voice/transcribe` — audio gửi lên **dạng base64 trong JSON**.
+///
+/// # Vì sao base64 chứ không phải multipart
+///
+/// `request_guard` bắt buộc mọi request thay đổi dữ liệu phải có
+/// `Content-Type: application/json` (mục 15.7 — chống CSRF). Giữ nguyên bất biến đó
+/// quan trọng hơn việc tiết kiệm ~33% băng thông: clip push-to-talk chỉ dài vài
+/// giây. Trần 1 MB của `MAX_BODY_BYTES` giới hạn audio thô vào khoảng 750 KB — quá
+/// đủ cho một câu nói.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct VoiceTranscribeRequest {
+    /// Byte audio đã mã hoá base64 (webm/opus, wav...).
+    pub audio_base64: String,
+    /// MIME type của audio, ví dụ `audio/webm`.
+    pub mime: String,
+}
+
+/// Kết quả STT.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VoiceTranscribeResponse {
+    /// Văn bản nhận dạng được.
+    pub text: String,
+}
+
+/// `POST /api/voice/synthesize` — văn bản cần đọc thành tiếng.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct VoiceSynthesizeRequest {
+    /// Văn bản cần đọc; server tự cắt theo `[voice].max_speak_chars`.
+    pub text: String,
+}
+
+/// Kết quả TTS: audio trả về **dạng base64** để client dựng `Blob` và phát.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VoiceSynthesizeResponse {
+    /// Byte audio đã mã hoá base64 (MP3 từ ElevenLabs, WAV từ Piper).
+    pub audio_base64: String,
+    /// MIME type để trình duyệt biết cách phát, ví dụ `audio/mpeg`.
+    pub mime: String,
 }

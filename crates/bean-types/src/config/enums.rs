@@ -26,6 +26,27 @@ impl LlmProviderKind {
     }
 }
 
+/// Nhà cung cấp STT/TTS cho `[voice]` (M27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechProviderKind {
+    /// Tiến trình con `whisper-cli` (STT) + `piper` (TTS) trên máy chủ — không cần mạng.
+    Local,
+    /// ElevenLabs qua HTTPS — cần API key riêng, audio rời khỏi máy.
+    Api,
+}
+
+impl SpeechProviderKind {
+    /// Chuỗi như trong file cấu hình.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Api => "api",
+        }
+    }
+}
+
 /// Chế độ sandbox cho `run_shell` (agents.md mục 15.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

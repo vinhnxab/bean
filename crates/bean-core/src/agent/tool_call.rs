@@ -63,6 +63,32 @@ impl<'a> Agent<'a> {
         let risk = registry
             .get(&call.name)
             .map_or(bean_types::Risk::Safe, |tool| tool.risk(&call.args));
+
+        // (M27) Lượt voice (`safe_only`) chỉ được chạy tool `Risk::Safe`. Đây là chốt chặn
+        // ở tầng thực thi dùng **cùng** struct `RolePermissions` mà Router đã resolve —
+        // model không thể gọi gián tiếp tool nguy hiểm dù ảo giác sinh ra tên tool (args
+        // là JSON không tin cậy). Không hỏi xác nhận: lượt giọng nói không có kênh trực
+        // quan để duyệt, nên thay vì treo chờ thì chặn và báo model rõ ràng.
+        if permissions.safe_only && risk != Risk::Safe {
+            let message = format!(
+                "Lượt này bắt nguồn từ giọng nói (voice) nên chỉ được chạy tool an toàn (Safe). \
+                 Tool `{}` có mức rủi ro cao hơn và đã bị chặn. Hãy dùng tool đọc/tra cứu hoặc \
+                 hỏi người dùng gõ thay vì nói.",
+                call.name
+            );
+            tracing::warn!(tool = %call.name, role = %permissions.role, "chặn tool nguy hiểm trong lượt voice (safe_only)");
+            append_run_message(
+                store,
+                session,
+                &mut state.transcript,
+                Message::tool_error(call.id.clone(), message.clone()),
+            )
+            .await?;
+            io.on_tool_start(&call.id, &call.name, risk, &call.name, "");
+            io.on_tool_end(&call.id, &call.name, false, &message);
+            return Ok(());
+        }
+
         let args_preview = args_preview(&call.args);
         io.on_tool_start(&call.id, &call.name, risk, &call.name, &args_preview);
 

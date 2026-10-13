@@ -48,6 +48,11 @@ export const testServer = setupServer(
   http.get("/api/mcp", () => HttpResponse.json({ servers: [] })),
   http.get("/api/usage", () => HttpResponse.json({ days: [], daily_token_budget: 1000, today_tokens: 0 })),
   http.get("/api/system", () => HttpResponse.json(SYSTEM_FIXTURE)),
+  // (M27) Mặc định voice TẮT: màn chat luôn hỏi trạng thái này để quyết định có hiện
+  // nút mic. Test nào cần bật thì `testServer.use(...)` ghi đè.
+  http.get("/api/voice", () =>
+    HttpResponse.json({ enabled: false, provider: "local", language: "vi", max_speak_chars: 400 }),
+  ),
 );
 
 /**

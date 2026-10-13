@@ -19,6 +19,7 @@
 //! ├─ channels.rs              [web] [telegram]
 //! ├─ integrations.rs          [[mcp_servers]] [mcp] [browser]
 //! ├─ products.rs              [billing] [scan] [marketing] [qa]
+//! ├─ voice.rs                 [voice] push-to-talk (M27)
 //! ├─ load.rs                  load / load_or_default / validate
 //! ├─ access.rs                accessor rbac / role / mcp / project
 //! ├─ validate.rs              validate lõi
@@ -45,10 +46,14 @@ mod secrets;
 mod tools;
 mod validate;
 mod validate_integrations;
+mod validate_voice;
+mod voice;
 
 pub use agent::{AgentConfig, DataConfig, ProjectConfig, RoleConfig};
 pub use channels::{TelegramConfig, WebConfig};
-pub use enums::{LlmProviderKind, QaRunner, SandboxMode, ScanTargetKind, WebSearchProvider};
+pub use enums::{
+    LlmProviderKind, QaRunner, SandboxMode, ScanTargetKind, SpeechProviderKind, WebSearchProvider,
+};
 pub use error::ConfigError;
 pub use integrations::{BrowserConfig, McpClientConfig, McpServerConfig, McpServerConfigSettings};
 pub use llm::{LearningConfig, LlmConfig, WebSearchConfig};
@@ -58,6 +63,7 @@ pub use products::{
 };
 pub use tools::{SandboxConfig, SecurityConfig, ToolsConfig};
 pub use validate::validate_scope_value;
+pub use voice::VoiceConfig;
 
 /// Tên file cấu hình mặc định ở gốc workspace.
 pub const DEFAULT_CONFIG_FILE: &str = "bean.toml";
@@ -174,6 +180,8 @@ pub struct Config {
     pub marketing: MarketingConfig,
     /// `[qa]` — domain chạy test suite cho vai trò `qa` (M27).
     pub qa: QaConfig,
+    /// `[voice]` — push-to-talk trên web (M27).
+    pub voice: VoiceConfig,
     /// `[[projects]]` — project profile (M21.1). Rỗng ⇒ chỉ có project `default`
     /// ánh xạ tới `agent.workspace`.
     pub projects: Vec<ProjectConfig>,

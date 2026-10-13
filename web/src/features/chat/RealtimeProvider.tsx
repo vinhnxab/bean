@@ -1,13 +1,30 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { DecisionDto, ServerMsg } from "@/api/bindings";
+import { api } from "@/api/client";
 import { ChatSocket, type SocketStatus } from "@/api/ws";
 import { queryKeys } from "@/features/auth/queries";
+import { playBase64Audio } from "@/lib/audio";
 import { useChatStore } from "@/store/chat";
 
 type RealtimeValue = {
   status: SocketStatus;
-  sendStart: (sessionId: number, text: string) => boolean;
+  /**
+   * Gửi một tin bắt đầu run.
+   *
+   * `voice = true` khi nội dung đến từ nút mic push-to-talk (M27): Router giới hạn
+   * lượt chỉ chạy tool `Safe` và chèn hướng dẫn trả lời một câu ngắn để TTS đọc.
+   */
+  sendStart: (sessionId: number, text: string, voice?: boolean) => boolean;
   sendCancel: (sessionId: number) => boolean;
   sendConfirm: (confirmId: string, decision: DecisionDto) => boolean;
 };
@@ -24,6 +41,26 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const applySync = useChatStore((state) => state.applySync);
   const applyServerMessage = useChatStore((state) => state.applyServerMessage);
   const setConfirmSubmitting = useChatStore((state) => state.setConfirmSubmitting);
+
+  // Session đã phát một lượt `voice = true` và đang chờ `final` để đọc thành tiếng.
+  // Là `ref` vì không tham gia render — chỉ là bộ nhớ giữa `sendStart` và sự kiện
+  // `final` (tới sau đó, ở vòng select của socket).
+  const voiceTurns = useRef<Set<number>>(new Set());
+
+  /**
+   * Đọc câu trả lời cuối bằng TTS (M27). Lỗi (voice tắt, mạng, autoplay bị chặn)
+   * **không** được làm hỏng UI — người dùng vẫn đọc được tin nhắn trong khung chat.
+   */
+  const speakReply = useCallback(async (text: string) => {
+    const spoken = text.trim();
+    if (!spoken) return;
+    try {
+      const result = await api.synthesize({ text: spoken });
+      await playBase64Audio(result.audio_base64, result.mime);
+    } catch {
+      // Im lặng có chủ đích.
+    }
+  }, []);
 
   useEffect(() => {
     const instance = new ChatSocket({
@@ -46,6 +83,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           if (message.type === "notification") {
             void queryClient.invalidateQueries({ queryKey: queryKeys.skillDrafts });
           }
+          // Lượt voice: đọc câu trả lời cuối bằng TTS. Chỉ đọc cho session vừa phát
+          // `voice = true`, nên thông báo nền của session khác không bị đọc oan.
+          if (message.type === "final" && voiceTurns.current.has(message.session_id)) {
+            voiceTurns.current.delete(message.session_id);
+            void speakReply(message.text);
+          }
         }
       },
     });
@@ -55,11 +98,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       instance.stop();
       setSocket(null);
     };
-  }, [applyServerMessage, applySync, queryClient]);
+  }, [applyServerMessage, applySync, queryClient, speakReply]);
 
   const sendStart = useCallback(
-    (sessionId: number, text: string) => {
-      if (!socket?.send({ type: "start", session_id: sessionId, text })) return false;
+    (sessionId: number, text: string, voice = false) => {
+      if (!socket?.send({ type: "start", session_id: sessionId, text, voice })) return false;
+      // Nhớ session này để đọc câu trả lời khi `final` tới (xem `onMessage`).
+      if (voice) voiceTurns.current.add(sessionId);
       markSubmitting(sessionId);
       return true;
     },
@@ -84,7 +129,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({ status, sendStart, sendCancel, sendConfirm }),
-    [sendCancel, sendConfirm, sendStart, status],
+    [status, sendStart, sendCancel, sendConfirm],
   );
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }

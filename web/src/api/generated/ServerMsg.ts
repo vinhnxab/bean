@@ -10,4 +10,8 @@ export type ServerMsg = { "type": "sync", running: Array<RunningInfo>, pending_c
 /**
  * Role của agent đang chờ duyệt; `null` khi RBAC tắt.
  */
-role: string | null, } | { "type": "confirm_resolved", confirm_id: string, outcome: string, } | { "type": "final", session_id: number, run_id: string, message_id: number, } | { "type": "error", session_id: number | null, run_id: string | null, code: string, message: string, } | { "type": "notification", session_id: number, message_id: number, } | { "type": "pong" };
+role: string | null, } | { "type": "confirm_resolved", confirm_id: string, outcome: string, } | { "type": "final", session_id: number, run_id: string, message_id: number, 
+/**
+ * (M27) Văn bản câu trả lời cuối — client dùng để gọi TTS khi lượt là voice.
+ */
+text: string, } | { "type": "error", session_id: number | null, run_id: string | null, code: string, message: string, } | { "type": "notification", session_id: number, message_id: number, } | { "type": "pong" };

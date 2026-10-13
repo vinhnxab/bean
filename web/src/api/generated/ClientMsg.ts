@@ -4,4 +4,8 @@ import type { DecisionDto } from "./DecisionDto";
 /**
  * Message client gửi lên WebSocket.
  */
-export type ClientMsg = { "type": "start", session_id: number, text: string, } | { "type": "cancel", session_id: number, } | { "type": "confirm", confirm_id: string, decision: DecisionDto, } | { "type": "ping" };
+export type ClientMsg = { "type": "start", session_id: number, text: string, 
+/**
+ * (M27) Lượt bắt nguồn từ nút mic push-to-talk — Router sẽ giới hạn Safe-only.
+ */
+voice: boolean, } | { "type": "cancel", session_id: number, } | { "type": "confirm", confirm_id: string, decision: DecisionDto, } | { "type": "ping" };

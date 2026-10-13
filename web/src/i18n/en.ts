@@ -299,4 +299,11 @@ export const en: Record<MessageKey, string> = {
   "markdown.expandCode": "Expand code block",
   "markdown.plainText": "plain text",
   "markdown.hiddenLines": "{count} hidden lines",
+  // --- Voice push-to-talk (M27) --------------------------------------------
+  "chat.voice.start": "Start recording",
+  "chat.voice.stop": "Stop recording",
+  "chat.voice.transcribing": "Transcribing speech…",
+  "chat.voice.error": "Could not transcribe the audio. Try again.",
+  "chat.voice.denied": "Microphone permission was denied.",
+  "chat.voice.unsupported": "This browser does not support audio recording.",
 };

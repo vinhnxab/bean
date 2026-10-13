@@ -467,10 +467,13 @@ async fn two_projects_do_not_mix_memory_md() {
             &store,
             &config,
             session,
-            ws.as_deref(),
-            "",
-            config.agent.context_budget_tokens,
-            &perms.role,
+            bean_core::context::BuildContextOptions {
+                workspace: ws.as_deref(),
+                skills_index: "",
+                context_budget: config.agent.context_budget_tokens,
+                role: &perms.role,
+                voice: perms.safe_only,
+            },
         )
         .await
         .unwrap();

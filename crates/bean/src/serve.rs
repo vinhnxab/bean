@@ -12,7 +12,7 @@ use bean_core::{Channel, Router, RouterDeps, Scheduler};
 use bean_memory::{SqliteStore, Store};
 use bean_skills::SkillCatalog;
 use bean_types::Config;
-use bean_web::{AuthService, WebChannel, WebState, build_router};
+use bean_web::{AuthService, WebChannel, WebState, WebStateDeps, build_router};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
@@ -117,15 +117,25 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
 
     let mut web_listener = None;
     if web_enabled {
-        let state = WebState::new(
-            config.clone(),
-            store_dyn.clone(),
-            router.clone(),
-            auth.context("web thiếu auth service")?,
-            audit.clone(),
-            skills.clone(),
-            workspace.clone(),
-        )?;
+        // M27: dựng provider STT/TTS ngay lúc khởi động. `build_speech` trả `None` khi
+        // voice tắt; bật mà thiếu key/model là lỗi khởi động tường minh (D6.4) — không
+        // âm thầm chạy tiếp với nút mic không bao giờ hoạt động.
+        let voice_key = config
+            .resolve_voice_api_key()
+            .context("đọc voice API key thất bại")?;
+        let speech = bean_speech::build_speech(&config, voice_key)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
+            .context("khởi tạo voice thất bại")?;
+        let state = WebState::new(WebStateDeps {
+            config: config.clone(),
+            store: store_dyn.clone(),
+            router: router.clone(),
+            auth: auth.context("web thiếu auth service")?,
+            audit: audit.clone(),
+            skills: skills.clone(),
+            workspace: workspace.clone(),
+            speech,
+        })?;
         let channel = Arc::new(WebChannel::new(state.notifications.clone()));
         router
             .register_channel(channel)

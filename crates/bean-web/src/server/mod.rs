@@ -45,6 +45,7 @@ use bean_core::{Channel, Router};
 use bean_memory::Store;
 use bean_security::AuditLog;
 use bean_skills::SkillCatalog;
+use bean_speech::SpeechProvider;
 use bean_tools::WorkspaceFs;
 use bean_types::{Config, Outbound};
 use tokio::sync::{Semaphore, broadcast};
@@ -67,6 +68,7 @@ mod rest_sessions;
 mod rest_skills;
 mod rest_tasks;
 mod rest_usage_system;
+mod rest_voice;
 mod routes;
 mod ui_assets;
 mod ws;
@@ -113,6 +115,12 @@ pub struct WebState {
     pub skills: SkillCatalog,
     /// Workspace capability cho memory files.
     pub workspace: Option<Arc<dyn WorkspaceFs>>,
+    /// Provider STT/TTS (M27); `None` khi `[voice].enabled = false`.
+    ///
+    /// Dựng sẵn một lần lúc khởi động (binary/model đã kiểm tra) rồi chia sẻ qua
+    /// `Arc`, không dựng lại cho mỗi request — tiến trình `whisper-cli`/`piper` và
+    /// client HTTPS dùng chung được.
+    pub speech: Option<Arc<dyn SpeechProvider>>,
     /// Broadcast notification từ scheduler/channel.
     pub notifications: broadcast::Sender<ServerMsg>,
     /// Thời điểm process bắt đầu.
@@ -132,17 +140,43 @@ impl std::fmt::Debug for WebState {
     }
 }
 
+/// Dependency để dựng [`WebState`] — theo mẫu `RouterDeps` của `bean-core`.
+///
+/// Struct thay vì 8 tham số rời: `clippy::too_many_arguments` bị cấm trong
+/// `Cargo.toml` (không thêm `#[allow]` trần), và đây đều là dependency injection nên
+/// gom lại một khối dễ đọc ở `serve`/test hơn.
+pub struct WebStateDeps {
+    /// Cấu hình đã validate.
+    pub config: Config,
+    /// Store dùng cho REST và Router.
+    pub store: Arc<dyn Store>,
+    /// Router sở hữu run, không gắn với kết nối.
+    pub router: Arc<Router>,
+    /// Auth service.
+    pub auth: AuthService,
+    /// Audit log tùy chọn.
+    pub audit: Option<Arc<AuditLog>>,
+    /// Catalog skill.
+    pub skills: SkillCatalog,
+    /// Workspace capability cho memory files.
+    pub workspace: Option<Arc<dyn WorkspaceFs>>,
+    /// Provider STT/TTS (M27); `None` khi voice tắt.
+    pub speech: Option<Arc<dyn SpeechProvider>>,
+}
+
 impl WebState {
     /// Tạo state và kiểm tra `public_origin` không có path/query/userinfo.
-    pub fn new(
-        config: Config,
-        store: Arc<dyn Store>,
-        router: Arc<Router>,
-        auth: AuthService,
-        audit: Option<Arc<AuditLog>>,
-        skills: SkillCatalog,
-        workspace: Option<Arc<dyn WorkspaceFs>>,
-    ) -> Result<Self, WebBuildError> {
+    pub fn new(deps: WebStateDeps) -> Result<Self, WebBuildError> {
+        let WebStateDeps {
+            config,
+            store,
+            router,
+            auth,
+            audit,
+            skills,
+            workspace,
+            speech,
+        } = deps;
         let public_origin =
             Url::parse(&config.web.public_origin).map_err(|_| WebBuildError::InvalidOrigin)?;
         if !matches!(public_origin.scheme(), "http" | "https")
@@ -164,6 +198,7 @@ impl WebState {
             audit,
             skills,
             workspace,
+            speech,
             notifications,
             started_at: Instant::now(),
             public_origin,
