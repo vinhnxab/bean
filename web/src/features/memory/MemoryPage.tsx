@@ -38,8 +38,8 @@ function MemoryFileEditor({ name }: { name: MemoryFileName }) {
   const dirty = draft !== null && draft !== original;
 
   useEffect(() => {
-    if (file.data && (draft === null || !dirty)) setDraft(file.data.content);
-  }, [dirty, draft, file.data]);
+    if (file.data && draft === null) setDraft(file.data.content);
+  }, [draft, file.data]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -52,9 +52,11 @@ function MemoryFileEditor({ name }: { name: MemoryFileName }) {
   }, [dirty]);
 
   async function confirmSave() {
+    const contentToSave = draft ?? original;
     try {
-      await save.mutateAsync({ name, request: { content: draft ?? original } });
+      await save.mutateAsync({ name, request: { content: contentToSave } });
       setConfirmOpen(false);
+      setDraft(null); // Reset to null so useEffect syncs with file.data
     } catch {
       // Mutation error is rendered below; keep the draft so the user can retry.
     }

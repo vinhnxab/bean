@@ -37,6 +37,8 @@ export const queryKeys = {
   usage: (days: number) => ["usage", { days }] as const,
   /** Cấu hình runtime đã khử secret. */
   system: ["system"] as const,
+  /** Cấu hình LLM runtime — cùng nguồn với lệnh `/model`. */
+  llmConfig: ["llm-config"] as const,
 };
 
 export function useAuth() {

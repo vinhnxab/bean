@@ -61,26 +61,14 @@ function DialogContent({
   useGsapAnimate(() => {
     const element = ref.current;
     if (!element) return;
-    // Hai hướng vào cho hai hình khối: hộp thoại bung ra giữa màn hình; flyout
-    // lịch sử (`data-slot="history-flyout"`) là ngăn kéo trượt từ mép trái.
-    if (element.dataset.slot === "history-flyout") {
-      gsap.from(element, {
-        opacity: 0,
-        x: -24,
-        duration: 0.22,
-        ease: "power2.out",
-        clearProps: "opacity,transform",
-      });
-    } else {
-      gsap.from(element, {
-        opacity: 0,
-        y: 10,
-        scale: 0.97,
-        duration: 0.22,
-        ease: "back.out(1.4)",
-        clearProps: "opacity,transform",
-      });
-    }
+    gsap.from(element, {
+      opacity: 0,
+      y: 10,
+      scale: 0.97,
+      duration: 0.22,
+      ease: "back.out(1.4)",
+      clearProps: "opacity,transform",
+    });
   }, []);
   return (
     <DialogPrimitive.Portal>

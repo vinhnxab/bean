@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import type { ReactNode } from "react";
@@ -84,6 +84,35 @@ describe("ChatLayout sidebar", () => {
     expect(screen.getByRole("link", { name: /MCP/ })).toHaveAttribute("href", "/mcp");
   });
 
+  // Cài đặt là mục "hệ thống" nằm ở **footer** sidebar, tách khỏi điều hướng
+  // chính — chat thường xuyên dùng nhất, cài đặt chỉ cần luôn biết tìm ở đáy.
+  it("Cài đặt nằm ở footer sidebar và trỏ /settings", async () => {
+    renderSidebar();
+    const settings = await screen.findByRole("link", { name: "Cài đặt" });
+    expect(settings).toHaveAttribute("href", "/settings");
+    // Footer nằm sau nav chính trong DOM (tách khỏi NAV_ITEMS).
+    const nav = screen.getByRole("navigation", { name: "Điều hướng chính" });
+    expect(nav.contains(settings)).toBe(false);
+  });
+
+  // Sidebar phải ở màn Cài đặt là **nav cài đặt**, không phải danh sách hội
+  // thoại: hai ngăn kéo không cùng tồn tại trên cùng một màn.
+  it("ở /settings, sidebar phải là nav cài đặt thay cho danh sách hội thoại", async () => {
+    renderManagement(
+      <Routes>
+        <Route element={<ChatLayout />}>
+          <Route path="/settings/:section" element={<div>providers</div>} />
+        </Route>
+      </Routes>,
+      ["/settings/providers"],
+    );
+
+    await screen.findByText("providers");
+    expect(screen.getByTestId("settings-sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Nhà cung cấp/ })).toHaveAttribute("href", "/settings/providers");
+  }, 15000);
+
   it("trang chu HUB khong loi danh sach hoi thoai vao", async () => {
     testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
     renderManagement(
@@ -95,6 +124,10 @@ describe("ChatLayout sidebar", () => {
     );
     await screen.findByText("hub");
     expect(screen.queryByLabelText("Tìm hội thoại")).not.toBeInTheDocument();
+    // HUB không có ngữ cảnh hội thoại: sidebar phải không render, và TopNav
+    // không có nút mở ngăn kéo hội thoại.
+    expect(screen.queryByTestId("chat-sidebar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mở danh sách hội thoại" })).not.toBeInTheDocument();
   }, 15000);
 
   // Mở bằng **bàn phím** chứ không bằng `user.click`: Radix bọc nội dung trong
@@ -147,11 +180,12 @@ describe("ChatLayout sidebar", () => {
     );
     // Skeleton nội dung: `role="status"` do `RouteFallback`.
     await screen.findByRole("status");
-    // Sidebar vẫn hiện đầy đủ — đây mới là điều cần giữ. Nhãn lấy đúng từ từ điển
-    // (`chat.logout`) để đổi copy không làm test hỏng theo.
+    // Sidebar trái vẫn hiện đầy đủ — đây mới là điều cần giữ. Nhãn lấy đúng từ
+    // từ điển (`common.account`) để đổi copy không làm test hỏng theo. Đăng xuất
+    // nằm trong menu tài khoản của TopNav, chưa mở menu thì chỉ có nút avatar.
     expect(screen.getByRole("link", { name: /Tools/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /MCP/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Đăng xuất" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tài khoản" })).toBeInTheDocument();
   });
 
   // Ba tính năng sidebar thêm ở đợt sửa giao diện: thu gọn được, mục điều
@@ -196,123 +230,75 @@ describe("ChatLayout sidebar", () => {
       expect(link.querySelector(".sr-only")).toHaveTextContent("Trò chuyện");
     }, 15000);
 
-    it("nút hội thoại mới còn dùng được khi thu gọn", async () => {
+    it("nút hội thoại mới nằm ở sidebar phải, không phụ thuộc rail trái", async () => {
       const user = renderSidebar();
       await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
 
-      // Rail giữ lại hành động quan trọng nhất: tạo hội thoại mới, làm được
-      // chỉ với một icon.
-      const create = screen.getByRole("button", { name: "Hội thoại mới" });
-      expect(create).toBeInTheDocument();
-      expect(create.querySelector(".sr-only")).toHaveTextContent("Hội thoại mới");
+      // Việc tạo hội thoại thuộc sidebar phải; rail trái thu gọn không có nghĩa
+      // là mất nút — hai sidebar độc lập với nhau.
+      expect(screen.getByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
     }, 15000);
 
-    // Flyout là câu trả lời cho "rail 80px thì đổi hội thoại bằng cách nào".
-    // Ba test dưới chốt đúng ba điều: mở được, **không chặn** nội dung chat, và
-    // đóng đúng cách.
-    describe("flyout danh sách hội thoại", () => {
-      it("chưa thu gọn thì không có nút lịch sử", async () => {
-        // Handler mặc định của `test/server.ts` trả `sessions: []`, nên phải mock
-        // riêng — không thì `findByText` chờ một danh sách vốn rỗng và test fail
-        // với lý do sai.
-        testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
-        renderSidebar();
-        // Danh sách đã nằm sẵn trong sidebar mở rộng; một nút mở lại nó là thừa.
-        await screen.findByText("Ke hoach hom nay");
-        expect(screen.queryByRole("button", { name: "Mở danh sách hội thoại" })).not.toBeInTheDocument();
-      }, 15000);
+    // Ngăn kéo hội thoại là câu trả lời cho "trên điện thoại thì đổi hội thoại
+    // bằng cách nào": nút mở nằm trên TopNav, kéo từ mép phải, có overlay.
+    describe("ngăn kéo hội thoại (mobile)", () => {
+      const drawer = () => screen.getByTestId("chat-sidebar");
 
-      it("thu gọn rồi bấm icon lịch sử thì danh sách hiện ra", async () => {
+      it("bấm icon trên TopNav thì danh sách hiện ra kèm overlay", async () => {
         testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
         const user = renderSidebar();
-        await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-
-        const toggle = screen.getByRole("button", { name: "Mở danh sách hội thoại" });
-        expect(toggle).toHaveAttribute("aria-expanded", "false");
-        // Rail không chứa nổi danh sách nên trước khi bấm, hội thoại chưa hiện.
-        expect(screen.queryByText("Ke hoach hom nay")).not.toBeInTheDocument();
+        const toggle = await screen.findByRole("button", { name: "Mở danh sách hội thoại" });
+        // Chưa mở: ngăn kéo không mang cờ mở (desktop thì luôn mở, không cần cờ).
+        expect(drawer()).not.toHaveAttribute("data-open");
 
         await user.click(toggle);
 
-        const flyout = await screen.findByRole("dialog");
-        expect(flyout).toHaveAttribute("data-slot", "history-flyout");
+        expect(drawer()).toHaveAttribute("data-open");
         expect(await screen.findByText("Ke hoach hom nay")).toBeInTheDocument();
-        // Ô tìm kiếm phải có thật: đây là lý do flyout hơn modal — cần lọc danh
-        // sách dài ngay trong bảng.
+        // Ô tìm kiếm phải có thật: cần lọc danh sách dài ngay trong ngăn kéo.
         expect(screen.getByLabelText("Tìm hội thoại")).toBeInTheDocument();
+        // Overlay mờ nằm ngay trước ngăn kéo trong DOM, là `<button>` để bấm ra
+        // ngoài đóng được bằng bàn phím.
+        const overlay = drawer().previousElementSibling;
+        expect(overlay).toHaveAttribute("aria-label", "Đóng");
       }, 15000);
 
-      it("không có overlay tối: nội dung chat phía sau vẫn thấy", async () => {
+      it("đóng bằng nút X trong đầu ngăn kéo", async () => {
+        testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
         const user = renderSidebar();
-        await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-        await user.click(screen.getByRole("button", { name: "Mở danh sách hội thoại" }));
-        await screen.findByRole("dialog");
+        await user.click(await screen.findByRole("button", { name: "Mở danh sách hội thoại" }));
+        await screen.findByText("Ke hoach hom nay");
 
-        // `modal={false}` ⇒ Radix không render `DialogOverlay`. Đây là điểm cốt
-        // lõi của thiết kế: modal sẽ che mất cuộc hội thoại đang đọc.
-        expect(document.querySelector("[data-slot='dialog-overlay']")).toBeNull();
-        // Vùng nội dung vẫn trong cây DOM, tức là vẫn nhìn thấy và đọc được.
-        expect(screen.getByText("chat")).toBeInTheDocument();
-      }, 15000);
+        // Nút X nằm trong chính ngăn kéo — `within` để không bấm nhầm nút "Đóng"
+        // của ngăn kéo điều hướng bên trái hay của overlay.
+        await user.click(within(drawer()).getByRole("button", { name: "Đóng" }));
 
-      it("đóng bằng Esc và đóng tự động khi bung sidebar ra", async () => {
-        const user = renderSidebar();
-        await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-        const toggle = screen.getByRole("button", { name: "Mở danh sách hội thoại" });
-
-        await user.click(toggle);
-        await screen.findByRole("dialog");
-        await user.keyboard("{Escape}");
-        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-
-        // Bung sidebar ra thì flyout phải tự đóng, không đè lên danh sách vừa
-        // lộ ra ở cùng mép trái.
-        await user.click(toggle);
-        await screen.findByRole("dialog");
-        await user.click(screen.getByRole("button", { name: "Mở rộng thanh điều hướng" }));
-        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        await waitFor(() => expect(drawer()).not.toHaveAttribute("data-open"));
+        // Overlay biến mất theo ngăn kéo.
+        await waitFor(() => expect(drawer().previousElementSibling).not.toHaveAttribute("aria-label"));
       }, 15000);
     });
   });
 
-  it("mở rộng: ngôn ngữ và chủ đề xếp dọc, kèm nhãn chữ", async () => {
+  // TopNav là nơi duy nhất chứa lựa chọn toàn cục: chủ đề và tài khoản. Đăng
+  // xuất phải nằm trong menu tài khoản — không bấm nhầm được khi chưa mở.
+  it("TopNav: chủ đề nằm trên thanh trên cùng, đăng xuất nằm trong menu tài khoản", async () => {
+    const user = userEvent.setup();
     renderSidebar();
-    const language = await screen.findByRole("combobox", { name: /Ngôn ngữ/ });
-    const theme = screen.getByRole("button", { name: /Giao diện/ });
 
-    // Xếp dọc chứ không phải hàng ngang: sau khi thêm nhãn, hàng ngang bị `truncate`
-    // cắt thành "Ngôn…"/"Giá…" — tệ hơn không có nhãn.
-    expect(language.parentElement).toBe(theme.parentElement);
-    expect(language.compareDocumentPosition(theme)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // Nút chủ đề là icon trơn: tên trợ năng là toàn bộ hành động, không có nhãn chữ.
+    const theme = screen.getByRole("button", { name: /Chuyển sang giao diện/ });
+    expect(theme).toHaveAccessibleName(/Chuyển sang giao diện/);
 
-    // Có nhãn chữ: icon trơn không nói được đây là gì.
-    expect(language).toHaveTextContent("Ngôn ngữ");
-    expect(language).toHaveTextContent("Tiếng Việt");
-    expect(theme).toHaveTextContent("Giao diện");
-  }, 15000);
-
-  // Rail thu gọn: nhãn chữ **không** hiện (80px không chứa nổi), chỉ còn icon —
-  // và phải xếp dọc vì 32 + 8 + 36 = 76px > 56px khả dụng.
-  it("thu gọn: ngôn ngữ và sáng/tối chỉ còn icon, xếp dọc", async () => {
-    const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-
-    const language = screen.getByRole("combobox", { name: /Ngôn ngữ/ });
-    const theme = screen.getByRole("button", { name: "Chuyển sang giao diện sáng" });
-
-    // Không chữ nhìn thấy; tên trợ năng vẫn đầy đủ (chỉ ở dạng thuộc tính).
-    expect(language).not.toHaveTextContent("Tiếng Việt");
-    expect(theme).not.toHaveTextContent("Giao diện");
-    // `aria-label` không có tiền tố "Giao diện" ở rail, vì không có chữ đó hiện.
-    expect(theme).toHaveAccessibleName("Chuyển sang giao diện sáng");
-
-    // Xếp dọc: hai ô là **anh em** cùng cha, không phải hai phần tử lồng nhau.
-    // `getBoundingClientRect` không dùng được ở đây — jsdom trả về 0 cho mọi
-    // phép đo, nên so `top` sẽ cho `0 > 0` là sai.
-    const row = language.closest("[data-slot='language-select']")?.parentElement;
-    expect(row).toContainElement(language);
-    expect(row).toContainElement(theme);
-    expect(language).not.toContainElement(theme);
+    // Chưa mở menu thì không có nút đăng xuất nào ngoài đó. Mở bằng bàn phím:
+    // giống test ngôn ngữ ở trên, cú click chuỗi-pointer trong file dài có thể
+    // bị bỏ qua (xem `SessionRow.test.tsx`), còn `focus` + `Enter` là đường
+    // ký tự mà Radix luôn lắng nghe.
+    expect(screen.queryByRole("button", { name: "Đăng xuất" })).not.toBeInTheDocument();
+    const account = await screen.findByRole("button", { name: "Tài khoản" });
+    account.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("menuitem", { name: "Đăng xuất" })).toBeInTheDocument();
   }, 15000);
 
   it("thu gọn: nút mở rộng sidebar nằm giữa rail", async () => {
@@ -320,72 +306,9 @@ describe("ChatLayout sidebar", () => {
     await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
 
     const expand = screen.getByRole("button", { name: "Mở rộng thanh điều hướng" });
-    // `justify-between` sẽ đẩy nút sang mép trái khi không còn khối tiêu đề bên
-    // cạnh; rail phải giữ cảm giác cột icon nên nút nằm giữa.
+    // Header chỉ còn một nút khi brand chuyển lên TopNav; rail phải giữ cảm giác
+    // cột icon nên nút nằm giữa.
     expect(expand.parentElement).toHaveClass("justify-center");
-  }, 15000);
-
-  // Chân sidebar phải **ở đáy** ở cả hai trạng thái. Trước đây khi thu gọn,
-  // `SessionList` không render nên footer trôi lên sát `nav` và treo lơ lửng giữa
-  // màn hình. `mt-auto` trên footer + `flex-1` trên `nav` là cặp đẩy nhau.
-  it("chân sidebar có mt-auto và nav có flex-1 để giữ chân ở đáy", async () => {
-    const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-
-    // Khối chân là **cha** của nút đăng xuất (không phải `lastElementChild`:
-    // portal của Radix sinh thêm phần tử con ở cuối `<aside>`).
-    const footer = screen.getByRole("button", { name: "Đăng xuất" }).parentElement;
-    expect(footer).toHaveClass("mt-auto");
-    // Nav phải hấp thụ khoảng trống, nếu không `mt-auto` của footer không có
-    // gì để đẩy.
-    const nav = screen.getByRole("navigation", { name: "Điều hướng chính" });
-    expect(nav).toHaveClass("md:flex-1");
-  }, 15000);
-
-  // Bỏ padding khi thu gọn: cả ba nút thu về ô vuông `size-8` không padding,
-  // thành cột icon thẳng hàng khớp với các mục điều hướng ngay trên.
-  it("thu gọn: ba nút chân sidebar không padding", async () => {
-    const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-
-    // Nút ngôn ngữ có `role="combobox"` (Radix `SelectTrigger`), **không** phải
-    // `button` — tìm sai role thì test fail với lý do không liên quan tới padding.
-    const targets = [
-      screen.getByRole("combobox", { name: /Ngôn ngữ/ }),
-      screen.getByRole("button", { name: /Chuyển sang giao diện sáng/ }),
-      screen.getByRole("button", { name: "Đăng xuất" }),
-    ];
-    for (const target of targets) {
-      // `\bp[xy]-\d` bắt `p-2`/`px-3`/`py-2`, không bắt nhầm `rounded-lg` hay
-      // `disabled:opacity-50` — `\b` chặn phần `p` trong `opacity`.
-      expect(target.className, target.getAttribute("data-slot") ?? target.tagName).not.toMatch(/\bp[xy]-\d/);
-      // Ô vuông 32px — khớp với các mục điều hướng ngay trên.
-      expect(target.className).toMatch(/\bsize-8\b/);
-    }
-    // Canh giữa bằng `items-center` của cha flex, không cần `mx-auto` từng nút.
-    expect(screen.getByRole("button", { name: "Đăng xuất" }).className).not.toContain("mx-auto");
-  }, 15000);
-
-  // Nút ngôn ngữ là `SelectTrigger`, có `border border-input` **trong component**;
-  // hai nút kia dùng `variant="ghost"` nên không viền. Ở rail 80px ô này thành
-  // nút duy nhất có viền — nhìn như ba nút khác nhau. Ở bản mở rộng thì viền đúng
-  // vì nó đọc là một ô nhập.
-  //
-  // Dùng `border-transparent` chứ không `border-0`: `twMerge` xem `border-input`
-  // và `border-0` là cùng nhóm rồi **xoá mất** `border-0`, còn `border-transparent`
-  // thì thay đúng màu viền và `border-width` của component vẫn giữ nên kích thước
-  // không đổi. Test này chặt cả hai: vừa phải có màu trong suốt, vừa phải bỏ
-  // `border-0` để không ai vô tình viết lại bằng nó.
-  it("thu gọn: nút ngôn ngữ trong suốt, mở rộng thì giữ viền", async () => {
-    const user = renderSidebar();
-    const trigger = () => screen.getByRole("combobox", { name: /Ngôn ngữ/ });
-
-    expect(trigger().className, "mở rộng phải có viền").toContain("border-input");
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-    expect(trigger().className, "thu gọn: viền phải trong suốt").toContain("border-transparent");
-    // `border-0` bị `twMerge` xoá mất, nên class này vô nghĩa — chặn để khỏi
-    // ai tưởng nó có tác dụng rồi viết lại.
-    expect(trigger().className).not.toContain("border-0");
   }, 15000);
 
   it("mục điều hướng dùng icon vector thay cho ký tự Unicode", async () => {

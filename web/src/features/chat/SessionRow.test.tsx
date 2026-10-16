@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 
 import type { SessionDto } from "@/api/bindings";
-import { SessionRow } from "@/features/chat/ChatLayout";
+import { SessionRow } from "@/features/chat/SessionList";
 import { renderManagement } from "@/test/management";
 import { testServer } from "@/test/server";
 

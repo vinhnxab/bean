@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
@@ -17,6 +18,7 @@ export function LoginPage() {
   const location = useLocation();
   const login = useLogin();
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const next = readNext(location.search);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -54,17 +56,27 @@ export function LoginPage() {
               <label className="block text-sm font-medium" htmlFor="password">
                 {t("login.password")}
               </label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="h-11"
-                required
-                disabled={login.isPending}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="h-11 pr-10"
+                  required
+                  disabled={login.isPending}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {error ? (
                 <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
                   {error.code === "rate_limited" ? t("login.rateLimited") : t("login.invalid")}

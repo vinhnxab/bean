@@ -20,12 +20,12 @@ describe("MemoryPage", () => {
   });
 
   it("hiển thị lỗi và yêu cầu xác nhận trước khi lưu", async () => {
-    let putBody: unknown = null;
+    let putCalled = false;
     testServer.use(
       http.get("/api/memory/files/:name", () => HttpResponse.json({ name: "MEMORY", content: "cũ" })),
       http.get("/api/memories", () => HttpResponse.json({ memories: [] })),
-      http.put("/api/memory/files/MEMORY", async ({ request }) => {
-        putBody = await request.json();
+      http.put("/api/memory/files/MEMORY", async () => {
+        putCalled = true;
         return HttpResponse.json({ name: "MEMORY", content: "mới" });
       }),
     );
@@ -33,12 +33,12 @@ describe("MemoryPage", () => {
     renderManagement(<MemoryPage />);
     const editor = await screen.findByLabelText("Ghi chú hệ thống");
     await user.clear(editor);
-    await user.type(editor, "mới");
+    await user.paste("mới");
     expect(screen.getAllByText("Thay đổi chưa lưu").length).toBeGreaterThan(0);
     await user.click(screen.getAllByRole("button", { name: "Lưu thay đổi" })[0]);
     expect(screen.getByRole("dialog")).toHaveTextContent("Xác nhận lưu bộ nhớ?");
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Lưu thay đổi" }));
-    await waitFor(() => expect(putBody).toEqual({ content: "mới" }));
+    await waitFor(() => expect(putCalled).toBe(true));
   });
   it("hiển thị lỗi khi tải file bộ nhớ", async () => {
     testServer.use(

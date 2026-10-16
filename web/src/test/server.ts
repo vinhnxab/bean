@@ -48,12 +48,30 @@ export const testServer = setupServer(
   http.get("/api/mcp", () => HttpResponse.json({ servers: [] })),
   http.get("/api/usage", () => HttpResponse.json({ days: [], daily_token_budget: 1000, today_tokens: 0 })),
   http.get("/api/system", () => HttpResponse.json(SYSTEM_FIXTURE)),
+  // Màn Cài đặt (providers). Model khớp `allowed_models[0]` để test vừa mở trang
+  // không lọt nhánh "dirty". Test nào cần kịch bản khác thì ghi đè theo use().
+  http.get("/api/config/llm", () => HttpResponse.json(LLM_CONFIG_FIXTURE)),
+  http.put("/api/config/llm/model", async ({ request }) => {
+    const body = (await request.json()) as { model: string };
+    return HttpResponse.json({ model: body.model });
+  }),
   // (M27) Mặc định voice TẮT: màn chat luôn hỏi trạng thái này để quyết định có hiện
   // nút mic. Test nào cần bật thì `testServer.use(...)` ghi đè.
   http.get("/api/voice", () =>
     HttpResponse.json({ enabled: false, provider: "local", language: "vi", max_speak_chars: 400 }),
   ),
 );
+
+/** Fixture `/api/config/llm` — đã khử secret: không có giá trị key nào ở đây. */
+export const LLM_CONFIG_FIXTURE = {
+  provider: "openai_compat",
+  model: "model-a",
+  allowed_models: ["model-a", "model-b", "model-c"],
+  api_key_env: "OPENROUTER_API_KEY",
+  base_url: "https://openrouter.ai/api/v1",
+  max_tokens: 16384,
+  key_configured: true,
+} as const;
 
 /**
  * Dữ liệu agent cho test — phản ánh đúng hệ trong `bean.example.toml`:

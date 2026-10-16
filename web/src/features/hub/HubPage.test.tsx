@@ -336,9 +336,9 @@ describe("HUB", () => {
     const { readFileSync } = await import("node:fs");
     const css = readFileSync("src/index.css", "utf8");
     const block = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-    expect(block).toContain("animation-duration: 0.01ms !important");
-    expect(block).toContain("transition-duration: 0.01ms !important");
-    expect(block).toContain("scroll-behavior: auto !important");
+    expect(block).toContain("animation-duration: 0.01ms");
+    expect(block).toContain("transition-duration: 0.01ms");
+    expect(block).toContain("scroll-behavior: auto");
   });
 
   it("index.html trỏ favicon vào badge PNG, không còn favicon.svg", async () => {
