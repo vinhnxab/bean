@@ -63,6 +63,7 @@ mod dto;
 mod guard;
 mod rest_audit_tools;
 mod rest_auth_status;
+mod rest_config;
 mod rest_memories;
 mod rest_sessions;
 mod rest_skills;

@@ -9,11 +9,12 @@
 use axum::Router as AxumRouter;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
-use axum::routing::{any, delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post, put};
 
 use super::guard::security_headers;
 use super::rest_audit_tools::{list_audit, list_mcp_servers, list_tools};
 use super::rest_auth_status::{auth_me, list_agents, login, logout, status};
+use super::rest_config::{get_llm_config, update_llm_model};
 use super::rest_memories::{delete_memory, get_memory_file, list_memories, put_memory_file};
 use super::rest_sessions::{
     create_session, delete_session, get_message, list_messages, list_sessions, update_session,
@@ -35,6 +36,8 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/auth/me", get(auth_me))
         .route("/status", get(status))
         .route("/system", get(system_info))
+        .route("/config/llm", get(get_llm_config))
+        .route("/config/llm/model", put(update_llm_model))
         .route("/tools", get(list_tools))
         .route("/mcp", get(list_mcp_servers))
         .route("/usage", get(usage_history))

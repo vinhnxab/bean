@@ -75,6 +75,12 @@ pub(super) async fn system_info(
     jar: CookieJar,
 ) -> ApiResult<Json<SystemResponse>> {
     let _ = require_user(&state, &jar).await?;
+    // Các trường [llm] đọc qua Router snapshot: `/model` và REST đổi model ghi vào
+    // RwLock của Router, bản `state.config` tĩnh sẽ stale.
+    let llm = state
+        .router
+        .llm_config()
+        .map_err(|_| ApiFailure::internal())?;
     let config = &state.config;
     let projects = if config.projects.is_empty() {
         vec![bean_types::config::DEFAULT_PROJECT.to_string()]
@@ -85,10 +91,10 @@ pub(super) async fn system_info(
         agent_name: config.agent.agent_name.clone(),
         workspace: config.agent.workspace.display().to_string(),
         timezone: config.agent.timezone.clone(),
-        provider: config.llm.provider.as_str().to_string(),
-        model: config.llm.model.clone(),
-        api_key_env: config.llm.api_key_env.clone(),
-        max_tokens: config.llm.max_tokens,
+        provider: llm.provider.as_str().to_string(),
+        model: llm.model,
+        api_key_env: llm.api_key_env,
+        max_tokens: llm.max_tokens,
         context_budget_tokens: config.agent.context_budget_tokens,
         max_steps: config.agent.max_steps,
         tool_timeout_seconds: config.security.tool_timeout_seconds,

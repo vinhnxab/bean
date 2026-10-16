@@ -62,6 +62,46 @@ pub struct StatusResponse {
     pub channels: Vec<String>,
 }
 
+/// Cấu hình LLM runtime, đã khử secret (mục 15.6).
+///
+/// Chỉ có *tên* biến môi trường của API key; giá trị không bao giờ đi qua endpoint
+/// này. `key_configured` đủ để UI nói "key đã cấu hình / thiếu" mà không lộ gì.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LlmConfigResponse {
+    /// Provider đang dùng (`anthropic` | `openai_compat`).
+    pub provider: String,
+    /// Model đang dùng.
+    pub model: String,
+    /// Danh sách model được phép chuyển runtime (nguồn của `/model`).
+    pub allowed_models: Vec<String>,
+    /// Tên biến môi trường chứa API key.
+    pub api_key_env: String,
+    /// Base URL ghi đè (openai_compat / Ollama); `null` khi dùng mặc định.
+    pub base_url: Option<String>,
+    /// Trần token output của một lượt gọi.
+    pub max_tokens: u32,
+    /// Biến môi trường `api_key_env` có giá trị trong process hay không.
+    pub key_configured: bool,
+}
+
+/// Request đổi model runtime; model phải nằm trong `allowed_models`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct LlmModelUpdateRequest {
+    /// Model muốn chuyển sang.
+    pub model: String,
+}
+
+/// Response sau khi đổi model runtime.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LlmModelUpdateResponse {
+    /// Model đang có hiệu lực cho run kế tiếp.
+    pub model: String,
+}
+
 /// Lỗi API ổn định.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]

@@ -4,6 +4,48 @@
 use super::*;
 
 impl Router {
+    /// Snapshot cấu hình LLM runtime, cùng nguồn với `/model` (mục 10).
+    ///
+    /// # Errors
+    /// [`RouterError::StatePoisoned`] nếu không đọc được cấu hình.
+    pub fn llm_config(&self) -> Result<LlmRuntimeConfig, RouterError> {
+        let config = read_lock(&self.inner.config)?;
+        Ok(LlmRuntimeConfig {
+            provider: config.llm.provider,
+            model: config.llm.model.clone(),
+            allowed_models: config.llm.effective_allowed_models(),
+            api_key_env: config.llm.api_key_env.clone(),
+            base_url: config.llm.base_url.clone(),
+            max_tokens: config.llm.max_tokens,
+            key_configured: std::env::var(&config.llm.api_key_env)
+                .is_ok_and(|value| !value.trim().is_empty()),
+        })
+    }
+
+    /// Đổi model runtime; model phải nằm trong `allowed_models` (mục 10).
+    ///
+    /// Hiệu lực ngay cho run kế tiếp vì mỗi run clone config từ lock này. Đây là
+    /// nguồn sự thật duy nhất cho việc đổi model — slash command `/model` cũng gọi
+    /// qua đây, không có bản sao validate nào khác.
+    ///
+    /// # Errors
+    /// * [`RouterError::ModelNotAllowed`] — model không nằm trong `allowed_models`.
+    /// * [`RouterError::StatePoisoned`] — không ghi được cấu hình.
+    pub fn set_llm_model(&self, model: &str) -> Result<(), RouterError> {
+        let mut config = write_lock(&self.inner.config)?;
+        if config
+            .llm
+            .effective_allowed_models()
+            .iter()
+            .any(|allowed| allowed == model)
+        {
+            config.llm.model = model.to_string();
+            Ok(())
+        } else {
+            Err(RouterError::ModelNotAllowed(model.to_string()))
+        }
+    }
+
     /// Đọc snapshot run/confirm hiện tại cho WebSocket `Sync`.
     pub fn snapshot(&self) -> RouterSnapshot {
         let state = match lock(&self.inner.state) {

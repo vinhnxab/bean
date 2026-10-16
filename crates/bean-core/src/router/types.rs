@@ -224,6 +224,27 @@ pub struct RunningInfo {
     pub role: Option<String>,
 }
 
+/// Snapshot phần `[llm]` của cấu hình runtime, đọc qua cùng `RwLock` mà `/model`
+/// dùng — adapter web đọc từ đây thay vì giữ bản config tĩnh lúc khởi động.
+/// Không chứa giá trị secret: `key_configured` chỉ là cờ "biến môi trường có giá trị".
+#[derive(Debug, Clone, PartialEq)]
+pub struct LlmRuntimeConfig {
+    /// Provider đang dùng.
+    pub provider: LlmProviderKind,
+    /// Model đang dùng.
+    pub model: String,
+    /// Danh sách model được phép chuyển runtime.
+    pub allowed_models: Vec<String>,
+    /// Tên biến môi trường chứa API key (không phải giá trị).
+    pub api_key_env: String,
+    /// Base URL ghi đè (openai_compat / Ollama).
+    pub base_url: Option<String>,
+    /// Trần token output của một lượt gọi.
+    pub max_tokens: u32,
+    /// `true` khi biến môi trường `api_key_env` tồn tại và khác rỗng trong process.
+    pub key_configured: bool,
+}
+
 /// Confirm đang chờ, dùng để đồng bộ sau reconnect.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingConfirmInfo {

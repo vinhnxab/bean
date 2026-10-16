@@ -38,15 +38,25 @@ pub(super) async fn ui_handler(uri: Uri) -> Response {
 #[cfg(feature = "ui")]
 #[derive(rust_embed::Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../web/dist/"]
-#[allow_missing = true]
-struct Assets;
+struct AssetsRoot;
+
+#[cfg(feature = "ui")]
+#[derive(rust_embed::Embed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../web/dist/assets/"]
+#[prefix = "assets/"]
+struct AssetsAssets;
 
 #[cfg(feature = "ui")]
 fn embedded_response(path: &str) -> Response {
     let relative = path.trim_start_matches('/');
-    let (served_path, file) = match Assets::get(relative) {
+
+    // Try to get from AssetsRoot first (for root files like index.html, theme-init.js)
+    let (served_path, file) = match AssetsRoot::get(relative) {
         Some(file) => (relative, Some(file)),
-        None => ("index.html", Assets::get("index.html")),
+        None => match AssetsAssets::get(relative) {
+            Some(file) => (relative, Some(file)),
+            None => ("index.html", AssetsRoot::get("index.html")),
+        },
     };
     let Some(file) = file else {
         let body = r#"<!doctype html><html lang="vi"><meta charset="utf-8"><title>Bean</title><body><h1>Bean</h1><p>UI chưa được build; API vẫn hoạt động.</p></body></html>"#;

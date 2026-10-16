@@ -1064,3 +1064,45 @@ async fn failed_alert_goes_to_outbox_instead_of_being_lost() {
     );
     assert_eq!(due.first().expect("có entry").channel, "test");
 }
+
+/// `llm_config` trả cùng nguồn với `/model` và `set_llm_model` là đường ghi duy nhất:
+/// REST `PUT /api/config/llm/model` và slash command đều đi qua method này.
+#[tokio::test]
+async fn llm_config_snapshot_and_set_model_share_one_truth() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::new());
+    let workspace = Arc::new(CapWorkspace::open(temp.path().to_path_buf()).unwrap());
+    let mut config = config();
+    config.llm.model = "model-a".into();
+    config.llm.allowed_models = vec!["model-a".into(), "model-b".into()];
+    config.llm.api_key_env = "X_TEST_LLM_KEY".into();
+    let router = Arc::new(Router::new(RouterDeps {
+        config,
+        store,
+        registry: Arc::new(ToolRegistry::with_workspace(workspace)),
+        llm: fake("ok"),
+        audit: None,
+        skills_index: String::new(),
+        skills: None,
+    }));
+
+    let snapshot = router.llm_config().unwrap();
+    assert_eq!(snapshot.model, "model-a");
+    assert_eq!(snapshot.allowed_models, vec!["model-a", "model-b"]);
+    assert_eq!(snapshot.api_key_env, "X_TEST_LLM_KEY");
+    // Biến môi trường không đặt trong test ⇒ cờ phải false, và snapshot không chứa
+    // giá trị key nào (chỉ tên biến).
+    assert!(
+        !snapshot.key_configured,
+        "env không đặt thì key phải là thiếu"
+    );
+
+    // Model hợp lệ được ghi runtime; snapshot kế tiếp thấy model mới.
+    router.set_llm_model("model-b").unwrap();
+    assert_eq!(router.llm_config().unwrap().model, "model-b");
+
+    // Model ngoài danh sách bị từ chối và không đổi trạng thái.
+    let denied = router.set_llm_model("model-c").unwrap_err();
+    assert!(matches!(denied, RouterError::ModelNotAllowed(ref m) if m == "model-c"));
+    assert_eq!(router.llm_config().unwrap().model, "model-b");
+}

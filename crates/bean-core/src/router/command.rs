@@ -97,7 +97,7 @@ pub(super) fn parse(input: &str) -> Result<Command<'_>, ParseError> {
 
 use bean_types::{RunEvent, RunId, SessionId};
 
-use super::{Incoming, Router, lock, read_lock, write_lock};
+use super::{Incoming, Router, lock, read_lock};
 
 impl Router {
     pub(super) async fn handle_command(
@@ -146,18 +146,12 @@ impl Router {
                 ))
             }
             Command::SetModel(argument) => {
-                let mut config = write_lock(&self.inner.config)?;
-                if config
-                    .llm
-                    .effective_allowed_models()
-                    .iter()
-                    .any(|model| model == argument)
-                {
-                    config.llm.model = argument.to_string();
-                    Ok(format!("Model đổi thành: {argument}"))
-                } else {
-                    Err(RouterError::ModelNotAllowed(argument.to_string()))
-                }
+                // Cùng nguồn sự thật với REST `PUT /api/config/llm/model`:
+                // validate + ghi đều nằm trong `Router::set_llm_model`. Lỗi validate
+                // phải đi qua `result` để phát `RunEvent::Error`, không được `?`
+                // văng ra khỏi `submit` (channel muốn nhận lỗi qua event stream).
+                self.set_llm_model(argument)
+                    .map(|()| format!("Model đổi thành: {argument}"))
             }
             Command::Skills => {
                 let index = self.inner.skills.index()?;

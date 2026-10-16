@@ -1372,3 +1372,107 @@ async fn system_endpoint_reports_config_without_secrets() {
     // Tên biến API key thì được phép: đó là cách cấu hình, không phải bí mật.
     assert!(raw.contains("ANTHROPIC_API_KEY"));
 }
+
+/// `GET/PUT /api/config/llm`: đọc cùng nguồn với `/model`, đổi model runtime,
+/// từ chối model ngoài danh sách và không bao giờ trả giá trị API key.
+#[tokio::test]
+async fn llm_config_endpoint_reads_runtime_and_rejects_unknown_model() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut config = make_config(&data, &workspace, origin);
+    config.llm.model = "model-a".into();
+    config.llm.allowed_models = vec!["model-a".into(), "model-b".into()];
+    // Tên biến độc đáo: test chạy song song, không được phụ thuộc biến môi trường
+    // thật (đặc biệt `ANTHROPIC_API_KEY` có thể tồn tại trên máy dev).
+    config.llm.api_key_env = "BEAN_TEST_LLM_KEY_UNSET".into();
+    let store = Arc::new(MemoryStore::new());
+    let (app, state) = make_state(config, store, vec![]).await;
+
+    let unauth = app
+        .clone()
+        .oneshot(get_request("/api/config/llm", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+    let token = login(&app, origin).await;
+    let body = get_json(&app, "/api/config/llm", origin, &token).await;
+    assert_eq!(body["provider"], "anthropic");
+    assert_eq!(body["model"], "model-a");
+    assert_eq!(
+        body["allowed_models"],
+        serde_json::json!(["model-a", "model-b"])
+    );
+    assert_eq!(body["api_key_env"], "BEAN_TEST_LLM_KEY_UNSET");
+    assert_eq!(body["key_configured"], false);
+
+    // Đổi model hợp lệ: response + GET kế tiếp + Router đều thấy cùng giá trị.
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/config/llm/model")
+        .header(
+            header::HOST,
+            origin.split_once("://").map_or(origin, |(_, host)| host),
+        )
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("bean_session={token}"))
+        .body(Body::from(r#"{"model":"model-b"}"#))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let updated: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(updated["model"], "model-b");
+    assert_eq!(
+        get_json(&app, "/api/config/llm", origin, &token).await["model"],
+        "model-b"
+    );
+    assert_eq!(state.router.llm_config().unwrap().model, "model-b");
+
+    // Model ngoài danh sách: 422 với mã ổn định, trạng thái không đổi.
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/config/llm/model")
+        .header(
+            header::HOST,
+            origin.split_once("://").map_or(origin, |(_, host)| host),
+        )
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("bean_session={token}"))
+        .body(Body::from(r#"{"model":"model-c"}"#))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "model_not_allowed");
+    assert_eq!(
+        state.router.llm_config().unwrap().model,
+        "model-b",
+        "model bị từ chối không được đổi trạng thái"
+    );
+
+    // Model rỗng cũng bị từ chối (validate trước khi vào Router).
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/config/llm/model")
+        .header(
+            header::HOST,
+            origin.split_once("://").map_or(origin, |(_, host)| host),
+        )
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("bean_session={token}"))
+        .body(Body::from(r#"{"model":"   "}"#))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}

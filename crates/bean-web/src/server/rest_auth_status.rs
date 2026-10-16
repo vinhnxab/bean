@@ -111,6 +111,13 @@ pub(super) async fn status(
         .usage(&today)
         .await
         .map_err(|_| ApiFailure::internal())?;
+    // Model đọc qua Router (cùng `RwLock` với `/model` và REST đổi model):
+    // bản `state.config` là snapshot lúc khởi động, sẽ hiện model cũ sau khi
+    // người dùng đổi runtime.
+    let llm = state
+        .router
+        .llm_config()
+        .map_err(|_| ApiFailure::internal())?;
     let mut channels = Vec::with_capacity(2);
     if state.config.web.enabled {
         channels.push("web".to_string());
@@ -120,7 +127,7 @@ pub(super) async fn status(
     }
     Ok(Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        model: state.config.llm.model.clone(),
+        model: llm.model,
         max_steps: state.config.agent.max_steps,
         daily_token_budget: state.config.security.daily_token_budget,
         tokens_used: u64::from(usage.total()),

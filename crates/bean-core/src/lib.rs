@@ -33,8 +33,8 @@ pub use agent::{EndReason, RunOutcome, RunTurnArgs, run_turn, run_turn_outcome};
 pub use context::TurnContext;
 pub use prompt::system_prompt;
 pub use router::{
-    Channel, Incoming, PendingConfirmInfo, Router, RouterDeps, RouterError, RouterOptions,
-    RouterSnapshot, RunningInfo,
+    Channel, Incoming, LlmRuntimeConfig, PendingConfirmInfo, Router, RouterDeps, RouterError,
+    RouterOptions, RouterSnapshot, RunningInfo,
 };
 pub use run_io::{Decision, RunIo};
 pub use scheduler::{

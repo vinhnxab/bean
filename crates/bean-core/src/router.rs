@@ -13,6 +13,7 @@ use bean_llm::LlmProvider;
 use bean_security::{AuditLog, SessionPolicy};
 use bean_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use bean_tools::{AlertSink, ToolRegistry, truncate_chars};
+use bean_types::config::LlmProviderKind;
 use bean_types::{
     AgentReport, AgentStatus, Config, ConfirmId, ConfirmOutcome, NO_ACCESS_ROLE, Outbound, Risk,
     RolePermissions, RunEvent, RunId, SessionId,
@@ -48,8 +49,8 @@ mod status;
 mod types;
 
 pub use types::{
-    Channel, Incoming, PendingConfirmInfo, RouterDeps, RouterError, RouterOptions, RouterSnapshot,
-    RunningInfo,
+    Channel, Incoming, LlmRuntimeConfig, PendingConfirmInfo, RouterDeps, RouterError,
+    RouterOptions, RouterSnapshot, RunningInfo,
 };
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;

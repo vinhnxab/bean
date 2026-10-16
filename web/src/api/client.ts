@@ -4,6 +4,9 @@ import type {
   AuthMeResponse,
   CreateSessionRequest,
   DeleteResponse,
+  LlmConfigResponse,
+  LlmModelUpdateRequest,
+  LlmModelUpdateResponse,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
@@ -173,10 +176,23 @@ export const api = {
     requestJson<UsageListResponse>(withQuery("/api/usage", { days }), { signal }),
 
   /**
-   * Cấu hình runtime **đã khử secret** — API key, bot token và MCP `env` không bao
+   * Cấu hình LLM runtime **đã khử secret** — API key, bot token và MCP `env` không bao
    * giờ đi qua endpoint này; chỉ có *tên* biến môi trường của API key.
    */
   system: (signal?: AbortSignal) => requestJson<SystemResponse>("/api/system", { signal }),
+
+  /**
+   * Cấu hình LLM runtime, cùng nguồn sự thật với lệnh `/model` (đổi runtime được).
+   * Đã khử secret: chỉ trả *tên* biến môi trường và cờ `key_configured`.
+   */
+  llmConfig: (signal?: AbortSignal) => requestJson<LlmConfigResponse>("/api/config/llm", { signal }),
+
+  /**
+   * Đổi model runtime; model phải nằm trong `allowed_models` mà server đã trả.
+   * Server trả 422 + `model_not_allowed` nếu model không được phép.
+   */
+  updateLlmModel: (request: LlmModelUpdateRequest) =>
+    requestJson<LlmModelUpdateResponse>("/api/config/llm/model", { method: "PUT", body: request }),
 
   listSessions: (query: SessionListOptions = {}, signal?: AbortSignal) =>
     requestJson<SessionListResponse>(
