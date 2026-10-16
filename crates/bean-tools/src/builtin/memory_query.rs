@@ -20,15 +20,14 @@
 
 use std::sync::Arc;
 
-use bean_types::Risk;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
 use crate::ctx::ToolCtx;
 use crate::error::ToolError;
 use crate::tool::Tool;
 use crate::typed::TypedTool;
 use crate::workspace::WorkspaceFs;
+use bean_types::Risk;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Trần ký tự trả về cho client MCP.
 ///
