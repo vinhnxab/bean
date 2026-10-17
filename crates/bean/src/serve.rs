@@ -21,7 +21,8 @@ use crate::cli::{ChatArgs, ServeArgs};
 
 /// Chạy các kênh được bật trong cấu hình trên một Router/store chung.
 pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
-    let config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
+    // `mut`: build_provider áp trạng thái provider đã persist vào config (hot-swap).
+    let mut config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
     let web_enabled = config.web.enabled;
     let telegram_enabled = config.telegram.enabled;
     if !web_enabled && !telegram_enabled {
@@ -74,7 +75,9 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         fake_llm: args.fake_llm.clone(),
         workspace: None,
     };
-    let (provider, web_search_api_key) = chat::build_provider(&chat_args, &config)?;
+    // Snapshot `[llm]` gốc TRƯỚC khi build_provider áp trạng thái persist (profile "default").
+    let default_profile = config.llm.as_profile();
+    let (provider, web_search_api_key) = chat::build_provider(&chat_args, &mut config)?;
     let telegram_token = config
         .resolve_telegram_token()
         .context("đọc TELEGRAM_BOT_TOKEN thất bại")?;
@@ -97,6 +100,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let workspace = built.registry.workspace_opt();
     let registry = Arc::new(built.registry);
     let audit = chat::build_audit(&config);
+    // Đường persist lựa chọn provider (hot-swap): `data.dir/llm-state.json`.
+    let llm_state_path = Some(bean_types::config::state_path(&chat::expand_tilde(
+        &config.data.dir,
+    )));
     let router = Arc::new(Router::new(RouterDeps {
         config: config.clone(),
         store: store_dyn.clone(),
@@ -105,6 +112,8 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         audit: audit.clone(),
         skills_index,
         skills: Some(skills.clone()),
+        llm_state_path,
+        default_profile,
     }));
     let scheduler = Arc::new(
         Scheduler::new(

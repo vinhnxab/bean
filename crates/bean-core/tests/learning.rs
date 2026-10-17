@@ -113,6 +113,7 @@ async fn fixture(
     let store = Arc::new(MemoryStore::new());
     let notifications = Arc::new(SentNotifications::default());
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config,
         store,
         registry: Arc::new(registry),
@@ -120,6 +121,7 @@ async fn fixture(
         audit: None,
         skills_index: catalog.index(),
         skills: Some(catalog.clone()),
+        llm_state_path: None,
     }));
     router.register_channel(notifications.clone()).unwrap();
     (temp, router, catalog, notifications)
@@ -259,6 +261,7 @@ async fn disabled_learning_never_calls_reflection() {
     config.agent.allowed_users.push("test:user".into());
     config.learning.enabled = false;
     let router = Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config,
         store: Arc::new(MemoryStore::new()),
         registry: Arc::new(registry),
@@ -270,6 +273,7 @@ async fn disabled_learning_never_calls_reflection() {
         audit: None,
         skills_index: String::new(),
         skills: Some(catalog.clone()),
+        llm_state_path: None,
     });
     run(&router, "tắt learning").await;
     tokio::time::sleep(Duration::from_millis(50)).await;

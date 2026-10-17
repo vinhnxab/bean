@@ -324,6 +324,11 @@ export const vi = {
   "settings.closeSidebar": "Đóng cài đặt",
   "settings.section.providers": "Nhà cung cấp",
   "settings.section.providersDescription": "Model và API mà Bean dùng để suy luận.",
+  "providers.sectionTitle": "Nhà cung cấp",
+  "providers.profilesHint":
+    "Chọn cấu hình API mà Bean dùng để suy luận. Đổi có hiệu lực ngay cho lượt chat kế tiếp.",
+  "providers.activeBadge": "Đang dùng",
+  "providers.noKeyNeeded": "Không cần API key (server tự host)",
   "providers.provider": "Provider",
   "providers.model": "Model",
   "providers.modelHint": "Đổi có hiệu lực ngay cho lượt chat kế tiếp, giống lệnh /model.",
@@ -333,8 +338,11 @@ export const vi = {
   "providers.keyConfigured": "Đã cấu hình trong môi trường",
   "providers.keyMissing": "Chưa có trong môi trường — Bean sẽ không gọi được API",
   "providers.saved": "Đã lưu. Lượt chat kế tiếp dùng model mới.",
-  "providers.saveError": "Không lưu được. Model phải nằm trong danh sách cho phép.",
-  "providers.readOnlyNote": "Provider, base URL và API key đổi trong bean.toml rồi khởi động lại Bean.",
+  "providers.switched": "Đã đổi nhà cung cấp. Lượt chat kế tiếp dùng profile mới.",
+  "providers.saveError":
+    "Không lưu được. Kiểm tra model nằm trong danh sách cho phép, profile tồn tại, và API key đã đặt trong biến môi trường.",
+  "providers.readOnlyNote":
+    "Thêm, xoá profile hoặc đổi API key trong bean.toml và biến môi trường; khởi động lại Bean để áp dụng.",
 } as const;
 
 export type MessageKey = keyof typeof vi;

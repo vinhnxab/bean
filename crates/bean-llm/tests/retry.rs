@@ -123,6 +123,7 @@ fn config(provider: LlmProviderKind, base_url: String) -> LlmConfig {
         api_key_env: "X_TEST_KEY".to_string(),
         base_url: Some(base_url),
         max_tokens: 64,
+        ..LlmConfig::default()
     }
 }
 

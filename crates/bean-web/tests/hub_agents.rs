@@ -91,6 +91,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
     let draft_dir = config.agent.workspace.join("skills/_drafts");
     let skills = SkillCatalog::load_with_paths(&[], draft_dir.clone(), draft_dir);
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store.clone(),
         registry: Arc::new(registry),
@@ -98,6 +99,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         audit: None,
         skills_index: skills.index(),
         skills: Some(skills.clone()),
+        llm_state_path: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {

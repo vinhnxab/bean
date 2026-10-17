@@ -21,6 +21,8 @@ impl Router {
             audit,
             skills_index,
             skills,
+            llm_state_path,
+            default_profile,
         } = deps;
         let (events, _) = broadcast::channel(options.event_capacity.max(1));
         Self {
@@ -28,7 +30,9 @@ impl Router {
                 config: RwLock::new(config),
                 store,
                 registry,
-                llm,
+                llm: RwLock::new(llm),
+                default_profile,
+                llm_state_path,
                 audit,
                 skills: SkillCoordinator::new(skills, skills_index),
                 learning_gate: LearningGate::default(),

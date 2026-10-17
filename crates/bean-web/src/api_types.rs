@@ -83,6 +83,42 @@ pub struct LlmConfigResponse {
     pub max_tokens: u32,
     /// Biến môi trường `api_key_env` có giá trị trong process hay không.
     pub key_configured: bool,
+    /// Các profile có thể hot-swap (kèm profile `"default"` đứng đầu).
+    pub providers: Vec<LlmProviderInfo>,
+}
+
+/// Một profile provider trong danh sách switch, đã khử secret.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LlmProviderInfo {
+    /// Tên profile (`"default"` = cấu hình `[llm]` gốc lúc khởi động).
+    pub name: String,
+    /// Provider LLM (`anthropic` | `openai_compat`).
+    pub provider: String,
+    /// Model mặc định của profile.
+    pub model: String,
+    /// Model được phép chọn trong profile.
+    pub allowed_models: Vec<String>,
+    /// Base URL ghi đè; `null` khi dùng mặc định.
+    pub base_url: Option<String>,
+    /// Tên biến môi trường chứa API key; rỗng = provider không cần key.
+    pub api_key_env: String,
+    /// Biến môi trường (nếu cần) có giá trị trong process hay không.
+    pub key_configured: bool,
+    /// Profile đang có hiệu lực.
+    pub active: bool,
+}
+
+/// Request hot-swap provider; `model` tuỳ chọn (mặc định = model của profile).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct LlmProviderSwitchRequest {
+    /// Tên profile muốn chuyển sang.
+    pub profile: String,
+    /// Model muốn dùng; `null` = model mặc định của profile.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Request đổi model runtime; model phải nằm trong `allowed_models`.

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LlmModelUpdateRequest } from "@/api/bindings";
+import type { LlmModelUpdateRequest, LlmProviderSwitchRequest } from "@/api/bindings";
 import { api } from "@/api/client";
 import { queryKeys } from "@/features/auth/queries";
 
@@ -25,6 +25,25 @@ export function useUpdateLlmModel() {
       queryClient.setQueryData(queryKeys.llmConfig, (current: Awaited<ReturnType<typeof api.llmConfig>>) =>
         current ? { ...current, model: updated.model } : current,
       );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.status });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.system });
+    },
+  });
+}
+
+/**
+ * Hot-swap provider theo profile (`[[llm.providers]]` hoặc "default").
+ *
+ * Server trả nguyên snapshot `LlmConfigResponse` sau khi switch — ghi đè cache
+ * một lần (provider, model, allowed_models, danh sách profile cùng đổi). Cũng vô
+ * hiệu `status`/`system` vì model hiện tại đã đổi.
+ */
+export function useSwitchLlmProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: LlmProviderSwitchRequest) => api.switchLlmProvider(request),
+    onSuccess: (snapshot) => {
+      queryClient.setQueryData(queryKeys.llmConfig, snapshot);
       void queryClient.invalidateQueries({ queryKey: queryKeys.status });
       void queryClient.invalidateQueries({ queryKey: queryKeys.system });
     },

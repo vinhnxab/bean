@@ -49,8 +49,8 @@ mod status;
 mod types;
 
 pub use types::{
-    Channel, Incoming, LlmRuntimeConfig, PendingConfirmInfo, RouterDeps, RouterError,
-    RouterOptions, RouterSnapshot, RunningInfo,
+    Channel, Incoming, LlmProfileInfo, LlmRuntimeConfig, PendingConfirmInfo, RouterDeps,
+    RouterError, RouterOptions, RouterSnapshot, RunningInfo,
 };
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;
@@ -122,11 +122,20 @@ struct Admission<'a> {
 }
 
 struct RouterInner {
-    /// Cấu hình có thể đổi lúc chạy (`/model`).
+    /// Cấu hình có thể đổi lúc chạy (`/model`, hot-swap provider).
     config: RwLock<Config>,
     store: Arc<dyn Store>,
     registry: Arc<ToolRegistry>,
-    llm: Arc<dyn LlmProvider>,
+    /// Provider LLM hiện tại — bọc `RwLock` để hot-swap provider không cần dựng lại
+    /// Router (run kế tiếp clone Arc ngay trước khi chạy).
+    llm: RwLock<Arc<dyn LlmProvider>>,
+    /// Snapshot `[llm]` gốc lúc khởi động làm profile `"default"`.
+    ///
+    /// Không thể suy từ `config` lúc switch vì `config.llm` đã bị apply profile khác —
+    /// giữ bản gốc ở đây thì switch về `"default"` luôn quay đúng cấu hình bean.toml.
+    default_profile: bean_types::config::LlmProfile,
+    /// File persist lựa chọn provider; `None` = không persist (test).
+    llm_state_path: Option<std::path::PathBuf>,
     audit: Option<Arc<AuditLog>>,
     /// Catalog skill + index progressive-disclosure (mục 9) và duyệt nháp (M15).
     skills: SkillCoordinator,

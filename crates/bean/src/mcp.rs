@@ -115,6 +115,7 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
     let llm: Arc<dyn LlmProvider> = Arc::new(FakeProvider::echo());
     let store_dyn: Arc<dyn Store> = store.clone();
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store_dyn,
         registry: Arc::new(built.registry),
@@ -122,6 +123,8 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
         audit: audit.clone(),
         skills_index: String::new(),
         skills: None,
+        // MCP serve không chạy agent loop và không switch provider — không cần persist.
+        llm_state_path: None,
     }));
     Ok(ServeContext {
         auth: Arc::new(McpAuth::new(store)),

@@ -142,6 +142,16 @@ pub enum RouterError {
     /// được chỉ ẩn khỏi `tools/list`.
     #[error("tool `{0}` không được expose qua MCP server")]
     ToolNotExposed(String),
+    /// Profile provider không tồn tại trong cấu hình (hot-swap provider).
+    #[error("profile provider không tồn tại: {0}")]
+    ProfileNotFound(String),
+    /// Dựng provider LLM mới thất bại (thiếu key, sai base_url…). Thông điệp lấy từ
+    /// [`bean_llm::LlmError`] — chỉ nêu tên biến môi trường, không bao giờ chứa giá trị key.
+    #[error("không dựng được provider LLM: {0}")]
+    LlmProvider(String),
+    /// Không ghi được file trạng thái LLM — switch bị từ chối nguyên vẹn (config không đổi).
+    #[error("không ghi được trạng thái LLM: {0}")]
+    Persist(String),
 }
 
 impl RouterError {
@@ -165,6 +175,9 @@ impl RouterError {
             Self::StatePoisoned => "router_state",
             Self::Random(_) => "random_unavailable",
             Self::ToolNotExposed(_) => "tool_not_exposed",
+            Self::ProfileNotFound(_) => "profile_not_found",
+            Self::LlmProvider(_) => "provider_build_failed",
+            Self::Persist(_) => "llm_state_unwritable",
         }
     }
 }
@@ -212,6 +225,16 @@ pub struct RouterDeps {
     pub skills_index: String,
     /// Catalog dùng cho learning, duyệt draft và reload sau khi kích hoạt.
     pub skills: Option<SkillCatalog>,
+    /// Đường dẫn file persist lựa chọn provider (`data.dir/llm-state.json`).
+    ///
+    /// `None` = không persist (test); mọi switch vẫn đổi runtime nhưng sẽ mất khi restart.
+    pub llm_state_path: Option<std::path::PathBuf>,
+    /// Snapshot `[llm]` **gốc** từ `bean.toml`, làm profile `"default"`.
+    ///
+    /// Phải được chụp TRƯỚC khi caller áp trạng thái persist vào `config` — nếu lấy
+    /// từ `config` sau đó thì `"default"` sẽ là lựa chọn đã lưu, và switch về
+    /// `"default"` thành no-op. Test truyền `config.llm.as_profile()`.
+    pub default_profile: bean_types::config::LlmProfile,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -243,6 +266,27 @@ pub struct LlmRuntimeConfig {
     pub max_tokens: u32,
     /// `true` khi biến môi trường `api_key_env` tồn tại và khác rỗng trong process.
     pub key_configured: bool,
+}
+
+/// Một profile provider trong danh sách switch (hot-swap), đã khử secret.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LlmProfileInfo {
+    /// Tên profile (`"default"` là profile ngầm định từ `[llm]` lúc khởi động).
+    pub name: String,
+    /// Provider LLM.
+    pub provider: LlmProviderKind,
+    /// Model mặc định của profile.
+    pub model: String,
+    /// Model được phép chọn trong profile.
+    pub allowed_models: Vec<String>,
+    /// Base URL ghi đè.
+    pub base_url: Option<String>,
+    /// Tên biến môi trường chứa API key (không phải giá trị); rỗng = không cần key.
+    pub api_key_env: String,
+    /// `true` khi biến môi trường (nếu cần) có giá trị trong process.
+    pub key_configured: bool,
+    /// `true` khi profile đang có hiệu lực.
+    pub active: bool,
 }
 
 /// Confirm đang chờ, dùng để đồng bộ sau reconnect.

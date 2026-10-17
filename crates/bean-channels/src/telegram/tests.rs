@@ -211,6 +211,7 @@ async fn make_router(
     config.agent.max_steps = 4;
     let router = Arc::new(Router::with_options(
         RouterDeps {
+            default_profile: config.llm.as_profile(),
             config,
             store: Arc::new(MemoryStore::new()),
             registry: Arc::new(registry),
@@ -218,6 +219,7 @@ async fn make_router(
             audit: None,
             skills_index: String::new(),
             skills: None,
+            llm_state_path: None,
         },
         options,
     ));
@@ -726,6 +728,7 @@ async fn skill_draft_inline_button_approves_for_exact_allowed_user() {
     let mut config = Config::default();
     config.agent.allowed_users = vec!["telegram:42".into()];
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config,
         store: Arc::new(MemoryStore::new()),
         registry: Arc::new(ToolRegistry::with_workspace(workspace)),
@@ -733,6 +736,7 @@ async fn skill_draft_inline_button_approves_for_exact_allowed_user() {
         audit: None,
         skills_index: catalog.index(),
         skills: Some(catalog.clone()),
+        llm_state_path: None,
     }));
     let transport = Arc::new(MockTransport::new());
     let mut telegram_config = telegram_config();

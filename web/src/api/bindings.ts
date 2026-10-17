@@ -14,6 +14,8 @@ export type { DeleteResponse } from "./generated/DeleteResponse";
 export type { LlmConfigResponse } from "./generated/LlmConfigResponse";
 export type { LlmModelUpdateRequest } from "./generated/LlmModelUpdateRequest";
 export type { LlmModelUpdateResponse } from "./generated/LlmModelUpdateResponse";
+export type { LlmProviderInfo } from "./generated/LlmProviderInfo";
+export type { LlmProviderSwitchRequest } from "./generated/LlmProviderSwitchRequest";
 export type { LoginRequest } from "./generated/LoginRequest";
 export type { LoginResponse } from "./generated/LoginResponse";
 export type { LogoutResponse } from "./generated/LogoutResponse";

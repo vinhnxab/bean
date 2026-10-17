@@ -85,7 +85,10 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     if let Some(workspace) = &args.workspace {
         config.agent.workspace = workspace.clone();
     }
-    let (provider, web_search_api_key) = build_provider(args, &config)?;
+    // Snapshot `[llm]` gốc TRƯỚC khi build_provider áp trạng thái persist — đây là
+    // profile "default" của Router (switch về "default" = quay về bean.toml).
+    let default_profile = config.llm.as_profile();
+    let (provider, web_search_api_key) = build_provider(args, &mut config)?;
     let store = Arc::new(
         SqliteStore::open(&store_path(&config))
             .map_err(|error| anyhow::anyhow!("không mở được store: {error}"))?,
@@ -111,6 +114,10 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     let untrusted_tools = untrusted_tool_names(&registry);
     let audit = build_audit(&config);
     let workspace = config.agent.workspace.display().to_string();
+    // Đường persist lựa chọn provider (hot-swap): `data.dir/llm-state.json`.
+    let llm_state_path = Some(bean_types::config::state_path(&expand_tilde(
+        &config.data.dir,
+    )));
     let router = Arc::new(Router::new(RouterDeps {
         config,
         store,
@@ -119,6 +126,8 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         audit,
         skills_index,
         skills: Some(skills),
+        llm_state_path,
+        default_profile,
     }));
     router
         .start_outbox_worker()
@@ -153,16 +162,29 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
 
 /// Chọn provider: kịch bản `--fake-llm` nếu có, ngược lại provider thật theo `[llm]`.
 ///
+/// Với provider thật: **trước** khi resolve secret, áp trạng thái đã persist
+/// (`data.dir/llm-state.json`) vào config — profile/model người dùng chọn qua UI
+/// hoặc `/model` có hiệu lực ngay cả sau restart. Đường `--fake-llm` không áp state
+/// (kịch bản test phải chạy đúng như viết).
+///
 /// Lỗi trả về luôn nêu rõ **nguyên nhân cấu hình** (thiếu biến môi trường, sai provider…)
 /// chứ không lộ giá trị secret.
 pub(crate) fn build_provider(
     args: &ChatArgs,
-    config: &Config,
+    config: &mut Config,
 ) -> Result<(Arc<dyn LlmProvider>, Option<SecretString>)> {
     if let Some(path) = args.fake_llm.as_deref() {
         let provider =
             FakeProvider::from_json_path(path).context("nạp kịch bản --fake-llm thất bại")?;
         return Ok((Arc::new(provider), config.resolve_web_search_api_key()));
+    }
+    let data_dir = expand_tilde(&config.data.dir);
+    if bean_types::config::apply_persisted_llm_state(config, &data_dir) {
+        tracing::info!(
+            profile = %config.llm.active_profile_name(),
+            model = %config.llm.model,
+            "áp lựa chọn provider đã lưu từ phiên trước"
+        );
     }
     let secrets = config
         .resolve_secrets()

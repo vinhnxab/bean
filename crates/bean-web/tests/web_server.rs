@@ -116,6 +116,7 @@ async fn make_state_with(
         config.agent.workspace.join("skills/_drafts"),
     );
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store_dyn.clone(),
         registry: Arc::new(registry),
@@ -123,6 +124,7 @@ async fn make_state_with(
         audit: None,
         skills_index: skills.index(),
         skills: Some(skills.clone()),
+        llm_state_path: None,
     }));
     let auth = AuthService::load(&config, store_dyn.clone()).unwrap();
     let state = WebState::new(WebStateDeps {
@@ -1475,4 +1477,144 @@ async fn llm_config_endpoint_reads_runtime_and_rejects_unknown_model() {
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+/// `PUT /api/config/llm/provider`: hot-swap sang profile openai_compat không cần key,
+/// từ chối profile lạ và profile cần key mà thiếu — không bao giờ trả giá trị key.
+#[tokio::test]
+async fn llm_provider_endpoint_swaps_profile_and_rejects_unknown_or_keyless() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut config = make_config(&data, &workspace, origin);
+    config.llm.model = "model-a".into();
+    config.llm.allowed_models = vec!["model-a".into()];
+    config.llm.api_key_env = "BEAN_TEST_LLM_KEY_UNSET".into();
+    // Profile không cần key (api_key_env rỗng): dựng provider offline được.
+    config.llm.providers = vec![bean_types::config::LlmProfile {
+        name: "ollama".into(),
+        provider: bean_types::config::LlmProviderKind::OpenAiCompat,
+        model: "qwen3:14b".into(),
+        allowed_models: vec!["qwen3:14b".into(), "qwen3:32b".into()],
+        api_key_env: String::new(),
+        base_url: Some("http://127.0.0.1:9/v1".into()),
+        max_tokens: 4096,
+    }];
+    let store = Arc::new(MemoryStore::new());
+    let (app, state) = make_state(config, store, vec![]).await;
+    let token = login(&app, origin).await;
+
+    let put = |uri: &str, body: String| {
+        Request::builder()
+            .method("PUT")
+            .uri(uri)
+            .header(
+                header::HOST,
+                origin.split_once("://").map_or(origin, |(_, host)| host),
+            )
+            .header(header::ORIGIN, origin)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::COOKIE, format!("bean_session={token}"))
+            .body(Body::from(body))
+            .unwrap()
+    };
+
+    // Chưa đăng nhập → 401.
+    let unauth = Request::builder()
+        .method("PUT")
+        .uri("/api/config/llm/provider")
+        .header(
+            header::HOST,
+            origin.split_once("://").map_or(origin, |(_, host)| host),
+        )
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"profile":"ollama"}"#))
+        .unwrap();
+    let response = app.clone().oneshot(unauth).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // Profile lạ → 422 profile_not_found.
+    let response = app
+        .clone()
+        .oneshot(put(
+            "/api/config/llm/provider",
+            r#"{"profile":"la"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "profile_not_found");
+
+    // Happy path: switch sang ollama kèm model — response là snapshot sau switch.
+    let response = app
+        .clone()
+        .oneshot(put(
+            "/api/config/llm/provider",
+            r#"{"profile":"ollama","model":"qwen3:32b"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let updated: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(updated["provider"], "openai_compat");
+    assert_eq!(updated["model"], "qwen3:32b");
+    let providers = updated["providers"].as_array().expect("providers là mảng");
+    assert_eq!(providers.len(), 2);
+    assert_eq!(providers[0]["name"], "default");
+    assert_eq!(providers[0]["active"], false);
+    assert_eq!(providers[1]["name"], "ollama");
+    assert_eq!(providers[1]["active"], true);
+    assert_eq!(
+        providers[1]["key_configured"], true,
+        "api_key_env rỗng = không cần key"
+    );
+    // Không có giá trị key nào trong response.
+    let raw = serde_json::to_string(&updated).unwrap();
+    assert!(!raw.contains("sk-"), "không chứa giá trị key");
+
+    // GET kế tiếp thấy cùng trạng thái; Router config đồng bộ.
+    let body = get_json(&app, "/api/config/llm", origin, &token).await;
+    assert_eq!(body["provider"], "openai_compat");
+    assert_eq!(body["model"], "qwen3:32b");
+    assert_eq!(state.router.llm_config().unwrap().model, "qwen3:32b");
+
+    // Switch sang profile cần key mà env thiếu → 422 provider_build_failed, không đổi.
+    let mut config = make_config(&data, &workspace, origin);
+    config.llm.providers = vec![bean_types::config::LlmProfile {
+        name: "paid".into(),
+        provider: bean_types::config::LlmProviderKind::Anthropic,
+        model: "claude-opus-5".into(),
+        allowed_models: vec![],
+        api_key_env: "BEAN_TEST_PAID_KEY_UNSET".into(),
+        base_url: None,
+        max_tokens: 4096,
+    }];
+    let (app2, _state2) = make_state(config, Arc::new(MemoryStore::new()), vec![]).await;
+    let token2 = login(&app2, origin).await;
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/config/llm/provider")
+        .header(
+            header::HOST,
+            origin.split_once("://").map_or(origin, |(_, host)| host),
+        )
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("bean_session={token2}"))
+        .body(Body::from(r#"{"profile":"paid"}"#))
+        .unwrap();
+    let response = app2.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "provider_build_failed");
 }

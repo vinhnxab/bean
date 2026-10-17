@@ -30,7 +30,8 @@ describe("SettingsPage — Providers", () => {
     expect(screen.getByText("https://openrouter.ai/api/v1")).toBeInTheDocument();
     // Chỉ có TÊN biến môi trường; giá trị key không bao giờ xuất hiện.
     expect(screen.getByText("OPENROUTER_API_KEY")).toBeInTheDocument();
-    expect(screen.getByText("Đã cấu hình trong môi trường")).toBeInTheDocument();
+    // Trạng thái key xuất hiện 2 lần: card profile mặc định + panel thông tin.
+    expect(screen.getAllByText("Đã cấu hình trong môi trường")).toHaveLength(2);
 
     // Lưu khoá khi chưa đổi: nút phải disabled.
     expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
@@ -93,8 +94,150 @@ describe("SettingsPage — Providers", () => {
     await user.click(screen.getByRole("button", { name: "Lưu" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Không lưu được. Model phải nằm trong danh sách cho phép.");
+    expect(alert).toHaveTextContent("Không lưu được. Kiểm tra model nằm trong danh sách");
     // Không có thông báo thành công song song với lỗi.
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+  });
+
+  it("hiển thị danh sách profile: profile active có badge, profile khác có trạng thái key", async () => {
+    renderProviders();
+
+    const group = await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    expect(group).toBeInTheDocument();
+    // Profile mặc định active — radio được chọn và có badge "Đang dùng".
+    const defaultRadio = screen.getByRole("radio", { name: "default" });
+    expect(defaultRadio).toBeChecked();
+    expect(screen.getByText("Đang dùng")).toBeInTheDocument();
+    // Profile ollama: base URL tự host + không cần key.
+    expect(screen.getByText("openai_compat · http://localhost:11434/v1")).toBeInTheDocument();
+    expect(screen.getByText("Không cần API key (server tự host)")).toBeInTheDocument();
+    // Lưu khoá khi chưa đổi gì.
+    expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
+  });
+
+  it("chọn profile khác rồi Lưu: PUT /provider đúng body, UI phản chiếu snapshot mới", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.put("/api/config/llm/provider", async ({ request }) => {
+        sent = await request.json();
+        const body = sent as { profile: string; model?: string };
+        const target = LLM_CONFIG_FIXTURE.providers.find((p) => p.name === body.profile);
+        if (!target) throw new Error("profile không tồn tại");
+        return HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          provider: target.provider,
+          model: body.model ?? target.model,
+          allowed_models: target.allowed_models,
+          api_key_env: target.api_key_env,
+          base_url: target.base_url,
+          key_configured: target.key_configured,
+          providers: LLM_CONFIG_FIXTURE.providers.map((p) => ({
+            ...p,
+            active: p.name === body.profile,
+          })),
+        });
+      }),
+    );
+    renderProviders();
+
+    // Chọn profile ollama — danh sách model chuyển sang allowed_models của profile.
+    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    await user.click(screen.getByRole("radio", { name: "ollama" }));
+    const select = screen.getByRole("combobox", { name: "Model" });
+    select.focus();
+    await user.keyboard("{Enter}");
+    // Danh sách model chuyển sang allowed_models của profile (không còn model cũ).
+    expect(await screen.findByRole("option", { name: "qwen3:14b" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "model-a" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: "Lưu" }));
+
+    await screen.findByRole("status");
+    // Không chọn model: gửi null = dùng model mặc định của profile (serde → None).
+    expect(sent).toEqual({ profile: "ollama", model: null });
+    // Badge chuyển sang ollama — UI phản chiếu snapshot server trả về.
+    expect(screen.getByRole("radio", { name: "ollama" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "default" })).not.toBeChecked();
+    const badges = screen.getAllByText("Đang dùng");
+    expect(badges).toHaveLength(1);
+  });
+
+  it("chọn profile kèm model khác: PUT /provider gửi cả model", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.put("/api/config/llm/provider", async ({ request }) => {
+        sent = await request.json();
+        const body = sent as { profile: string; model?: string };
+        const target = LLM_CONFIG_FIXTURE.providers.find((p) => p.name === body.profile);
+        if (!target) throw new Error("profile không tồn tại");
+        return HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          model: body.model ?? target.model,
+          providers: LLM_CONFIG_FIXTURE.providers.map((p) => ({
+            ...p,
+            active: p.name === body.profile,
+          })),
+        });
+      }),
+    );
+    renderProviders();
+
+    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    await user.click(screen.getByRole("radio", { name: "ollama" }));
+    const select = screen.getByRole("combobox", { name: "Model" });
+    select.focus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("option", { name: "qwen3:32b" });
+    await user.click(screen.getByRole("option", { name: "qwen3:32b" }));
+    await user.click(screen.getByRole("button", { name: "Lưu" }));
+
+    await screen.findByRole("status");
+    expect(sent).toEqual({ profile: "ollama", model: "qwen3:32b" });
+  });
+
+  it("switch bị server từ chối (provider_build_failed khi thiếu key): alert lỗi, badge không đổi", async () => {
+    const user = userEvent.setup();
+    testServer.use(
+      http.put("/api/config/llm/provider", () =>
+        HttpResponse.json(
+          { code: "provider_build_failed", message: "không dựng được provider" },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderProviders();
+
+    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    await user.click(screen.getByRole("radio", { name: "ollama" }));
+    await user.click(screen.getByRole("button", { name: "Lưu" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Không lưu được. Kiểm tra model nằm trong danh sách");
+    // Form giữ lựa chọn của người dùng để sửa lại; badge "Đang dùng" vẫn trên profile
+    // mặc định vì snapshot server không đổi sau lỗi.
+    expect(screen.getByRole("radio", { name: "ollama" })).toBeChecked();
+    expect(screen.getAllByText("Đang dùng")).toHaveLength(1);
+  });
+
+  it("profile thiếu key trong môi trường: cảnh báo destructive ngay trên card", async () => {
+    testServer.use(
+      http.get("/api/config/llm", () =>
+        HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          providers: LLM_CONFIG_FIXTURE.providers.map((p) =>
+            p.name === "ollama" ? { ...p, key_configured: false, api_key_env: "OLLAMA_KEY" } : p,
+          ),
+        }),
+      ),
+    );
+    renderProviders();
+
+    // Chỉ card ollama thiếu key; panel thông tin (profile active) vẫn key OK.
+    const warnings = await screen.findAllByText("Chưa có trong môi trường — Bean sẽ không gọi được API");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].className).toContain("text-destructive");
   });
 });

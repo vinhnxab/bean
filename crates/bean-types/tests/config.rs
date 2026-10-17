@@ -12,8 +12,9 @@
 use std::path::{Path, PathBuf};
 
 use bean_types::config::{
-    Config, ConfigError, QaConfig, QaRunner, QaSandboxConfig, QaSuiteConfig, SandboxMode,
-    WebSearchProvider,
+    Config, ConfigError, DEFAULT_PROFILE_NAME, LlmProviderKind, LlmState, QaConfig, QaRunner,
+    QaSandboxConfig, QaSuiteConfig, SandboxMode, WebSearchProvider, apply_persisted_llm_state,
+    state_path,
 };
 
 /// Ghi nội dung TOML ra file tạm và trả về (thư mục tạm, đường dẫn file).
@@ -906,4 +907,262 @@ fn enabled_browser_accepts_valid_origins() {
     let config = Config::load(&path).expect("cấu hình hợp lệ phải nạp được");
     assert!(config.browser.enabled);
     assert_eq!(config.browser.allowed_origins.len(), 2);
+}
+
+// -------------------------------------------------------------------------
+// `[[llm.providers]]` + persist trạng thái LLM (hot-swap provider)
+// -------------------------------------------------------------------------
+
+fn llm_with_ollama_profile() -> String {
+    "[llm]\n\
+     provider = \"anthropic\"\n\
+     model = \"claude-sonnet-5\"\n\
+     allowed_models = [\"claude-sonnet-5\"]\n\
+     api_key_env = \"ANTHROPIC_API_KEY\"\n\
+     \n\
+     [[llm.providers]]\n\
+     name = \"ollama\"\n\
+     provider = \"openai_compat\"\n\
+     model = \"qwen3:14b\"\n\
+     base_url = \"http://localhost:11434/v1\"\n\
+     \n\
+     [[llm.providers]]\n\
+     name = \"openrouter\"\n\
+     provider = \"openai_compat\"\n\
+     model = \"openai/gpt-5\"\n\
+     allowed_models = [\"openai/gpt-5\", \"anthropic/claude-sonnet-5\"]\n\
+     api_key_env = \"OPENROUTER_API_KEY\"\n"
+        .to_string()
+}
+
+#[test]
+fn llm_provider_profiles_parse_and_default_profile_leads() {
+    let (_dir, path) = write_config(&llm_with_ollama_profile());
+    let config = Config::load(&path).expect("profiles hợp lệ phải nạp được");
+
+    let profile_list = config.llm.profiles();
+    let names: Vec<&str> = profile_list.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["default", "ollama", "openrouter"]);
+    // Profile ngầm định suy đúng từ chính `[llm]`.
+    let default = config
+        .llm
+        .profile(DEFAULT_PROFILE_NAME)
+        .expect("default phải tồn tại");
+    assert_eq!(default.provider, LlmProviderKind::Anthropic);
+    assert_eq!(default.model, "claude-sonnet-5");
+    // Profile tường minh giữ nguyên trường.
+    let ollama = config.llm.profile("ollama").expect("ollama phải tồn tại");
+    assert_eq!(ollama.provider, LlmProviderKind::OpenAiCompat);
+    assert_eq!(
+        ollama.base_url.as_deref(),
+        Some("http://localhost:11434/v1")
+    );
+    assert!(
+        ollama.api_key_env.is_empty(),
+        "api_key_env rỗng = không cần key"
+    );
+    assert_eq!(ollama.max_tokens, 4096, "mặc định max_tokens của profile");
+    // allowed_models của profile rỗng ⇒ chỉ model mặc định.
+    assert_eq!(
+        ollama.effective_allowed_models(),
+        vec!["qwen3:14b".to_string()]
+    );
+    // Profile lạ trả None, không panic.
+    assert!(config.llm.profile("khong-ton-tai").is_none());
+    // active_profile mặc định (serde skip) coi như "default".
+    assert_eq!(config.llm.active_profile_name(), "default");
+}
+
+#[test]
+fn apply_profile_swaps_fields_and_keeps_providers() {
+    let (_dir, path) = write_config(&llm_with_ollama_profile());
+    let mut config = Config::load(&path).expect("nạp được");
+    let ollama = config.llm.profile("ollama").expect("có ollama");
+
+    config.llm.apply_profile(&ollama);
+    assert_eq!(config.llm.provider, LlmProviderKind::OpenAiCompat);
+    assert_eq!(config.llm.model, "qwen3:14b");
+    assert_eq!(
+        config.llm.base_url.as_deref(),
+        Some("http://localhost:11434/v1")
+    );
+    assert_eq!(config.llm.active_profile, "ollama");
+    // `providers` không bị mất sau khi apply — vẫn switch tiếp được.
+    assert_eq!(config.llm.providers.len(), 2);
+    // Lưu ý ngữ nghĩa: profile `default` được SUY từ `[llm]` hiện tại, nên việc
+    // "switch về default" sau khi đã apply profile khác là no-op ở tầng này.
+    // Router giữ snapshot `[llm]` gốc lúc khởi động để "default" luôn có nghĩa
+    // (xem test switch_llm_provider ở bean-core).
+    let default = config.llm.profile("default").expect("vẫn có default");
+    assert_eq!(default.name, "default");
+    assert!(config.llm.profile("openrouter").is_some());
+}
+
+#[test]
+fn llm_provider_profiles_validate_rejects_bad_names_and_models() {
+    struct BadCase {
+        body: String,
+        needle: &'static str,
+    }
+    let cases = [
+        BadCase {
+            body: "[[llm.providers]]\nname = \"default\"\nprovider = \"openai_compat\"\nmodel = \"m\"\n".into(),
+            needle: "default",
+        },
+        BadCase {
+            body: "[[llm.providers]]\nname = \"  \"\nprovider = \"openai_compat\"\nmodel = \"m\"\n".into(),
+            needle: "name rỗng",
+        },
+        BadCase {
+            body: "[[llm.providers]]\nname = \"a\"\nprovider = \"openai_compat\"\nmodel = \"m\"\n\
+                   [[llm.providers]]\nname = \"a\"\nprovider = \"openai_compat\"\nmodel = \"m\"\n"
+                .into(),
+            needle: "trùng",
+        },
+        BadCase {
+            body: "[[llm.providers]]\nname = \"a\"\nprovider = \"openai_compat\"\nmodel = \"m\"\
+                   \nallowed_models = [\"x\"]\n"
+                .into(),
+            needle: "không nằm trong allowed_models",
+        },
+        BadCase {
+            body: "[[llm.providers]]\nname = \"a\"\nprovider = \"openai_compat\"\nmodel = \"m\"\
+                   \nbase_url = \"ftp://nope\"\n"
+                .into(),
+            needle: "base_url",
+        },
+    ];
+    for case in &cases {
+        let body = format!(
+            "[llm]\nprovider = \"anthropic\"\nmodel = \"claude-sonnet-5\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n\n{}",
+            case.body
+        );
+        let (_dir, path) = write_config(&body);
+        let error = Config::load(&path).expect_err("profile sai phải bị chặn");
+        assert!(
+            matches!(&error, ConfigError::Invalid(m) if m.contains(case.needle)),
+            "{}: {error:?}",
+            case.needle
+        );
+    }
+}
+
+fn llm_state_test_config(data_dir: &std::path::Path) -> Config {
+    let body = format!(
+        "[llm]\n\
+         provider = \"anthropic\"\n\
+         model = \"claude-sonnet-5\"\n\
+         allowed_models = [\"claude-sonnet-5\"]\n\
+         api_key_env = \"ANTHROPIC_API_KEY\"\n\
+         \n\
+         [[llm.providers]]\n\
+         name = \"ollama\"\n\
+         provider = \"openai_compat\"\n\
+         model = \"qwen3:14b\"\
+         \nbase_url = \"http://localhost:11434/v1\"\
+         \nallowed_models = [\"qwen3:14b\", \"qwen3:32b\"]\n\
+         [data]\n\
+         dir = \"{}\"\n",
+        data_dir.display()
+    );
+    let (_dir, path) = write_config(&body);
+    Config::load(&path).expect("nạp được")
+}
+
+#[test]
+fn llm_state_round_trip_save_load_apply() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut restarted = llm_state_test_config(dir.path());
+
+    // Save ở một "phiên" rồi load lại như khi khởi động lần sau.
+    LlmState::save(
+        &state_path(dir.path()),
+        &LlmState {
+            profile: "ollama".into(),
+            model: "qwen3:32b".into(),
+        },
+    )
+    .expect("ghi state được");
+    assert!(state_path(dir.path()).exists());
+
+    assert!(
+        apply_persisted_llm_state(&mut restarted, dir.path()),
+        "state hợp lệ phải được áp"
+    );
+    assert_eq!(restarted.llm.provider, LlmProviderKind::OpenAiCompat);
+    assert_eq!(restarted.llm.model, "qwen3:32b");
+    assert_eq!(
+        restarted.llm.base_url.as_deref(),
+        Some("http://localhost:11434/v1")
+    );
+    assert_eq!(restarted.llm.active_profile_name(), "ollama");
+    assert_eq!(restarted.llm.providers.len(), 1, "providers không bị mất");
+}
+
+#[test]
+fn llm_state_missing_file_or_profile_returns_false_and_keeps_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = llm_state_test_config(dir.path());
+
+    // Chưa có file state: không áp, không lỗi.
+    assert!(!apply_persisted_llm_state(&mut config, dir.path()));
+    assert_eq!(config.llm.active_profile_name(), "default");
+
+    // Profile đã bị xoá khỏi bean.toml: state bị bỏ qua, config giữ nguyên.
+    LlmState::save(
+        &state_path(dir.path()),
+        &LlmState {
+            profile: "da-xoa".into(),
+            model: "m".into(),
+        },
+    )
+    .unwrap();
+    assert!(!apply_persisted_llm_state(&mut config, dir.path()));
+    assert_eq!(config.llm.provider, LlmProviderKind::Anthropic);
+
+    // File hỏng: warn + bỏ qua (startup không được phép gãy vì file state).
+    std::fs::write(state_path(dir.path()), "{ not json").unwrap();
+    assert!(!apply_persisted_llm_state(&mut config, dir.path()));
+}
+
+#[test]
+fn llm_state_disallowed_model_falls_back_to_profile_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = llm_state_test_config(dir.path());
+    LlmState::save(
+        &state_path(dir.path()),
+        &LlmState {
+            profile: "ollama".into(),
+            model: "model-da-bi-xoa-khoi-allowed".into(),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        apply_persisted_llm_state(&mut config, dir.path()),
+        "profile còn thì vẫn áp"
+    );
+    assert_eq!(config.llm.active_profile_name(), "ollama");
+    assert_eq!(
+        config.llm.model, "qwen3:14b",
+        "model không allowed ⇒ fallback profile.model"
+    );
+}
+
+#[test]
+fn llm_state_profile_empty_means_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = llm_state_test_config(dir.path());
+    LlmState::save(
+        &state_path(dir.path()),
+        &LlmState {
+            profile: String::new(),
+            model: "claude-sonnet-5".into(),
+        },
+    )
+    .unwrap();
+
+    assert!(apply_persisted_llm_state(&mut config, dir.path()));
+    assert_eq!(config.llm.active_profile_name(), "default");
+    assert_eq!(config.llm.model, "claude-sonnet-5");
 }

@@ -7,6 +7,7 @@ import type {
   LlmConfigResponse,
   LlmModelUpdateRequest,
   LlmModelUpdateResponse,
+  LlmProviderSwitchRequest,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
@@ -193,6 +194,15 @@ export const api = {
    */
   updateLlmModel: (request: LlmModelUpdateRequest) =>
     requestJson<LlmModelUpdateResponse>("/api/config/llm/model", { method: "PUT", body: request }),
+
+  /**
+   * Hot-swap provider theo profile đã khai báo trong `[[llm.providers]]`. Trả về
+   * snapshot `LlmConfigResponse` sau khi switch (provider mới dùng cho lượt kế tiếp).
+   * Lỗi 422: `profile_not_found` / `model_not_allowed` / `provider_build_failed`
+   * (thiếu API key trong môi trường — key không bao giờ gửi qua body).
+   */
+  switchLlmProvider: (request: LlmProviderSwitchRequest) =>
+    requestJson<LlmConfigResponse>("/api/config/llm/provider", { method: "PUT", body: request }),
 
   listSessions: (query: SessionListOptions = {}, signal?: AbortSignal) =>
     requestJson<SessionListResponse>(

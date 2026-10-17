@@ -55,6 +55,30 @@ export const testServer = setupServer(
     const body = (await request.json()) as { model: string };
     return HttpResponse.json({ model: body.model });
   }),
+  http.put("/api/config/llm/provider", async ({ request }) => {
+    const body = (await request.json()) as { profile: string; model?: string };
+    // Trả snapshot hợp lệ: profile vừa chọn thành active (fixture mặc định có 2 profile).
+    const target = LLM_CONFIG_FIXTURE.providers.find((provider) => provider.name === body.profile) ?? null;
+    if (!target) {
+      return HttpResponse.json(
+        { code: "profile_not_found", message: "profile không tồn tại trong cấu hình" },
+        { status: 422 },
+      );
+    }
+    return HttpResponse.json({
+      ...LLM_CONFIG_FIXTURE,
+      provider: target.provider,
+      model: body.model ?? target.model,
+      allowed_models: target.allowed_models,
+      api_key_env: target.api_key_env,
+      base_url: target.base_url,
+      key_configured: target.key_configured,
+      providers: LLM_CONFIG_FIXTURE.providers.map((provider) => ({
+        ...provider,
+        active: provider.name === body.profile,
+      })),
+    });
+  }),
   // (M27) Mặc định voice TẮT: màn chat luôn hỏi trạng thái này để quyết định có hiện
   // nút mic. Test nào cần bật thì `testServer.use(...)` ghi đè.
   http.get("/api/voice", () =>
@@ -62,7 +86,10 @@ export const testServer = setupServer(
   ),
 );
 
-/** Fixture `/api/config/llm` — đã khử secret: không có giá trị key nào ở đây. */
+/**
+ * Fixture `/api/config/llm` — đã khử secret: không có giá trị key nào ở đây.
+ * Hai profile (`default` active + `ollama`) để test hot-swap provider.
+ */
 export const LLM_CONFIG_FIXTURE = {
   provider: "openai_compat",
   model: "model-a",
@@ -71,6 +98,28 @@ export const LLM_CONFIG_FIXTURE = {
   base_url: "https://openrouter.ai/api/v1",
   max_tokens: 16384,
   key_configured: true,
+  providers: [
+    {
+      name: "default",
+      provider: "openai_compat",
+      model: "model-a",
+      allowed_models: ["model-a", "model-b", "model-c"],
+      base_url: "https://openrouter.ai/api/v1",
+      api_key_env: "OPENROUTER_API_KEY",
+      key_configured: true,
+      active: true,
+    },
+    {
+      name: "ollama",
+      provider: "openai_compat",
+      model: "qwen3:14b",
+      allowed_models: ["qwen3:14b", "qwen3:32b"],
+      base_url: "http://localhost:11434/v1",
+      api_key_env: "",
+      key_configured: true,
+      active: false,
+    },
+  ],
 } as const;
 
 /**

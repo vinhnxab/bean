@@ -110,6 +110,7 @@ async fn fixture(
     }
     let router = Arc::new(Router::with_options(
         RouterDeps {
+            default_profile: config().llm.as_profile(),
             config: config(),
             store: store.clone(),
             registry: Arc::new(registry),
@@ -117,6 +118,7 @@ async fn fixture(
             audit: None,
             skills_index: String::new(),
             skills: None,
+            llm_state_path: None,
         },
         RouterOptions {
             outbox_base_delay: Duration::from_millis(1),

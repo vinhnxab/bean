@@ -53,6 +53,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
     let skills = SkillCatalog::load_with_paths(&[], draft.clone(), draft);
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store.clone(),
         registry: Arc::new(registry),
@@ -60,6 +61,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
         audit: None,
         skills_index: skills.index(),
         skills: Some(skills.clone()),
+        llm_state_path: None,
     }));
     let auth = AuthService::load(&config, store.clone()).unwrap();
     let speech: Option<Arc<dyn SpeechProvider>> = if speech_enabled {

@@ -317,6 +317,11 @@ export const en: Record<MessageKey, string> = {
   "settings.closeSidebar": "Close settings",
   "settings.section.providers": "Providers",
   "settings.section.providersDescription": "The model and API Bean reasons with.",
+  "providers.sectionTitle": "Providers",
+  "providers.profilesHint":
+    "Choose which API setup Bean uses for reasoning. Changes take effect on the next chat turn.",
+  "providers.activeBadge": "In use",
+  "providers.noKeyNeeded": "No API key needed (self-hosted)",
   "providers.provider": "Provider",
   "providers.model": "Model",
   "providers.modelHint": "Changes take effect on the next chat turn, like the /model command.",
@@ -326,6 +331,9 @@ export const en: Record<MessageKey, string> = {
   "providers.keyConfigured": "Configured in the environment",
   "providers.keyMissing": "Not present in the environment — Bean will not be able to call the API",
   "providers.saved": "Saved. The next chat turn uses the new model.",
-  "providers.saveError": "Could not save. The model must be in the allowed list.",
-  "providers.readOnlyNote": "Provider, base URL and API key are changed in bean.toml, then restart Bean.",
+  "providers.switched": "Provider switched. The next chat turn uses the new profile.",
+  "providers.saveError":
+    "Could not save. Check the model is allowed, the profile exists, and the API key is set in the environment.",
+  "providers.readOnlyNote":
+    "Add, remove profiles or change API keys in bean.toml and environment variables; restart Bean to apply.",
 };

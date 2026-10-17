@@ -32,6 +32,17 @@ api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "http://localhost:11434/v1"   # cho openai_compat / Ollama
 max_tokens = 4096
 
+# Hot-swap provider: khai báo sẵn profile để đổi từ màn Cài đặt (hoặc API)
+# mà không cần restart. Lựa chọn đang dùng được lưu ở data.dir/llm-state.json.
+# [[llm.providers]]
+# name = "ollama"                      # tên profile, dùng khi switch; không được là "default"
+# provider = "openai_compat"
+# model = "qwen3:14b"
+# base_url = "http://localhost:11434/v1"
+# api_key_env = ""                     # rỗng = provider không cần key (Ollama/vLLM)
+# allowed_models = ["qwen3:14b", "qwen3:32b"]  # rỗng = chỉ model phía trên
+# max_tokens = 4096
+
 [tools]
 # Nhóm `browser` chỉ có tác dụng khi `[browser].enabled = true` (mặc định tắt).
 enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing", "browser"]

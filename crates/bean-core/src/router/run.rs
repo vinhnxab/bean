@@ -122,10 +122,19 @@ impl Router {
             project = %project,
             "resolve quyền cho run"
         );
+        // Clone Arc khỏi RwLock ra local: borrow của `Arc<dyn LlmProvider>` sống đến
+        // hết await (run_turn_outcome) mà không giữ read-lock qua `.await`.
+        let llm = match read_lock(&self.inner.llm) {
+            Ok(provider) => provider.clone(),
+            Err(error) => {
+                self.emit_error(&queued, "router_state", &error.to_string());
+                return;
+            }
+        };
         let result = run_turn_outcome(RunTurnArgs {
             store: self.inner.store.as_ref(),
             registry: self.inner.registry.as_ref(),
-            llm: self.inner.llm.as_ref(),
+            llm: llm.as_ref(),
             config: &config,
             session: queued.session_id,
             user_text: queued.incoming.text.clone(),
@@ -182,9 +191,18 @@ impl Router {
         let shutdown = self.inner.shutdown.clone();
         let created_at = reservation.to_rfc3339();
         tokio::spawn(async move {
+            // Snapshot provider ra local trước khi vào await — cùng pattern với `execute`.
+            let llm = match read_lock(&router.inner.llm) {
+                Ok(provider) => provider.clone(),
+                Err(error) => {
+                    tracing::warn!(error = %error, "không đọc được provider cho reflection");
+                    router.inner.learning_gate.release(reservation);
+                    return;
+                }
+            };
             let result = reflect(ReflectionArgs {
                 store: router.inner.store.as_ref(),
-                llm: router.inner.llm.as_ref(),
+                llm: llm.as_ref(),
                 config: &config,
                 catalog: &catalog,
                 transcript: &outcome.transcript,

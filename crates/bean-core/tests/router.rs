@@ -49,6 +49,7 @@ async fn router_with(
     }
     let router = Arc::new(Router::with_options(
         RouterDeps {
+            default_profile: config().llm.as_profile(),
             config: config(),
             store,
             registry: Arc::new(registry),
@@ -56,6 +57,7 @@ async fn router_with(
             audit: None,
             skills_index: "demo: Dùng cho test".into(),
             skills: None,
+            llm_state_path: None,
         },
         options,
     ));
@@ -562,6 +564,7 @@ async fn confirm_actor_is_written_to_audit_log() {
         LlmResponse::text_only("xong"),
     ]));
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config().llm.as_profile(),
         config: config(),
         store,
         registry: Arc::new(registry),
@@ -569,6 +572,7 @@ async fn confirm_actor_is_written_to_audit_log() {
         audit: Some(audit),
         skills_index: String::new(),
         skills: None,
+        llm_state_path: None,
     }));
     let mut events = router.events();
     let run = router
@@ -702,6 +706,7 @@ async fn explicit_session_id_from_another_user_is_rejected() {
     let mut config = config();
     config.agent.allowed_users = vec!["cli:local".into(), "cli:other".into()];
     let router = Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config,
         store,
         registry: Arc::new(ToolRegistry::with_workspace(Arc::new(
@@ -711,6 +716,7 @@ async fn explicit_session_id_from_another_user_is_rejected() {
         audit: None,
         skills_index: String::new(),
         skills: None,
+        llm_state_path: None,
     });
     let result = router
         .submit(Incoming::new("cli", "local", "cli:other", "cướp session").with_session(owned))
@@ -784,6 +790,7 @@ async fn model_command_applies_override_to_next_run_only() {
     config.llm.model = "model-a".into();
     config.llm.allowed_models = vec!["model-a".into(), "model-b".into()];
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config,
         store,
         registry: Arc::new(ToolRegistry::with_workspace(workspace)),
@@ -791,6 +798,7 @@ async fn model_command_applies_override_to_next_run_only() {
         audit: None,
         skills_index: String::new(),
         skills: None,
+        llm_state_path: None,
     }));
     let mut events = router.events();
 
@@ -925,6 +933,7 @@ async fn router_with_alerts(store: Arc<MemoryStore>) -> (tempfile::TempDir, Arc<
     let workspace = Arc::new(CapWorkspace::open(temp.path().to_path_buf()).unwrap());
     let registry = ToolRegistry::with_workspace(workspace);
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config_with_alerts().llm.as_profile(),
         config: config_with_alerts(),
         store,
         registry: Arc::new(registry),
@@ -932,6 +941,7 @@ async fn router_with_alerts(store: Arc<MemoryStore>) -> (tempfile::TempDir, Arc<
         audit: None,
         skills_index: "demo".into(),
         skills: None,
+        llm_state_path: None,
     }));
     (temp, router)
 }
@@ -1077,6 +1087,7 @@ async fn llm_config_snapshot_and_set_model_share_one_truth() {
     config.llm.allowed_models = vec!["model-a".into(), "model-b".into()];
     config.llm.api_key_env = "X_TEST_LLM_KEY".into();
     let router = Arc::new(Router::new(RouterDeps {
+        default_profile: config.llm.as_profile(),
         config,
         store,
         registry: Arc::new(ToolRegistry::with_workspace(workspace)),
@@ -1084,6 +1095,7 @@ async fn llm_config_snapshot_and_set_model_share_one_truth() {
         audit: None,
         skills_index: String::new(),
         skills: None,
+        llm_state_path: None,
     }));
 
     let snapshot = router.llm_config().unwrap();

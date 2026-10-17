@@ -3,6 +3,17 @@
 
 use super::*;
 
+use secrecy::SecretString;
+
+/// Signature factory dựng provider từ config candidate + API key resolve từ env.
+///
+/// Trừu tượng hoá [`bean_llm::build_provider`] để test không cần mạng/key thật.
+pub type ProviderFactory<'f> = dyn Fn(
+        &bean_types::config::LlmConfig,
+        Option<SecretString>,
+    ) -> Result<Arc<dyn LlmProvider>, bean_llm::LlmError>
+    + 'f;
+
 impl Router {
     /// Snapshot cấu hình LLM runtime, cùng nguồn với `/model` (mục 10).
     ///
@@ -28,22 +39,167 @@ impl Router {
     /// nguồn sự thật duy nhất cho việc đổi model — slash command `/model` cũng gọi
     /// qua đây, không có bản sao validate nào khác.
     ///
+    /// Lựa chọn được persist xuống `llm-state.json` (khi Router có `llm_state_path`)
+    /// **trước khi** mutate config: lỗi ghi ⇒ trả Err, config giữ nguyên — không có
+    /// trạng thái nửa vời giữa RAM và đĩa.
+    ///
     /// # Errors
     /// * [`RouterError::ModelNotAllowed`] — model không nằm trong `allowed_models`.
+    /// * [`RouterError::Persist`] — không ghi được file state.
     /// * [`RouterError::StatePoisoned`] — không ghi được cấu hình.
     pub fn set_llm_model(&self, model: &str) -> Result<(), RouterError> {
         let mut config = write_lock(&self.inner.config)?;
-        if config
+        if !config
             .llm
             .effective_allowed_models()
             .iter()
             .any(|allowed| allowed == model)
         {
-            config.llm.model = model.to_string();
-            Ok(())
-        } else {
-            Err(RouterError::ModelNotAllowed(model.to_string()))
+            return Err(RouterError::ModelNotAllowed(model.to_string()));
         }
+        self.persist_llm_state(config.llm.active_profile_name(), model)?;
+        config.llm.model = model.to_string();
+        Ok(())
+    }
+
+    /// Ghi lựa chọn profile+model ra file state (nếu Router được cấp đường dẫn).
+    ///
+    /// Gọi khi đang giữ lock config — chỉ đọc tên, không mutate. Lỗi đĩa trả
+    /// [`RouterError::Persist`] để caller từ chối nguyên thay đổi (transactional).
+    fn persist_llm_state(&self, profile: &str, model: &str) -> Result<(), RouterError> {
+        let Some(path) = &self.inner.llm_state_path else {
+            return Ok(());
+        };
+        let state = bean_types::config::LlmState {
+            profile: profile.to_string(),
+            model: model.to_string(),
+        };
+        bean_types::config::LlmState::save(path, &state)
+            .map_err(|error| RouterError::Persist(error.to_string()))
+    }
+
+    /// Hot-swap provider runtime sang một profile khai báo trong `[[llm.providers]]`
+    /// (hoặc `"default"` = cấu hình `[llm]` gốc lúc khởi động).
+    ///
+    /// Thứ tự thao tác là **transactional**: dựng provider mới (có thể fail vì thiếu
+    /// key) → persist state (có thể fail vì đĩa) → mới swap vào RAM + config. Bất kỳ
+    /// bước nào lỗi thì trạng thái hiện tại giữ nguyên — không bao giờ có lúc provider
+    /// runtime đã đổi nhưng config/state chưa, hoặc ngược lại.
+    ///
+    /// # Errors
+    /// * [`RouterError::ProfileNotFound`] — profile không tồn tại.
+    /// * [`RouterError::ModelNotAllowed`] — `model` không nằm trong allowed của profile.
+    /// * [`RouterError::LlmProvider`] — factory dựng provider thất bại (thiếu key…).
+    /// * [`RouterError::Persist`] — không ghi được file state.
+    /// * [`RouterError::StatePoisoned`] — lock bị poison.
+    pub fn switch_llm_provider(
+        &self,
+        profile: &str,
+        model: Option<&str>,
+    ) -> Result<LlmRuntimeConfig, RouterError> {
+        self.switch_llm_provider_with(profile, model, &bean_llm::build_provider)
+    }
+
+    /// Như [`Router::switch_llm_provider`] nhưng nhận factory — test dùng để dựng
+    /// provider giả không cần mạng.
+    ///
+    /// # Errors
+    /// Như [`Router::switch_llm_provider`].
+    pub fn switch_llm_provider_with(
+        &self,
+        profile: &str,
+        model: Option<&str>,
+        factory: &ProviderFactory<'_>,
+    ) -> Result<LlmRuntimeConfig, RouterError> {
+        // 1) Resolve profile + model và dựng provider candidate TRƯỚC khi giữ bất kỳ
+        //    write lock nào — các bước fail-able không được chặn run khác.
+        let config = read_lock(&self.inner.config)?;
+        let resolved = if profile == bean_types::config::DEFAULT_PROFILE_NAME {
+            self.inner.default_profile.clone()
+        } else {
+            config
+                .llm
+                .profile(profile)
+                .ok_or_else(|| RouterError::ProfileNotFound(profile.to_string()))?
+        };
+        let model = match model {
+            Some(requested) => {
+                if !resolved
+                    .effective_allowed_models()
+                    .iter()
+                    .any(|allowed| allowed == requested)
+                {
+                    return Err(RouterError::ModelNotAllowed(requested.to_string()));
+                }
+                requested.to_string()
+            }
+            None => resolved.model.clone(),
+        };
+        // 2) Key từ env theo đúng biến của profile — rỗng ⇒ provider không cần key.
+        let api_key = if resolved.api_key_env.trim().is_empty() {
+            None
+        } else {
+            std::env::var(&resolved.api_key_env)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(SecretString::from)
+        };
+        // Candidate config cho factory: chính là hình thái `[llm]` sẽ có sau khi apply.
+        let candidate = {
+            let mut candidate = config.llm.clone();
+            candidate.apply_profile(&resolved);
+            candidate.model = model.clone();
+            candidate
+        };
+        let provider = factory(&candidate, api_key)
+            .map_err(|error| RouterError::LlmProvider(error.to_string()))?;
+        drop(config); // buông read-lock trước khi ghi state + swap.
+
+        // 3) Persist TRƯỚC khi đổi RAM — lỗi đĩa ⇒ nguyên trạng cũ, config chưa đổi.
+        self.persist_llm_state(&resolved.name, &model)?;
+
+        // 4) Swap provider + config trong cùng lúc (cả hai lock giữ tới hết thân).
+        {
+            let mut config = write_lock(&self.inner.config)?;
+            let mut current = write_lock(&self.inner.llm)?;
+            config
+                .llm
+                .apply_profile(&bean_types::config::LlmProfile { model, ..resolved });
+            *current = provider;
+        }
+        self.llm_config()
+    }
+
+    /// Danh sách profile có thể switch, kèm trạng thái key + active — đã khử secret.
+    ///
+    /// # Errors
+    /// [`RouterError::StatePoisoned`] nếu không đọc được cấu hình.
+    pub fn llm_profiles(&self) -> Result<Vec<LlmProfileInfo>, RouterError> {
+        let config = read_lock(&self.inner.config)?;
+        let active = config.llm.active_profile_name().to_string();
+        let mut out = Vec::new();
+        // `default` là snapshot gốc, không phải `[llm]` hiện tại (đã có thể bị apply).
+        let mut push = |profile: &bean_types::config::LlmProfile| {
+            let key_configured = profile.api_key_env.trim().is_empty()
+                || std::env::var(&profile.api_key_env).is_ok_and(|value| !value.trim().is_empty());
+            out.push(LlmProfileInfo {
+                name: profile.name.clone(),
+                provider: profile.provider,
+                model: profile.model.clone(),
+                allowed_models: profile.effective_allowed_models(),
+                base_url: profile.base_url.clone(),
+                api_key_env: profile.api_key_env.clone(),
+                key_configured,
+                active: profile.name == active,
+            });
+        };
+        push(&self.inner.default_profile);
+        for profile in &config.llm.providers {
+            if profile.name != bean_types::config::DEFAULT_PROFILE_NAME {
+                push(profile);
+            }
+        }
+        Ok(out)
     }
 
     /// Đọc snapshot run/confirm hiện tại cho WebSocket `Sync`.

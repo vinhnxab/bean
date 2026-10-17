@@ -188,6 +188,43 @@ impl Config {
         if let Some(base_url) = self.llm.base_url.as_deref() {
             validate_http_url("llm.base_url", base_url)?;
         }
+        let mut seen_profiles = std::collections::HashSet::new();
+        for profile in &self.llm.providers {
+            let name = profile.name.trim();
+            if name.is_empty() {
+                return Err(invalid("llm.providers có profile với name rỗng"));
+            }
+            if name == DEFAULT_PROFILE_NAME {
+                return Err(invalid(
+                    "llm.providers không được dùng name `default` — tên này dành cho profile ngầm định",
+                ));
+            }
+            if !seen_profiles.insert(name.to_string()) {
+                return Err(invalid(format!("llm.providers có name `{name}` bị trùng")));
+            }
+            if profile.model.trim().is_empty() {
+                return Err(invalid(format!("llm.providers.{name}.model rỗng")));
+            }
+            if !profile
+                .effective_allowed_models()
+                .iter()
+                .any(|m| m == &profile.model)
+            {
+                return Err(invalid(format!(
+                    "llm.providers.{name}.model `{}` không nằm trong allowed_models của profile",
+                    profile.model
+                )));
+            }
+            if !(1..=1_000_000).contains(&profile.max_tokens) {
+                return Err(invalid(format!(
+                    "llm.providers.{name}.max_tokens phải trong 1..=1000000 (đang là {})",
+                    profile.max_tokens
+                )));
+            }
+            if let Some(base_url) = profile.base_url.as_deref() {
+                validate_http_url(&format!("llm.providers.{name}.base_url"), base_url)?;
+            }
+        }
 
         if self.security.daily_token_budget == 0 {
             return Err(invalid("security.daily_token_budget phải > 0"));
