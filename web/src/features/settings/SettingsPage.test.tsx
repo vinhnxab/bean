@@ -379,7 +379,9 @@ describe("SettingsPage — Providers CRUD", () => {
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Không thực hiện được");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "profile đang active — hãy chuyển sang profile khác trước",
+    );
     // Confirm dialog vẫn mở (onSuccess không chạy) — người dùng có thể Huỷ.
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });

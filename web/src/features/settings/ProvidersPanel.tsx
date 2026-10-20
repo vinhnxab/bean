@@ -1,6 +1,7 @@
 import { CheckCircle2Icon, CircleAlertIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 import type { LlmProviderInfo, LlmProviderUpdateRequest } from "@/api/bindings";
+import { ApiRequestError } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -27,6 +28,18 @@ import { useI18n } from "@/i18n";
 
 /** Đích của form thêm/sửa profile; `edit` giữ nguyên profile gốc để điền sẵn. */
 type FormTarget = { mode: "create" } | { mode: "edit"; profile: LlmProviderInfo };
+
+/**
+ * Thông điệp lỗi cho người dùng: server trả message chi tiết theo từng trường
+ * (422 `profile_invalid` v.v.) — ưu tiên hiển thị nguyên văn; `http_error` của
+ * lớp transport (mạng, body lạ) thì fallback câu hướng dẫn chung.
+ */
+function mutationErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiRequestError && error.code !== "http_error") {
+    return error.message;
+  }
+  return fallback;
+}
 
 /**
  * Mục **Nhà cung cấp** trong Cài đặt (giai đoạn 2 + 3: hot-swap + CRUD profile).
@@ -281,7 +294,7 @@ export function ProvidersPanel() {
           {deleteProvider.isError ? (
             <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-destructive">
               <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
-              {t("providers.crudError")}
+              {mutationErrorMessage(deleteProvider.error, t("providers.crudError"))}
             </p>
           ) : null}
         </form>
@@ -400,15 +413,19 @@ function ProviderFormDialog({
   const [apiKeyEnv, setApiKeyEnv] = useState(editing?.api_key_env ?? "");
   const [baseUrl, setBaseUrl] = useState(editing?.base_url ?? "");
   const [maxTokens, setMaxTokens] = useState(editing ? String(editing.max_tokens) : "");
+  // Message lỗi của lần submit gần nhất; null = chưa lỗi. State nội bộ (không dựa
+  // vào mutation.error) để dialog mở lại luôn sạch, còn status success vẫn sống
+  // trên panel qua mutation như comment ở đầu component.
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const pending = create.isPending || update.isPending;
-  const failed = create.isError || update.isError;
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (pending) return;
     const trimmedModel = model.trim();
     if (trimmedModel === "") return;
+    setSubmitError(null);
     const request: LlmProviderUpdateRequest = {
       provider: providerKind,
       model: trimmedModel,
@@ -420,10 +437,13 @@ function ProviderFormDialog({
       base_url: baseUrl.trim() === "" ? null : baseUrl.trim(),
       max_tokens: maxTokens.trim() === "" ? null : Number(maxTokens.trim()),
     };
+    const onError = (error: Error) => {
+      setSubmitError(mutationErrorMessage(error, t("providers.crudError")));
+    };
     if (editing) {
-      update.mutate({ name: editing.name, request }, { onSuccess: onClose });
+      update.mutate({ name: editing.name, request }, { onSuccess: onClose, onError });
     } else {
-      create.mutate({ name: name.trim(), ...request }, { onSuccess: onClose });
+      create.mutate({ name: name.trim(), ...request }, { onSuccess: onClose, onError });
     }
   };
 
@@ -557,10 +577,10 @@ function ProviderFormDialog({
             </div>
           </div>
 
-          {failed ? (
+          {submitError ? (
             <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
               <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
-              {t("providers.crudError")}
+              {submitError}
             </p>
           ) : null}
 
