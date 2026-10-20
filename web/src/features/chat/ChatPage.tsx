@@ -332,10 +332,10 @@ function ChatSession({ sessionId }: { sessionId: number }) {
                 <ThinkingIndicator />
               </Enter>
             ) : null}
-            {run?.error ? (
+            {run && (run.error || run.errorCode === "interrupted") ? (
               <Enter kind="shake" className="mt-4">
                 <p className="rounded-lg bg-alert/10 p-3 text-sm text-alert" role="alert">
-                  {run.error}
+                  {run.error ?? t("chat.interrupted")}
                 </p>
               </Enter>
             ) : null}

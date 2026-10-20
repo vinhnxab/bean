@@ -76,6 +76,7 @@ export const en: Record<MessageKey, string> = {
   "chat.send": "Send",
   "chat.stop": "Stop",
   "chat.stopping": "Stopping…",
+  "chat.interrupted": "The connection dropped while processing; the outcome of your last message is unknown.",
   "chat.queued": "Queued",
   "chat.thinking": "Thinking…",
   "chat.loadingOlder": "Load older messages",

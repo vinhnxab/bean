@@ -119,4 +119,30 @@ describe("ChatSocket", () => {
       }),
     ).toBeNull();
   });
+
+  it("nhận sự kiện lỗi có session_id là number (shape server Option<i64>)", () => {
+    // Regress: guard cũ dùng hasNullableString cho session_id nên error thật
+    // (session_id number) bị loại ở biên — UI kẹt "Đang suy nghĩ" vĩnh viễn.
+    const withSession = parseServerMessage({
+      type: "error",
+      session_id: 18,
+      run_id: "run_x",
+      code: "llm",
+      message: "provider trả HTTP 401: User not found.",
+    });
+    expect(withSession).toEqual({
+      type: "error",
+      session_id: 18,
+      run_id: "run_x",
+      code: "llm",
+      message: "provider trả HTTP 401: User not found.",
+    });
+    expect(
+      parseServerMessage({ type: "error", session_id: null, run_id: null, code: "x", message: "y" }),
+    ).not.toBeNull();
+    expect(
+      parseServerMessage({ type: "error", session_id: "18", run_id: "r", code: "x", message: "y" }),
+    ).toBeNull();
+    expect(parseServerMessage({ type: "error", session_id: 1, run_id: "r", code: "x" })).toBeNull();
+  });
 });

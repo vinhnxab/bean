@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import type { ServerMsg } from "@/api/bindings";
 import { parseServerMessage } from "@/api/ws";
 import { useChatStore } from "@/store/chat";
 
-const sync = { type: "sync", running: [], pending_confirms: [] } as const;
+const sync: Extract<ServerMsg, { type: "sync" }> = { type: "sync", running: [], pending_confirms: [] };
 
 describe("chat event state", () => {
   it("xử lý chuỗi Queued → ToolStart → ToolEnd → Final và refetch Final", () => {
@@ -131,5 +132,54 @@ describe("chat event state", () => {
       .applyServerMessage({ type: "text", session_id: 1, run_id: "run-2", text: "x" });
     expect(first?.runId).toBe("run-2");
     expect(second).toBeNull();
+  });
+
+  it("error event (session_id number) đưa run về idle kèm thông báo lỗi", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().markSubmitting(7);
+    useChatStore.getState().applyServerMessage({
+      type: "error",
+      session_id: 7,
+      run_id: "run-7",
+      code: "llm",
+      message: "provider trả HTTP 401: User not found.",
+    });
+    const run = useChatStore.getState().runsBySession[7];
+    expect(run?.status).toBe("idle");
+    expect(run?.error).toBe("provider trả HTTP 401: User not found.");
+    expect(run?.errorCode).toBe("llm");
+    expect(run?.runId).toBeNull();
+  });
+
+  it("applySync reconcile reset run submitting (runId null) thành interrupted", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().markSubmitting(3);
+    useChatStore.getState().applySync(sync, true);
+    const run = useChatStore.getState().runsBySession[3];
+    expect(run?.status).toBe("idle");
+    expect(run?.errorCode).toBe("interrupted");
+    expect(run?.error).toBeNull();
+  });
+
+  it("applySync giữ run submitting khi lần sync đầu (không reconcile)", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().markSubmitting(3);
+    useChatStore.getState().applySync(sync, false);
+    expect(useChatStore.getState().runsBySession[3]?.status).toBe("submitting");
+  });
+
+  it("applySync ghi đè interrupted bằng run thật server đang chạy", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().markSubmitting(3);
+    useChatStore
+      .getState()
+      .applySync(
+        { type: "sync", running: [{ session_id: 3, run_id: "run-3", role: null }], pending_confirms: [] },
+        true,
+      );
+    const run = useChatStore.getState().runsBySession[3];
+    expect(run?.status).toBe("running");
+    expect(run?.runId).toBe("run-3");
+    expect(run?.errorCode).toBeNull();
   });
 });

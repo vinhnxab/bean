@@ -33,6 +33,10 @@ function hasNullableString(value: Record<string, unknown>, key: string): boolean
   return value[key] === null || typeof value[key] === "string";
 }
 
+function hasNullableNumber(value: Record<string, unknown>, key: string): boolean {
+  return value[key] === null || hasNumber(value, key);
+}
+
 function isPendingConfirm(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
@@ -103,8 +107,12 @@ export function parseServerMessage(raw: unknown): ServerMsg | null {
       case "notification":
         return hasNumber(raw, "session_id") && hasNumber(raw, "message_id");
       case "error":
+        // `session_id`/`run_id` là `Option<i64>`/`Option<String>` phía server: Some
+        // serialize thành number/string, None thành null. Dùng đúng shape để sự
+        // kiện lỗi thật (có session) không bị loại ở biên — nếu không, run ở client
+        // kẹt "submitting" và UI treo "Đang suy nghĩ" vĩnh viễn.
         return (
-          hasNullableString(raw, "session_id") &&
+          hasNullableNumber(raw, "session_id") &&
           hasNullableString(raw, "run_id") &&
           hasString(raw, "code") &&
           hasString(raw, "message")

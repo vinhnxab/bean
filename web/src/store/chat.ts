@@ -25,6 +25,8 @@ export type SessionRunState = {
   streamText: string;
   liveTools: Record<string, LiveTool>;
   error: string | null;
+  /** Mã lỗi server (ví dụ "llm") hoặc "interrupted" khi client tự phát hiện mất đồng bộ. */
+  errorCode: string | null;
 };
 
 export type RefreshEffect = {
@@ -54,6 +56,7 @@ function idleRun(): SessionRunState {
     streamText: "",
     liveTools: {},
     error: null,
+    errorCode: null,
   };
 }
 
@@ -120,6 +123,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           streamText: "",
           liveTools: {},
           error: null,
+          errorCode: null,
         }),
       },
     })),
@@ -137,8 +141,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const runs = { ...state.runsBySession };
       const activeRunIds = new Set(message.running.map((item) => item.run_id));
       for (const [sessionId, run] of Object.entries(runs)) {
-        if (run.runId && !activeRunIds.has(run.runId) && run.status !== "idle")
-          runs[Number(sessionId)] = idleRun();
+        if (run.status === "idle") continue;
+        if (run.runId === null) {
+          // Run "submitting" chưa gắn run_id: sau lần đồng bộ lại (reconnect/tab
+          // mới/server lag) nếu run thật server vẫn giữ thì mục `running` ở dưới
+          // sẽ ghi đè lại — ở đây reset để run ảo không kẹt vĩnh viễn.
+          if (reconcile) runs[Number(sessionId)] = { ...idleRun(), errorCode: "interrupted" };
+          continue;
+        }
+        if (!activeRunIds.has(run.runId)) runs[Number(sessionId)] = idleRun();
       }
       for (const item of message.running) {
         const previous = runs[item.session_id];
@@ -146,9 +157,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...(previous ?? idleRun()),
           runId: item.run_id,
           status: "running",
+          error: null,
+          errorCode: null,
           streamText: previous?.runId === item.run_id ? previous.streamText : "",
           liveTools: previous?.runId === item.run_id ? previous.liveTools : {},
-          error: null,
         };
       }
       const confirms = { ...state.confirmsById };
@@ -184,6 +196,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             status: "queued",
             queuePosition: message.position,
             error: null,
+            errorCode: null,
           });
           break;
         case "text":
@@ -192,6 +205,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             status: "running",
             queuePosition: null,
             streamText: message.text,
+            error: null,
+            errorCode: null,
           });
           effect = { sessionId: message.session_id, messageId: null, runId: message.run_id };
           break;
@@ -212,6 +227,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             runId: message.run_id,
             status: "running",
             queuePosition: null,
+            error: null,
+            errorCode: null,
           });
           runs[message.session_id] = {
             ...run,
@@ -256,6 +273,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             runId: message.run_id,
             status: "running",
             queuePosition: null,
+            error: null,
+            errorCode: null,
           });
           confirms[message.confirm_id] = { ...message, receivedAt: Date.now(), resolution: "pending" };
           break;
@@ -267,7 +286,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         case "final":
           runs[message.session_id] = {
-            ...runFor(state, message.session_id, { status: "idle" }),
+            ...runFor(state, message.session_id, { status: "idle", error: null, errorCode: null }),
             runId: null,
             queuePosition: null,
             streamText: "",
@@ -282,7 +301,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const sessionId = message.session_id;
           if (sessionId !== null) {
             runs[sessionId] = {
-              ...runFor(state, sessionId, { error: message.message, status: "idle" }),
+              ...runFor(state, sessionId, {
+                error: message.message,
+                errorCode: message.code,
+                status: "idle",
+              }),
               runId: null,
               queuePosition: null,
               streamText: "",
