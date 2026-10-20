@@ -486,3 +486,28 @@ fn config_path_none_is_ram_only() {
     let profiles = router.llm_profiles().unwrap();
     assert!(profiles.iter().any(|p| p.name == "local"));
 }
+
+/// Chuẩn hoá `allowed_models` lúc lưu: lọc phần tử rỗng và tự chèn model mặc định
+/// vào đầu khi thiếu — bảo đảm `serve` nạp config nổi (validate.rs từ chối khởi
+/// động khi model mặc định vắng mặt trong danh sách).
+#[test]
+fn add_profile_normalizes_allowed_models() {
+    let setup = setup(false);
+    let mut profile = new_profile("groq", "llama-4-8b");
+    // Người dùng dán thiếu dấu `,` (tạo phần tử "llama-4-8b;") + phần tử rỗng.
+    profile.allowed_models = vec!["llama-4-8b;".to_string(), " ".to_string()];
+    setup.router.add_llm_provider(profile).unwrap();
+
+    let info = setup
+        .router
+        .llm_profiles()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.name == "groq")
+        .unwrap();
+    assert_eq!(info.allowed_models, vec!["llama-4-8b", "llama-4-8b;"]);
+
+    // File persist chứa danh sách đã chuẩn hoá (model mặc định đứng đầu).
+    let stored = std::fs::read_to_string(&setup.config_path).unwrap();
+    assert!(stored.contains("allowed_models = [\"llama-4-8b\", \"llama-4-8b;\"]"));
+}

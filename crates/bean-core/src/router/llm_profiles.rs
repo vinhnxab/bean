@@ -78,6 +78,26 @@ impl Router {
             .map_err(|error| RouterError::ConfigPersist(error.to_string()))
     }
 
+    /// Chuẩn hoá `allowed_models` của profile trước khi lưu.
+    ///
+    /// Lọc phần tử rỗng (dán tham số tạo `""`/khoảng trắng) và khi danh sách không
+    /// rỗng mà thiếu model mặc định thì chèn model vào đầu. Bắt buộc để config luôn
+    /// nạp nổi: `validate.rs` từ chối khởi động `serve` khi model mặc định không
+    /// nằm trong `allowed_models` của profile (sự cố thật 2026-10-20: phần tử dán
+    /// thiếu dấu `,` khiến profile hợp lệ lúc lưu nhưng làm `serve` chết lúc load).
+    fn normalize_allowed_models(profile: &mut bean_types::config::LlmProfile) {
+        let mut models: Vec<String> = profile
+            .allowed_models
+            .iter()
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty())
+            .collect();
+        if !models.is_empty() && models.iter().all(|model| *model != profile.model) {
+            models.insert(0, profile.model.clone());
+        }
+        profile.allowed_models = models;
+    }
+
     /// Thêm profile vào `[[llm.providers]]` — **không** switch runtime.
     ///
     /// Thứ tự transactional: validate → persist `bean.toml` → mutate RAM. Lỗi bất
@@ -90,8 +110,9 @@ impl Router {
     /// * [`RouterError::StatePoisoned`] — lock bị poison.
     pub fn add_llm_provider(
         &self,
-        profile: bean_types::config::LlmProfile,
+        mut profile: bean_types::config::LlmProfile,
     ) -> Result<LlmRuntimeConfig, RouterError> {
+        Self::normalize_allowed_models(&mut profile);
         profile
             .validate_for_storage()
             .map_err(|error| RouterError::ProfileInvalid(error.to_string()))?;
@@ -151,6 +172,7 @@ impl Router {
             return Err(RouterError::DefaultProfileReadonly);
         }
         profile.name = name.to_string();
+        Self::normalize_allowed_models(&mut profile);
         profile
             .validate_for_storage()
             .map_err(|error| RouterError::ProfileInvalid(error.to_string()))?;
