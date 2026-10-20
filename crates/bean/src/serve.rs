@@ -114,6 +114,8 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         skills: Some(skills.clone()),
         llm_state_path,
         default_profile,
+        // `bean serve` biết đường config gốc → bật CRUD provider profile từ UI.
+        config_path: config_path.map(std::path::Path::to_path_buf),
     }));
     let scheduler = Arc::new(
         Scheduler::new(

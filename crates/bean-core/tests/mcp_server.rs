@@ -154,6 +154,7 @@ fn setup() -> (TempDir, Arc<Router>, Config, Arc<EchoArgs>) {
         skills_index: String::new(),
         skills: None,
         llm_state_path: None,
+        config_path: None,
     }));
     (dir, router, config, billing)
 }

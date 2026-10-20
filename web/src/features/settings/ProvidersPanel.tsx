@@ -1,31 +1,59 @@
-import { CheckCircle2Icon, CircleAlertIcon } from "lucide-react";
+import { CheckCircle2Icon, CircleAlertIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
+import type { LlmProviderInfo, LlmProviderUpdateRequest } from "@/api/bindings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { ErrorState, LoadingState, Panel } from "@/components/ui/Page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useLlmConfig, useSwitchLlmProvider, useUpdateLlmModel } from "@/features/settings/queries";
+import {
+  useCreateLlmProvider,
+  useDeleteLlmProvider,
+  useLlmConfig,
+  useSwitchLlmProvider,
+  useUpdateLlmModel,
+  useUpdateLlmProvider,
+} from "@/features/settings/queries";
 import { useI18n } from "@/i18n";
 
+/** Đích của form thêm/sửa profile; `edit` giữ nguyên profile gốc để điền sẵn. */
+type FormTarget = { mode: "create" } | { mode: "edit"; profile: LlmProviderInfo };
+
 /**
- * Mục **Nhà cung cấp** trong Cài đặt (giai đoạn 2: hot-swap provider).
+ * Mục **Nhà cung cấp** trong Cài đặt (giai đoạn 2 + 3: hot-swap + CRUD profile).
  *
  * # Ranh giới chỉnh sửa
  *
- * Người dùng switch giữa các profile khai báo sẵn trong `[[llm.providers]]`
- * (`bean.toml`) — server tự dựng lại HTTP client và resolve API key từ biến môi
- * trường; key **không bao giờ** được nhập/hiển thị tại đây (mục 15.6). Thêm/xoá
- * profile vẫn là sửa `bean.toml` + restart: UI chỉ đọc danh sách server trả về.
+ * Switch giữa các profile và thêm/sửa/xoá profile đều chạy ngay tại đây: CRUD ghi
+ * thẳng `[[llm.providers]]` của `bean.toml` phía server (persist trước, áp dụng
+ * runtime sau). API key **không bao giờ** được nhập/hiển thị tại đây — chỉ khai
+ * báo *tên* biến môi trường, giá trị resolve phía server (mục 15.6). Máy chủ chạy
+ * không biết đường `bean.toml` (CLI/test) sẽ trả 503 `config_readonly`.
  */
 export function ProvidersPanel() {
   const { t } = useI18n();
   const config = useLlmConfig();
   const switchProvider = useSwitchLlmProvider();
   const updateModel = useUpdateLlmModel();
+  const createProvider = useCreateLlmProvider();
+  const updateProvider = useUpdateLlmProvider();
+  const deleteProvider = useDeleteLlmProvider();
   const data = config.data;
   // Lựa chọn đang sửa trong form; `null` = theo snapshot server (chưa bấm gì).
   const [profile, setProfile] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  // CRUD (giai đoạn 3): form thêm/sửa + confirm xoá.
+  const [formTarget, setFormTarget] = useState<FormTarget | null>(null);
+  const [deleting, setDeleting] = useState<LlmProviderInfo | null>(null);
 
   if (config.isPending) return <LoadingState label={t("common.loading")} />;
   if (config.isError || !data) return <ErrorState onRetry={() => void config.refetch()} />;
@@ -40,7 +68,12 @@ export function ProvidersPanel() {
   const providerDirty = selectedName !== activeName;
   const modelDirty = currentModel !== (providerDirty ? selected.model : data.model);
   const dirty = providerDirty || modelDirty;
-  const pending = switchProvider.isPending || updateModel.isPending;
+  const pending =
+    switchProvider.isPending ||
+    updateModel.isPending ||
+    createProvider.isPending ||
+    updateProvider.isPending ||
+    deleteProvider.isPending;
 
   const save = (event: React.FormEvent) => {
     event.preventDefault();
@@ -61,8 +94,29 @@ export function ProvidersPanel() {
     <div className="max-w-3xl">
       <Panel>
         <form onSubmit={save}>
-          <h2 className="font-semibold">{t("providers.sectionTitle")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t("providers.profilesHint")}</p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="font-semibold">{t("providers.sectionTitle")}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{t("providers.profilesHint")}</p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              data-slot="add-profile"
+              onClick={() => {
+                // Bắt đầu một phiên làm việc CRUD mới: xoá trạng thái của lần trước.
+                createProvider.reset();
+                updateProvider.reset();
+                deleteProvider.reset();
+                setFormTarget({ mode: "create" });
+              }}
+            >
+              <PlusIcon className="size-4" aria-hidden="true" />
+              {t("providers.addProfile")}
+            </Button>
+          </div>
 
           <div role="radiogroup" aria-label={t("providers.sectionTitle")} className="mt-4 grid gap-2">
             {data.providers.map((entry) => {
@@ -103,10 +157,52 @@ export function ProvidersPanel() {
                     </span>
                     <KeyStatus apiKeyEnv={entry.api_key_env} keyConfigured={entry.key_configured} />
                   </span>
+                  {entry.name === "default" ? null : (
+                    <span className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        aria-label={t("providers.editProfile")}
+                        onClick={(event) => {
+                          // Nút nằm trong <label> của radio: chặn để không chọn nhầm profile.
+                          event.preventDefault();
+                          switchProvider.reset();
+                          updateModel.reset();
+                          createProvider.reset();
+                          updateProvider.reset();
+                          deleteProvider.reset();
+                          setFormTarget({ mode: "edit", profile: entry });
+                        }}
+                      >
+                        <PencilIcon className="size-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-destructive hover:text-destructive"
+                        aria-label={t("providers.deleteProfile")}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          switchProvider.reset();
+                          updateModel.reset();
+                          createProvider.reset();
+                          updateProvider.reset();
+                          deleteProvider.reset();
+                          setDeleting(entry);
+                        }}
+                      >
+                        <Trash2Icon className="size-4" aria-hidden="true" />
+                      </Button>
+                    </span>
+                  )}
                 </label>
               );
             })}
           </div>
+          <p className="mt-2 text-xs text-muted-foreground">{t("providers.defaultReadonlyHint")}</p>
 
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
             <div className="min-w-0">
@@ -160,10 +256,32 @@ export function ProvidersPanel() {
               {t("providers.saved")}
             </p>
           ) : null}
+          {createProvider.isSuccess ? (
+            <p role="status" className="mt-3 flex items-center gap-2 text-sm text-live">
+              <CheckCircle2Icon className="size-4 shrink-0" aria-hidden="true" />
+              {t("providers.created")}
+            </p>
+          ) : updateProvider.isSuccess ? (
+            <p role="status" className="mt-3 flex items-center gap-2 text-sm text-live">
+              <CheckCircle2Icon className="size-4 shrink-0" aria-hidden="true" />
+              {t("providers.updated")}
+            </p>
+          ) : deleteProvider.isSuccess ? (
+            <p role="status" className="mt-3 flex items-center gap-2 text-sm text-live">
+              <CheckCircle2Icon className="size-4 shrink-0" aria-hidden="true" />
+              {t("providers.deleted")}
+            </p>
+          ) : null}
           {switchProvider.isError || updateModel.isError ? (
             <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-destructive">
               <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
               {t("providers.saveError")}
+            </p>
+          ) : null}
+          {deleteProvider.isError ? (
+            <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-destructive">
+              <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
+              {t("providers.crudError")}
             </p>
           ) : null}
         </form>
@@ -181,6 +299,33 @@ export function ProvidersPanel() {
           {t("providers.readOnlyNote")}
         </p>
       </Panel>
+
+      {/* Form thêm/sửa profile. `key` theo đích để state form luôn khởi tạo mới
+          khi đổi giữa create/edit hoặc đổi profile đang sửa. */}
+      {formTarget ? (
+        <ProviderFormDialog
+          key={formTarget.mode === "edit" ? `edit:${formTarget.profile.name}` : "create"}
+          target={formTarget}
+          create={createProvider}
+          update={updateProvider}
+          onClose={() => setFormTarget(null)}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        title={t("providers.confirmDeleteTitle")}
+        message={t("providers.confirmDeleteMessage")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        danger
+        pending={deleteProvider.isPending}
+        onConfirm={() => {
+          if (!deleting) return;
+          deleteProvider.mutate(deleting.name, { onSuccess: () => setDeleting(null) });
+        }}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }
@@ -227,5 +372,208 @@ function Row({ label, value, mono = false }: { label: string; value: string; mon
       <dt className="text-muted-foreground">{label}</dt>
       <dd className={mono ? "text-right font-mono text-xs break-all" : "text-right font-medium"}>{value}</dd>
     </div>
+  );
+}
+
+/**
+ * Form thêm/sửa profile (giai đoạn 3). State khởi tạo từ `target` mỗi lần mount
+ * (component unmount khi đóng), mutations nhận qua props để trạng thái
+ * success/error sống sót sau khi dialog đóng và hiển thị trên panel.
+ */
+function ProviderFormDialog({
+  target,
+  create,
+  update,
+  onClose,
+}: {
+  target: FormTarget;
+  create: ReturnType<typeof useCreateLlmProvider>;
+  update: ReturnType<typeof useUpdateLlmProvider>;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const editing = target.mode === "edit" ? target.profile : null;
+  const [name, setName] = useState(editing?.name ?? "");
+  const [providerKind, setProviderKind] = useState(editing?.provider ?? "anthropic");
+  const [model, setModel] = useState(editing?.model ?? "");
+  const [allowedModels, setAllowedModels] = useState(editing?.allowed_models.join(", ") ?? "");
+  const [apiKeyEnv, setApiKeyEnv] = useState(editing?.api_key_env ?? "");
+  const [baseUrl, setBaseUrl] = useState(editing?.base_url ?? "");
+  const [maxTokens, setMaxTokens] = useState(editing ? String(editing.max_tokens) : "");
+
+  const pending = create.isPending || update.isPending;
+  const failed = create.isError || update.isError;
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (pending) return;
+    const trimmedModel = model.trim();
+    if (trimmedModel === "") return;
+    const request: LlmProviderUpdateRequest = {
+      provider: providerKind,
+      model: trimmedModel,
+      allowed_models: allowedModels
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== ""),
+      api_key_env: apiKeyEnv.trim(),
+      base_url: baseUrl.trim() === "" ? null : baseUrl.trim(),
+      max_tokens: maxTokens.trim() === "" ? null : Number(maxTokens.trim()),
+    };
+    if (editing) {
+      update.mutate({ name: editing.name, request }, { onSuccess: onClose });
+    } else {
+      create.mutate({ name: name.trim(), ...request }, { onSuccess: onClose });
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next && !pending) onClose();
+      }}
+    >
+      <DialogContent showClose={!pending}>
+        <DialogHeader>
+          <DialogTitle>{editing ? t("providers.editProfile") : t("providers.addProfile")}</DialogTitle>
+          <DialogDescription>{editing ? editing.name : t("providers.apiKeyEnvHint")}</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="grid gap-4">
+          {editing ? null : (
+            <div className="grid gap-1.5">
+              <label htmlFor="provider-name" className="text-sm font-medium">
+                {t("providers.name")}
+              </label>
+              <Input
+                id="provider-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
+                autoFocus
+                maxLength={64}
+                pattern="[a-z0-9][a-z0-9-]*"
+                title={t("providers.nameHint")}
+                data-slot="provider-name"
+                className="font-mono"
+              />
+              <span className="text-xs text-muted-foreground">{t("providers.nameHint")}</span>
+            </div>
+          )}
+
+          <div className="grid gap-1.5">
+            <span className="text-sm font-medium">{t("providers.providerKind")}</span>
+            <Select
+              value={providerKind}
+              onValueChange={(value) => {
+                // Radix fire "" khi đóng danh sách mà không chọn (Escape) — bỏ qua.
+                if (!value) return;
+                setProviderKind(value);
+              }}
+            >
+              <SelectTrigger data-slot="provider-kind" aria-label={t("providers.providerKind")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="anthropic">{t("providers.providerAnthropic")}</SelectItem>
+                <SelectItem value="openai_compat">{t("providers.providerOpenaiCompat")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <label htmlFor="provider-model" className="text-sm font-medium">
+              {t("providers.model")}
+            </label>
+            <Input
+              id="provider-model"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              required
+              data-slot="provider-model"
+              className="font-mono"
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <label htmlFor="provider-allowed-models" className="text-sm font-medium">
+              {t("providers.allowedModels")}
+            </label>
+            <Input
+              id="provider-allowed-models"
+              value={allowedModels}
+              onChange={(event) => setAllowedModels(event.target.value)}
+              data-slot="provider-allowed-models"
+              className="font-mono"
+            />
+            <span className="text-xs text-muted-foreground">{t("providers.allowedModelsHint")}</span>
+          </div>
+
+          <div className="grid gap-1.5">
+            <label htmlFor="provider-api-key-env" className="text-sm font-medium">
+              {t("providers.apiKeyEnv")}
+            </label>
+            <Input
+              id="provider-api-key-env"
+              value={apiKeyEnv}
+              onChange={(event) => setApiKeyEnv(event.target.value)}
+              placeholder="ANTHROPIC_API_KEY"
+              data-slot="provider-api-key-env"
+              className="font-mono"
+            />
+            <span className="text-xs text-muted-foreground">{t("providers.apiKeyEnvHint")}</span>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <label htmlFor="provider-base-url" className="text-sm font-medium">
+                {t("providers.baseUrl")}
+              </label>
+              <Input
+                id="provider-base-url"
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder="https://…"
+                data-slot="provider-base-url"
+                className="font-mono"
+              />
+              <span className="text-xs text-muted-foreground">{t("providers.baseUrlHint")}</span>
+            </div>
+            <div className="grid gap-1.5">
+              <label htmlFor="provider-max-tokens" className="text-sm font-medium">
+                {t("providers.maxTokens")}
+              </label>
+              <Input
+                id="provider-max-tokens"
+                value={maxTokens}
+                onChange={(event) => setMaxTokens(event.target.value)}
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                data-slot="provider-max-tokens"
+              />
+              <span className="text-xs text-muted-foreground">{t("providers.maxTokensHint")}</span>
+            </div>
+          </div>
+
+          {failed ? (
+            <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
+              <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
+              {t("providers.crudError")}
+            </p>
+          ) : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={pending} onClick={onClose}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="submit" disabled={pending}>
+              {pending ? t("common.loading") : t("common.save")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -341,8 +341,30 @@ export const vi = {
   "providers.switched": "Đã đổi nhà cung cấp. Lượt chat kế tiếp dùng profile mới.",
   "providers.saveError":
     "Không lưu được. Kiểm tra model nằm trong danh sách cho phép, profile tồn tại, và API key đã đặt trong biến môi trường.",
+  "providers.addProfile": "Thêm profile",
+  "providers.editProfile": "Sửa profile",
+  "providers.deleteProfile": "Xoá profile",
+  "providers.name": "Tên profile",
+  "providers.nameHint": "Chữ thường, số và gạch ngang. Ví dụ: openrouter.",
+  "providers.providerKind": "Loại provider",
+  "providers.providerAnthropic": "Anthropic API",
+  "providers.providerOpenaiCompat": "Tương thích OpenAI (Ollama, OpenRouter…)",
+  "providers.allowedModels": "Model được phép",
+  "providers.allowedModelsHint": "Ngăn cách bằng dấu phẩy; để trống chỉ dùng model mặc định.",
+  "providers.apiKeyEnvHint": "Chỉ tên biến môi trường; giá trị đặt trên máy chạy Bean.",
+  "providers.baseUrlHint": "Để trống dùng endpoint mặc định.",
+  "providers.maxTokensHint": "Để trống dùng mặc định (4096).",
+  "providers.confirmDeleteTitle": "Xoá profile?",
+  "providers.confirmDeleteMessage":
+    "Profile sẽ bị xoá khỏi bean.toml và không thể hoàn tác. Profile đang dùng phải chuyển sang profile khác trước.",
+  "providers.created": "Đã thêm profile vào bean.toml.",
+  "providers.updated": "Đã cập nhật profile trong bean.toml.",
+  "providers.deleted": "Đã xoá profile khỏi bean.toml.",
+  "providers.crudError":
+    "Không thực hiện được. Kiểm tra tên profile (chữ thường + gạch ngang, không trùng), các trường bắt buộc, và file bean.toml ghi được.",
+  "providers.defaultReadonlyHint": "Profile “default” là ánh xạ của mục [llm] gốc — không sửa/xoá tại đây.",
   "providers.readOnlyNote":
-    "Thêm, xoá profile hoặc đổi API key trong bean.toml và biến môi trường; khởi động lại Bean để áp dụng.",
+    "Thêm, sửa, xoá profile tại đây — thay đổi ghi thẳng vào bean.toml và áp dụng ngay. Đổi API key bằng biến môi trường trên máy chạy Bean.",
 } as const;
 
 export type MessageKey = keyof typeof vi;

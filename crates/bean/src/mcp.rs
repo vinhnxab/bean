@@ -125,6 +125,7 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
         skills: None,
         // MCP serve không chạy agent loop và không switch provider — không cần persist.
         llm_state_path: None,
+        config_path: None,
     }));
     Ok(ServeContext {
         auth: Arc::new(McpAuth::new(store)),

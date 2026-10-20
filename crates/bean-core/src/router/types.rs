@@ -152,6 +152,21 @@ pub enum RouterError {
     /// Không ghi được file trạng thái LLM — switch bị từ chối nguyên vẹn (config không đổi).
     #[error("không ghi được trạng thái LLM: {0}")]
     Persist(String),
+    /// Profile mới/sửa không đạt validate (tên, model, api_key_env…).
+    #[error("profile không hợp lệ: {0}")]
+    ProfileInvalid(String),
+    /// Tên profile đã tồn tại trong `[[llm.providers]]`.
+    #[error("tên profile đã tồn tại: {0}")]
+    ProfileExists(String),
+    /// Profile đang active — phải switch sang profile khác trước khi xoá.
+    #[error("profile đang hoạt động, không thể xoá: {0}")]
+    ProfileActive(String),
+    /// Profile `"default"` là cấu hình `[llm]` ngầm định, không sửa/xoá được qua API.
+    #[error("profile `default` là cấu hình [llm] ngầm định, không sửa/xoá được")]
+    DefaultProfileReadonly,
+    /// Không ghi được `bean.toml` — CRUD profile bị từ chối nguyên vẹn.
+    #[error("không ghi được file cấu hình: {0}")]
+    ConfigPersist(String),
 }
 
 impl RouterError {
@@ -178,6 +193,11 @@ impl RouterError {
             Self::ProfileNotFound(_) => "profile_not_found",
             Self::LlmProvider(_) => "provider_build_failed",
             Self::Persist(_) => "llm_state_unwritable",
+            Self::ProfileInvalid(_) => "profile_invalid",
+            Self::ProfileExists(_) => "profile_exists",
+            Self::ProfileActive(_) => "profile_active",
+            Self::DefaultProfileReadonly => "default_readonly",
+            Self::ConfigPersist(_) => "config_unwritable",
         }
     }
 }
@@ -229,6 +249,11 @@ pub struct RouterDeps {
     ///
     /// `None` = không persist (test); mọi switch vẫn đổi runtime nhưng sẽ mất khi restart.
     pub llm_state_path: Option<std::path::PathBuf>,
+    /// Đường dẫn `bean.toml` để CRUD profile provider từ UI ghi lại.
+    ///
+    /// `None` (test, `--fake-llm`, `chat`) = profile chỉ tồn tại trong RAM; adapter
+    /// web hỏi [`Router::llm_profiles_writable`] để trả 503 thay vì giả vờ lưu.
+    pub config_path: Option<std::path::PathBuf>,
     /// Snapshot `[llm]` **gốc** từ `bean.toml`, làm profile `"default"`.
     ///
     /// Phải được chụp TRƯỚC khi caller áp trạng thái persist vào `config` — nếu lấy
@@ -281,6 +306,8 @@ pub struct LlmProfileInfo {
     pub allowed_models: Vec<String>,
     /// Base URL ghi đè.
     pub base_url: Option<String>,
+    /// Trần token cho mỗi lượt gọi của profile.
+    pub max_tokens: u32,
     /// Tên biến môi trường chứa API key (không phải giá trị); rỗng = không cần key.
     pub api_key_env: String,
     /// `true` khi biến môi trường (nếu cần) có giá trị trong process.

@@ -90,16 +90,18 @@ async fn make_state(
     store: Arc<dyn Store>,
     responses: Vec<LlmResponse>,
 ) -> (AxumRouter, WebState) {
-    make_state_with(config, store, responses, Vec::new()).await
+    make_state_with(config, store, responses, Vec::new(), None).await
 }
 
 /// Như [`make_state`] nhưng đăng ký thêm tool — cần cho các test đọc
 /// `GET /api/tools` / `/api/mcp`, nơi nội dung payload **là** nội dung registry.
+/// `config_path` bật CRUD provider profile khi là `Some` (mô phỏng `bean serve`).
 async fn make_state_with(
     config: Config,
     store: Arc<dyn Store>,
     responses: Vec<LlmResponse>,
     extra_tools: Vec<Arc<dyn Tool>>,
+    config_path: Option<std::path::PathBuf>,
 ) -> (AxumRouter, WebState) {
     set_password(&config.data.dir, PASSWORD).unwrap();
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
@@ -116,6 +118,7 @@ async fn make_state_with(
         config.agent.workspace.join("skills/_drafts"),
     );
     let router = Arc::new(Router::new(RouterDeps {
+        config_path,
         default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store_dyn.clone(),
@@ -1086,7 +1089,7 @@ async fn fixture_with(
     let mut config = make_config(&data, &workspace, origin);
     tweak(&mut config);
     let store = Arc::new(MemoryStore::new());
-    let (app, _state) = make_state_with(config, store.clone(), vec![], extra_tools).await;
+    let (app, _state) = make_state_with(config, store.clone(), vec![], extra_tools, None).await;
     (dir, app, store)
 }
 
@@ -1617,4 +1620,371 @@ async fn llm_provider_endpoint_swaps_profile_and_rejects_unknown_or_keyless() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(error["code"], "provider_build_failed");
+}
+
+/// Request thay đổi dữ liệu cho test CRUD profile.
+fn crud_request(method: &str, uri: &str, origin: &str, token: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(
+            header::HOST,
+            origin.split_once("://").map_or(origin, |(_, host)| host),
+        )
+        .header(header::ORIGIN, origin)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::COOKIE, format!("bean_session={token}"))
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// Setup CRUD: server biết đường `bean.toml` (như `bean serve`) + file TOML ban
+/// đầu có profile `ollama`. Trả thêm tempdir giữ file sống đủ lâu.
+async fn crud_fixture(
+    origin: &str,
+) -> (tempfile::TempDir, AxumRouter, WebState, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config_path = dir.path().join("bean.toml");
+    std::fs::write(
+        &config_path,
+        r#"[llm]
+provider = "anthropic"
+model = "model-a"
+allowed_models = ["model-a"]
+
+[[llm.providers]]
+name = "ollama"
+provider = "openai_compat"
+model = "qwen3:14b"
+allowed_models = ["qwen3:14b", "qwen3:32b"]
+base_url = "http://127.0.0.1:9/v1"
+"#,
+    )
+    .unwrap();
+    let mut config = Config::load(&config_path).unwrap();
+    config.data.dir = data;
+    config.agent.workspace = workspace;
+    config.web.public_origin = origin.to_string();
+    config.web.session_ttl_hours = 1;
+    config.agent.allowed_users = vec!["web:admin".into()];
+    let store = Arc::new(MemoryStore::new());
+    let (app, state) =
+        make_state_with(config, store, vec![], Vec::new(), Some(config_path.clone())).await;
+    (dir, app, state, config_path)
+}
+
+/// CRUD provider profile: POST/PUT/DELETE ghi thẳng `bean.toml` (Giai đoạn 3).
+#[tokio::test]
+async fn llm_provider_crud_endpoints_persist_and_validate() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_tempdir, app, state, config_path) = crud_fixture(origin).await;
+    let token = login(&app, origin).await;
+
+    // Chưa đăng nhập → 401 cho cả 3 mutation.
+    for (method, uri, body) in [
+        (
+            "POST",
+            "/api/config/llm/providers",
+            r#"{"name":"x","provider":"anthropic","model":"m"}"#,
+        ),
+        (
+            "PUT",
+            "/api/config/llm/providers/ollama",
+            r#"{"provider":"anthropic","model":"m"}"#,
+        ),
+        ("DELETE", "/api/config/llm/providers/ollama", "{}"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(crud_request(method, uri, origin, "no-token", body))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {uri}"
+        );
+    }
+
+    // POST hợp lệ → 201 + snapshot có profile mới + file ghi đúng.
+    let response = app
+        .clone()
+        .oneshot(
+            crud_request(
+                "POST",
+                "/api/config/llm/providers",
+                origin,
+                &token,
+                r#"{"name":"openrouter","provider":"openai_compat","model":"anthropic/claude-sonnet-5","allowed_models":["anthropic/claude-sonnet-5"],"api_key_env":"BEAN_TEST_LLM_KEY_UNSET","base_url":"https://openrouter.ai/api/v1","max_tokens":8192}"#,
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let snapshot: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let names: Vec<&str> = snapshot["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["default", "ollama", "openrouter"]);
+    let config = Config::load(&config_path).unwrap();
+    assert_eq!(config.llm.providers.len(), 2);
+    assert_eq!(config.llm.providers[1].name, "openrouter");
+    assert_eq!(config.llm.providers[1].max_tokens, 8192);
+
+    // POST trùng tên → 409 profile_exists; POST name sai charset → 422
+    // profile_invalid; POST provider lạ → 422 invalid_provider.
+    for (body, status, code) in [
+        (
+            r#"{"name":"ollama","provider":"anthropic","model":"m"}"#,
+            StatusCode::CONFLICT,
+            "profile_exists",
+        ),
+        (
+            r#"{"name":"Bad Name","provider":"anthropic","model":"m"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_invalid",
+        ),
+        (
+            r#"{"name":"ok","provider":"claude","model":"m"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_provider",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(crud_request(
+                "POST",
+                "/api/config/llm/providers",
+                origin,
+                &token,
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "body={body}");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["code"], code, "body={body}");
+    }
+
+    // PUT sửa profile → 200 + file cập nhật; tên lấy từ đường dẫn.
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "PUT",
+            "/api/config/llm/providers/ollama",
+            origin,
+            &token,
+            r#"{"provider":"openai_compat","model":"qwen3:32b","allowed_models":["qwen3:32b"],"api_key_env":"","base_url":"http://127.0.0.1:9/v2","max_tokens":null}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let config = Config::load(&config_path).unwrap();
+    assert_eq!(config.llm.providers[0].model, "qwen3:32b");
+
+    // PUT default → 422 default_readonly; PUT không tồn tại → 422
+    // profile_not_found.
+    for (uri, body, status, code) in [
+        (
+            "/api/config/llm/providers/default",
+            r#"{"provider":"anthropic","model":"m"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "default_readonly",
+        ),
+        (
+            "/api/config/llm/providers/khong-ton-tai",
+            r#"{"provider":"anthropic","model":"m"}"#,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_not_found",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(crud_request("PUT", uri, origin, &token, body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "uri={uri}");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["code"], code, "uri={uri}");
+    }
+
+    // DELETE profile không active → 200 + file rỗng providers.
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "DELETE",
+            "/api/config/llm/providers/ollama",
+            origin,
+            &token,
+            "{}",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let config = Config::load(&config_path).unwrap();
+    // Chỉ còn profile vừa POST ở trên; ollama đã bị xoá.
+    assert_eq!(config.llm.providers.len(), 1);
+    assert_eq!(config.llm.providers[0].name, "openrouter");
+
+    // DELETE default → 422 default_readonly; DELETE không tồn tại → 422.
+    for (uri, status, code) in [
+        (
+            "/api/config/llm/providers/default",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "default_readonly",
+        ),
+        (
+            "/api/config/llm/providers/khong-ton-tai",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_not_found",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(crud_request("DELETE", uri, origin, &token, "{}"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "uri={uri}");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["code"], code, "uri={uri}");
+    }
+    let _ = state;
+}
+
+/// Xoá profile đang active bị chặn 409 `profile_active`; server không tự fallback.
+#[tokio::test]
+async fn llm_provider_crud_delete_active_profile_is_conflict() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_tempdir, app, state, config_path) = crud_fixture(origin).await;
+    let token = login(&app, origin).await;
+
+    // Switch sang ollama (openai_compat + base_url ⇒ dựng offline được).
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "PUT",
+            "/api/config/llm/provider",
+            origin,
+            &token,
+            r#"{"profile":"ollama"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "DELETE",
+            "/api/config/llm/providers/ollama",
+            origin,
+            &token,
+            "{}",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "profile_active");
+    // File + RAM giữ nguyên profile.
+    let config = Config::load(&config_path).unwrap();
+    assert_eq!(config.llm.providers.len(), 1);
+    assert_eq!(state.router.llm_profiles().unwrap().len(), 2);
+}
+
+/// Sửa profile đang active với provider cần key mà thiếu → 422
+/// `provider_build_failed`, nguyên trạng cũ giữ nguyên (RAM + file).
+#[tokio::test]
+async fn llm_provider_crud_update_active_with_missing_key_reverts() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_tempdir, app, state, config_path) = crud_fixture(origin).await;
+    let token = login(&app, origin).await;
+
+    // Active hoá ollama trước.
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "PUT",
+            "/api/config/llm/provider",
+            origin,
+            &token,
+            r#"{"profile":"ollama"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Sửa profile active sang anthropic (cần key, biến không tồn tại) → lỗi build.
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "PUT",
+            "/api/config/llm/providers/ollama",
+            origin,
+            &token,
+            r#"{"provider":"anthropic","model":"m","api_key_env":"BEAN_TEST_MISSING_KEY_XYZ"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "provider_build_failed");
+
+    // Nguyên trạng: RAM + file đều giữ openai_compat/qwen3:14b.
+    let runtime = state.router.llm_config().unwrap();
+    assert_eq!(
+        runtime.provider,
+        bean_types::config::LlmProviderKind::OpenAiCompat
+    );
+    assert_eq!(runtime.model, "qwen3:14b");
+    let config = Config::load(&config_path).unwrap();
+    assert_eq!(
+        config.llm.providers[0].provider,
+        bean_types::config::LlmProviderKind::OpenAiCompat
+    );
+}
+
+/// Server chạy không biết đường `bean.toml` → CRUD trả 503 `config_readonly`.
+#[tokio::test]
+async fn llm_provider_crud_is_readonly_without_config_path() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, _store) = fixture(origin, vec![]).await;
+    let token = login(&app, origin).await;
+
+    let response = app
+        .clone()
+        .oneshot(crud_request(
+            "POST",
+            "/api/config/llm/providers",
+            origin,
+            &token,
+            r#"{"name":"x","provider":"anthropic","model":"m"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["code"], "config_readonly");
 }

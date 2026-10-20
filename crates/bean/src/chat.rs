@@ -128,6 +128,8 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         skills: Some(skills),
         llm_state_path,
         default_profile,
+        // CLI chat không biết đường config gốc — CRUD provider profile tắt (RAM only).
+        config_path: None,
     }));
     router
         .start_outbox_worker()

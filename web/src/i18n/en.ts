@@ -334,6 +334,29 @@ export const en: Record<MessageKey, string> = {
   "providers.switched": "Provider switched. The next chat turn uses the new profile.",
   "providers.saveError":
     "Could not save. Check the model is allowed, the profile exists, and the API key is set in the environment.",
+  "providers.addProfile": "Add profile",
+  "providers.editProfile": "Edit profile",
+  "providers.deleteProfile": "Delete profile",
+  "providers.name": "Profile name",
+  "providers.nameHint": "Lowercase letters, digits and hyphens. Example: openrouter.",
+  "providers.providerKind": "Provider type",
+  "providers.providerAnthropic": "Anthropic API",
+  "providers.providerOpenaiCompat": "OpenAI-compatible (Ollama, OpenRouter…)",
+  "providers.allowedModels": "Allowed models",
+  "providers.allowedModelsHint": "Comma-separated; leave empty to only allow the default model.",
+  "providers.apiKeyEnvHint": "Environment variable name only; the value lives on the machine running Bean.",
+  "providers.baseUrlHint": "Leave empty to use the provider default endpoint.",
+  "providers.maxTokensHint": "Leave empty for the default (4096).",
+  "providers.confirmDeleteTitle": "Delete profile?",
+  "providers.confirmDeleteMessage":
+    "The profile will be removed from bean.toml and cannot be undone. Switch to another profile first if it is in use.",
+  "providers.created": "Profile added to bean.toml.",
+  "providers.updated": "Profile updated in bean.toml.",
+  "providers.deleted": "Profile removed from bean.toml.",
+  "providers.crudError":
+    "Could not apply. Check the profile name (lowercase + hyphens, unique), required fields, and that bean.toml is writable.",
+  "providers.defaultReadonlyHint":
+    "The “default” profile mirrors the original [llm] section — edit bean.toml to change it.",
   "providers.readOnlyNote":
-    "Add, remove profiles or change API keys in bean.toml and environment variables; restart Bean to apply.",
+    "Add, edit and delete profiles here — changes are written to bean.toml and applied immediately. Change API keys via environment variables on the machine running Bean.",
 };

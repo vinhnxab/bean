@@ -91,6 +91,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
     let draft_dir = config.agent.workspace.join("skills/_drafts");
     let skills = SkillCatalog::load_with_paths(&[], draft_dir.clone(), draft_dir);
     let router = Arc::new(Router::new(RouterDeps {
+        config_path: None,
         default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store.clone(),

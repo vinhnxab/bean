@@ -110,6 +110,7 @@ async fn fixture(
     }
     let router = Arc::new(Router::with_options(
         RouterDeps {
+            config_path: None,
             default_profile: config().llm.as_profile(),
             config: config(),
             store: store.clone(),

@@ -41,6 +41,7 @@ mod decision;
 mod dispatch;
 mod io;
 mod learning;
+mod llm_profiles;
 mod outbox;
 mod queue;
 mod run;
@@ -136,6 +137,8 @@ struct RouterInner {
     default_profile: bean_types::config::LlmProfile,
     /// File persist lựa chọn provider; `None` = không persist (test).
     llm_state_path: Option<std::path::PathBuf>,
+    /// File cấu hình để ghi CRUD profile từ UI; `None` = chỉ trong RAM (test).
+    config_path: Option<std::path::PathBuf>,
     audit: Option<Arc<AuditLog>>,
     /// Catalog skill + index progressive-disclosure (mục 9) và duyệt nháp (M15).
     skills: SkillCoordinator,

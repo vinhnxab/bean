@@ -7,7 +7,9 @@ import type {
   LlmConfigResponse,
   LlmModelUpdateRequest,
   LlmModelUpdateResponse,
+  LlmProviderCreateRequest,
   LlmProviderSwitchRequest,
+  LlmProviderUpdateRequest,
   LoginRequest,
   LoginResponse,
   LogoutResponse,
@@ -203,6 +205,33 @@ export const api = {
    */
   switchLlmProvider: (request: LlmProviderSwitchRequest) =>
     requestJson<LlmConfigResponse>("/api/config/llm/provider", { method: "PUT", body: request }),
+
+  /**
+   * Thêm profile vào `[[llm.providers]]` của bean.toml (CRUD từ UI). Trả snapshot
+   * `LlmConfigResponse` sau khi thêm; 201 khi thành công.
+   * Lỗi: 409 `profile_exists`, 422 `profile_invalid` / `invalid_provider`,
+   * 503 `config_readonly` (server không biết đường bean.toml).
+   */
+  createLlmProvider: (request: LlmProviderCreateRequest) =>
+    requestJson<LlmConfigResponse>("/api/config/llm/providers", { method: "POST", body: request }),
+
+  /**
+   * Sửa profile theo tên trên đường dẫn (tên không đổi được). Nếu profile đang
+   * active, server rebuild provider ngay — lỗi thiếu key trả 422
+   * `provider_build_failed` và giữ nguyên trạng thái cũ.
+   */
+  updateLlmProviderProfile: (name: string, request: LlmProviderUpdateRequest) =>
+    requestJson<LlmConfigResponse>(`/api/config/llm/providers/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: request,
+    }),
+
+  /** Xoá profile; 409 `profile_active` nếu profile đang active. */
+  deleteLlmProviderProfile: (name: string) =>
+    requestJson<LlmConfigResponse>(`/api/config/llm/providers/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      body: {},
+    }),
 
   listSessions: (query: SessionListOptions = {}, signal?: AbortSignal) =>
     requestJson<SessionListResponse>(

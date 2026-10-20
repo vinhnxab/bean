@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router";
@@ -239,5 +239,148 @@ describe("SettingsPage — Providers", () => {
     const warnings = await screen.findAllByText("Chưa có trong môi trường — Bean sẽ không gọi được API");
     expect(warnings).toHaveLength(1);
     expect(warnings[0].className).toContain("text-destructive");
+  });
+});
+
+describe("SettingsPage — Providers CRUD", () => {
+  it("profile mặc định không có nút sửa/xoá; có nút thêm profile", async () => {
+    renderProviders();
+
+    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    expect(screen.getByRole("button", { name: "Thêm profile" })).toBeInTheDocument();
+    // Chỉ card ollama có nút sửa/xoá — default là ánh xạ của [llm], read-only.
+    expect(screen.getAllByRole("button", { name: "Sửa profile" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Xoá profile" })).toHaveLength(1);
+  });
+
+  it("thêm profile: POST đúng body, card mới xuất hiện, thông báo thành công", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.post("/api/config/llm/providers", async ({ request }) => {
+        sent = await request.json();
+        const body = sent as { name: string; provider: string; model: string };
+        return HttpResponse.json(
+          {
+            ...LLM_CONFIG_FIXTURE,
+            providers: [
+              ...LLM_CONFIG_FIXTURE.providers,
+              {
+                name: body.name,
+                provider: body.provider,
+                model: body.model,
+                allowed_models: [body.model],
+                base_url: null,
+                api_key_env: "OPENROUTER_API_KEY",
+                key_configured: true,
+                active: false,
+              },
+            ],
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Thêm profile" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Tên profile"), "openrouter");
+    await user.type(within(dialog).getByLabelText("Model"), "anthropic/claude-sonnet-5");
+    await user.type(within(dialog).getByLabelText("Biến môi trường API key"), "OPENROUTER_API_KEY");
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toEqual({
+      name: "openrouter",
+      provider: "anthropic",
+      model: "anthropic/claude-sonnet-5",
+      allowed_models: [],
+      api_key_env: "OPENROUTER_API_KEY",
+      base_url: null,
+      max_tokens: null,
+    });
+    // Dialog đóng sau thành công; snapshot mới có card openrouter (radio).
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByRole("radio", { name: "openrouter" })).toBeInTheDocument();
+    expect(screen.getByText("Đã thêm profile vào bean.toml.")).toBeInTheDocument();
+  });
+
+  it("sửa profile: PUT đúng tên trên đường dẫn, body không có trường tên", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    let path = "";
+    testServer.use(
+      http.put("/api/config/llm/providers/:name", async ({ request, params }) => {
+        path = String(params.name);
+        sent = await request.json();
+        return HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          providers: LLM_CONFIG_FIXTURE.providers.map((p) =>
+            p.name === "ollama" ? { ...p, model: "qwen3:32b", allowed_models: ["qwen3:32b"] } : p,
+          ),
+        });
+      }),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Sửa profile" }));
+    const dialog = await screen.findByRole("dialog");
+    // Không có ô "Tên profile" khi sửa — tên là định danh lấy từ đường dẫn.
+    expect(within(dialog).queryByLabelText("Tên profile")).not.toBeInTheDocument();
+    const modelInput = within(dialog).getByLabelText("Model");
+    await user.clear(modelInput);
+    await user.type(modelInput, "qwen3:32b");
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(path).toBe("ollama");
+    expect(sent).toMatchObject({ provider: "openai_compat", model: "qwen3:32b" });
+    expect(await screen.findByText("Đã cập nhật profile trong bean.toml.")).toBeInTheDocument();
+  });
+
+  it("xoá profile không active: DELETE được gọi, card biến mất", async () => {
+    const user = userEvent.setup();
+    let deleted = "";
+    testServer.use(
+      http.delete("/api/config/llm/providers/:name", ({ params }) => {
+        deleted = String(params.name);
+        return HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          providers: LLM_CONFIG_FIXTURE.providers.filter((p) => p.name !== "ollama"),
+        });
+      }),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Xoá profile" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Xoá profile?");
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+
+    expect(await screen.findByText("Đã xoá profile khỏi bean.toml.")).toBeInTheDocument();
+    expect(deleted).toBe("ollama");
+    expect(screen.queryByRole("radio", { name: "ollama" })).not.toBeInTheDocument();
+  });
+
+  it("xoá profile đang active bị server chặn 409: alert lỗi, dialog vẫn mở", async () => {
+    const user = userEvent.setup();
+    testServer.use(
+      http.delete("/api/config/llm/providers/:name", () =>
+        HttpResponse.json(
+          { code: "profile_active", message: "profile đang active — hãy chuyển sang profile khác trước" },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Xoá profile" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Không thực hiện được");
+    // Confirm dialog vẫn mở (onSuccess không chạy) — người dùng có thể Huỷ.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

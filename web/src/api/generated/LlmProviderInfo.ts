@@ -25,6 +25,10 @@ allowed_models: Array<string>,
  */
 base_url: string | null, 
 /**
+ * Trần token cho mỗi lượt gọi của profile.
+ */
+max_tokens: number, 
+/**
  * Tên biến môi trường chứa API key; rỗng = provider không cần key.
  */
 api_key_env: string, 

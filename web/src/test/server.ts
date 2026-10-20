@@ -79,6 +79,103 @@ export const testServer = setupServer(
       })),
     });
   }),
+  // CRUD profile (giai đoạn 3). Handler dựa trên fixture tĩnh (không giữ state
+  // giữa request): test nào cần kịch bản lỗi/đặc biệt sẽ `testServer.use(...)`
+  // ghi đè riêng.
+  http.post("/api/config/llm/providers", async ({ request }) => {
+    const body = (await request.json()) as {
+      name: string;
+      provider: string;
+      model: string;
+      allowed_models?: string[];
+      api_key_env?: string;
+      base_url?: string | null;
+      max_tokens?: number | null;
+    };
+    if (body.name === "default" || LLM_CONFIG_FIXTURE.providers.some((entry) => entry.name === body.name)) {
+      return HttpResponse.json(
+        { code: "profile_exists", message: "đã có profile với tên này" },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        ...LLM_CONFIG_FIXTURE,
+        providers: [
+          ...LLM_CONFIG_FIXTURE.providers,
+          {
+            name: body.name,
+            provider: body.provider,
+            model: body.model,
+            allowed_models: body.allowed_models ?? [],
+            base_url: body.base_url ?? null,
+            max_tokens: body.max_tokens ?? 4096,
+            api_key_env: body.api_key_env ?? "",
+            key_configured: (body.api_key_env ?? "") !== "",
+            active: false,
+          },
+        ],
+      },
+      { status: 201 },
+    );
+  }),
+  http.put("/api/config/llm/providers/:name", async ({ request, params }) => {
+    const name = String(params.name);
+    const body = (await request.json()) as {
+      provider: string;
+      model: string;
+      allowed_models?: string[];
+      api_key_env?: string;
+      base_url?: string | null;
+      max_tokens?: number | null;
+    };
+    const target = LLM_CONFIG_FIXTURE.providers.find((entry) => entry.name === name) ?? null;
+    if (name === "default") {
+      return HttpResponse.json(
+        { code: "default_readonly", message: "profile 'default' là ánh xạ của [llm]" },
+        { status: 422 },
+      );
+    }
+    if (!target) {
+      return HttpResponse.json(
+        { code: "profile_not_found", message: "profile không tồn tại trong cấu hình" },
+        { status: 422 },
+      );
+    }
+    const updatedProvider = {
+      ...target,
+      provider: body.provider,
+      model: body.model,
+      allowed_models: body.allowed_models ?? [],
+      api_key_env: body.api_key_env ?? "",
+      base_url: body.base_url ?? null,
+    };
+    return HttpResponse.json({
+      // Profile đang active được sửa → runtime đổi theo (model, allowed_models…).
+      ...(target.active ? updatedProvider : LLM_CONFIG_FIXTURE),
+      providers: LLM_CONFIG_FIXTURE.providers.map((entry) => (entry.name === name ? updatedProvider : entry)),
+    });
+  }),
+  http.delete("/api/config/llm/providers/:name", ({ params }) => {
+    const name = String(params.name);
+    const target = LLM_CONFIG_FIXTURE.providers.find((entry) => entry.name === name) ?? null;
+    if (!target) {
+      return HttpResponse.json(
+        { code: "profile_not_found", message: "profile không tồn tại trong cấu hình" },
+        { status: 422 },
+      );
+    }
+    if (target.active) {
+      return HttpResponse.json(
+        { code: "profile_active", message: "profile đang active — hãy chuyển sang profile khác trước" },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json({
+      ...LLM_CONFIG_FIXTURE,
+      providers: LLM_CONFIG_FIXTURE.providers.filter((entry) => entry.name !== name),
+    });
+  }),
   // (M27) Mặc định voice TẮT: màn chat luôn hỏi trạng thái này để quyết định có hiện
   // nút mic. Test nào cần bật thì `testServer.use(...)` ghi đè.
   http.get("/api/voice", () =>
@@ -105,6 +202,7 @@ export const LLM_CONFIG_FIXTURE = {
       model: "model-a",
       allowed_models: ["model-a", "model-b", "model-c"],
       base_url: "https://openrouter.ai/api/v1",
+      max_tokens: 16384,
       api_key_env: "OPENROUTER_API_KEY",
       key_configured: true,
       active: true,
@@ -115,6 +213,7 @@ export const LLM_CONFIG_FIXTURE = {
       model: "qwen3:14b",
       allowed_models: ["qwen3:14b", "qwen3:32b"],
       base_url: "http://localhost:11434/v1",
+      max_tokens: 4096,
       api_key_env: "",
       key_configured: true,
       active: false,

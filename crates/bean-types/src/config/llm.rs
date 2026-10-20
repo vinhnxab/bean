@@ -34,7 +34,8 @@ pub struct LlmConfig {
 /// Tên profile ngầm định suy từ chính `[llm]` (không cần khai báo tường minh).
 pub const DEFAULT_PROFILE_NAME: &str = "default";
 
-fn default_max_tokens() -> u32 {
+/// Trần token mặc định cho mỗi lượt gọi LLM khi profile không khai báo.
+pub fn default_max_tokens() -> u32 {
     4096
 }
 
@@ -71,6 +72,111 @@ pub struct LlmProfile {
 
 fn is_default_max_tokens(value: &u32) -> bool {
     *value == default_max_tokens()
+}
+
+/// Lỗi validate một [`LlmProfile`] trước khi lưu vào `bean.toml` (CRUD từ UI).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{field}: {message}")]
+pub struct LlmProfileInvalid {
+    /// Trường vi phạm (`name`, `model`, `api_key_env`, `base_url`, `max_tokens`,
+    /// `allowed_models`).
+    pub field: &'static str,
+    /// Thông điệp cho người dùng, không chứa secret.
+    pub message: String,
+}
+
+impl LlmProfile {
+    /// Validate các trường của profile trước khi lưu vào `bean.toml`.
+    ///
+    /// Tên được kiểm tra riêng bằng [`validate_profile_name`] vì cần danh sách
+    /// profile hiện có để xét trùng lặp. Chuỗi vào được kiểm tra **nguyên bản**
+    /// (không trim hộ): caller ở ranh giới API phải trim trước khi dựng profile.
+    ///
+    /// # Errors
+    /// [`LlmProfileInvalid`] khi một trường không đạt ràng buộc.
+    pub fn validate_for_storage(&self) -> Result<(), LlmProfileInvalid> {
+        let invalid = |field: &'static str, message: &str| LlmProfileInvalid {
+            field,
+            message: message.to_string(),
+        };
+        if self.model.trim().is_empty() {
+            return Err(invalid("model", "model không được rỗng"));
+        }
+        if self
+            .allowed_models
+            .iter()
+            .any(|model| model.trim().is_empty())
+        {
+            return Err(invalid(
+                "allowed_models",
+                "model trong danh sách không được rỗng",
+            ));
+        }
+        if !self.api_key_env.is_empty() && !is_env_var_name(&self.api_key_env) {
+            return Err(invalid(
+                "api_key_env",
+                "phải là tên biến môi trường dạng NAME_ENV",
+            ));
+        }
+        if let Some(base_url) = &self.base_url {
+            let rest = base_url
+                .strip_prefix("https://")
+                .or_else(|| base_url.strip_prefix("http://"));
+            if !rest.is_some_and(|rest| !rest.is_empty()) {
+                return Err(invalid("base_url", "phải là URL http(s)"));
+            }
+        }
+        if self.max_tokens == 0 {
+            return Err(invalid("max_tokens", "phải lớn hơn 0"));
+        }
+        Ok(())
+    }
+}
+
+/// Tên biến môi trường: `[A-Z_][A-Z0-9_]*`, kiểm tra trên chuỗi nguyên bản.
+fn is_env_var_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase() || c == '_');
+    first_ok && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Validate tên profile mới: kebab-case ngắn, không phải `"default"`, không trùng.
+///
+/// Kiểm tra trên chuỗi nguyên bản — khoảng trắng đầu/cuối tự thất bại ràng buộc
+/// ký tự, nên caller không bắt buộc phải trim (nhưng vẫn nên trim ở ranh giới API).
+///
+/// # Errors
+/// [`LlmProfileInvalid`] trên trường `name`.
+pub fn validate_profile_name(name: &str, existing: &[LlmProfile]) -> Result<(), LlmProfileInvalid> {
+    let invalid = |message: &str| LlmProfileInvalid {
+        field: "name",
+        message: message.to_string(),
+    };
+    if name.is_empty() {
+        return Err(invalid("tên profile không được rỗng"));
+    }
+    if name == DEFAULT_PROFILE_NAME {
+        return Err(invalid("`default` là tên dành riêng cho profile ngầm định"));
+    }
+    if name.len() > 64 {
+        return Err(invalid("tên profile tối đa 64 ký tự"));
+    }
+    let mut chars = name.chars();
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let rest_ok = chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !(first_ok && rest_ok) {
+        return Err(invalid(
+            "chỉ dùng chữ thường, số và dấu gạch ngang (kebab-case)",
+        ));
+    }
+    if existing.iter().any(|profile| profile.name == name) {
+        return Err(invalid("tên profile đã tồn tại"));
+    }
+    Ok(())
 }
 
 impl LlmProfile {

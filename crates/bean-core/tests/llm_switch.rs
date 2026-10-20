@@ -112,6 +112,7 @@ fn setup(persist: bool, allowed_models: Option<Vec<String>>) -> Setup {
     let workspace = Arc::new(CapWorkspace::open(workspace_root).unwrap());
     let router = Router::with_options(
         RouterDeps {
+            config_path: None,
             default_profile: config.llm.as_profile(),
             config,
             store: Arc::new(MemoryStore::new()),
@@ -305,6 +306,7 @@ async fn switch_persist_failure_rejects_whole_switch() {
     let workspace = Arc::new(CapWorkspace::open(workspace_root).unwrap());
     let router = Router::with_options(
         RouterDeps {
+            config_path: None,
             default_profile: config.llm.as_profile(),
             config: config.clone(),
             store: Arc::new(MemoryStore::new()),

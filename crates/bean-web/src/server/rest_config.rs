@@ -9,12 +9,13 @@
 //! biến môi trường phía server, không bao giờ nhận qua body.
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum_extra::extract::cookie::CookieJar;
+use bean_types::config::{LlmProfile, LlmProviderKind};
 
 use crate::api_types::{
-    LlmConfigResponse, LlmModelUpdateRequest, LlmModelUpdateResponse, LlmProviderInfo,
-    LlmProviderSwitchRequest,
+    LlmConfigResponse, LlmModelUpdateRequest, LlmModelUpdateResponse, LlmProviderCreateRequest,
+    LlmProviderInfo, LlmProviderSwitchRequest, LlmProviderUpdateRequest,
 };
 
 use super::{ApiFailure, ApiResult, WebState, require_user};
@@ -27,18 +28,28 @@ fn provider_info(profile: bean_core::LlmProfileInfo) -> LlmProviderInfo {
         model: profile.model,
         allowed_models: profile.allowed_models,
         base_url: profile.base_url,
+        max_tokens: profile.max_tokens,
         api_key_env: profile.api_key_env,
         key_configured: profile.key_configured,
         active: profile.active,
     }
 }
 
-/// `GET /api/config/llm` — cấu hình LLM runtime, đã khử secret.
-pub(super) async fn get_llm_config(
-    State(state): State<WebState>,
-    jar: CookieJar,
-) -> ApiResult<Json<LlmConfigResponse>> {
-    let _ = require_user(&state, &jar).await?;
+/// Gate chung cho CRUD profile: `bean serve` phải biết đường dẫn `bean.toml` gốc
+/// thì ghi vào `[[llm.providers]]` mới có ý nghĩa; CLI/test không bật.
+fn ensure_profiles_writable(state: &WebState) -> Result<(), ApiFailure> {
+    if !state.router.llm_profiles_writable() {
+        return Err(ApiFailure::new(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "config_readonly",
+            "server không biết đường dẫn bean.toml — không thể thêm/sửa/xoá profile",
+        ));
+    }
+    Ok(())
+}
+
+/// Dựng snapshot `LlmConfigResponse` từ trạng thái hiện tại của Router (khử secret).
+fn llm_config_response(state: &WebState) -> Result<LlmConfigResponse, ApiFailure> {
     let llm = state
         .router
         .llm_config()
@@ -50,7 +61,7 @@ pub(super) async fn get_llm_config(
         .into_iter()
         .map(provider_info)
         .collect();
-    Ok(Json(LlmConfigResponse {
+    Ok(LlmConfigResponse {
         provider: llm.provider.as_str().to_string(),
         model: llm.model,
         allowed_models: llm.allowed_models,
@@ -59,7 +70,130 @@ pub(super) async fn get_llm_config(
         max_tokens: llm.max_tokens,
         key_configured: llm.key_configured,
         providers,
-    }))
+    })
+}
+
+fn parse_provider_kind(raw: &str) -> Result<LlmProviderKind, ApiFailure> {
+    match raw {
+        "anthropic" => Ok(LlmProviderKind::Anthropic),
+        "openai_compat" => Ok(LlmProviderKind::OpenAiCompat),
+        _ => Err(ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_provider",
+            "provider phải là 'anthropic' hoặc 'openai_compat'",
+        )),
+    }
+}
+
+/// Map [`bean_core::RouterError`] của CRUD profile sang HTTP failure.
+fn map_profile_error(error: bean_core::RouterError) -> ApiFailure {
+    use bean_core::RouterError;
+    match error {
+        RouterError::ProfileNotFound(_) => ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_not_found",
+            "profile không tồn tại trong cấu hình",
+        ),
+        RouterError::ProfileExists(_) => ApiFailure::new(
+            axum::http::StatusCode::CONFLICT,
+            "profile_exists",
+            "đã có profile với tên này",
+        ),
+        RouterError::ProfileActive(_) => ApiFailure::new(
+            axum::http::StatusCode::CONFLICT,
+            "profile_active",
+            "profile đang active — hãy chuyển sang profile khác trước",
+        ),
+        RouterError::DefaultProfileReadonly => ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "default_readonly",
+            "profile 'default' là ánh xạ của [llm] — không sửa/xoá được",
+        ),
+        RouterError::ProfileInvalid(detail) => ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_invalid",
+            detail,
+        ),
+        RouterError::LlmProvider(_) => ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "provider_build_failed",
+            "không dựng được provider — kiểm tra biến môi trường API key",
+        ),
+        RouterError::Persist(_) => ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "llm_state_unwritable",
+            "không ghi được llm-state.json — kiểm tra quyền ghi data.dir",
+        ),
+        RouterError::ConfigPersist(_) => ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "config_unwritable",
+            "không ghi được bean.toml — kiểm tra quyền ghi file cấu hình",
+        ),
+        _ => ApiFailure::internal(),
+    }
+}
+
+/// Dựng [`bean_types::config::LlmProfile`] từ request sửa. Trim mọi trường chuỗi
+/// trước khi dựng — validate_for_storage kiểm tra chuỗi nguyên bản nên phải làm
+/// sạch ở biên giới HTTP.
+fn parse_update_profile(request: LlmProviderUpdateRequest) -> Result<LlmProfile, ApiFailure> {
+    let LlmProviderUpdateRequest {
+        provider,
+        model,
+        allowed_models,
+        api_key_env,
+        base_url,
+        max_tokens,
+    } = request;
+    Ok(bean_types::config::LlmProfile {
+        name: String::new(), // router gán lại từ tên trên đường dẫn API
+        provider: parse_provider_kind(provider.trim())?,
+        model: model.trim().to_string(),
+        allowed_models: allowed_models
+            .into_iter()
+            .map(|entry| entry.trim().to_string())
+            .filter(|entry| !entry.is_empty())
+            .collect(),
+        api_key_env: api_key_env.trim().to_string(),
+        base_url: base_url
+            .map(|url| url.trim().to_string())
+            .filter(|url| !url.is_empty()),
+        max_tokens: max_tokens.unwrap_or_else(bean_types::config::default_max_tokens),
+    })
+}
+
+/// Dựng [`bean_types::config::LlmProfile`] từ request tạo. Tên giữ nguyên bản —
+/// `validate_profile_name` chủ động chặn khoảng trắng/ký tự lạ, kể cả khoảng
+/// trắng đầu/cuối (người dùng phải tự nhập sạch).
+fn parse_create_profile(request: LlmProviderCreateRequest) -> Result<LlmProfile, ApiFailure> {
+    let LlmProviderCreateRequest {
+        name,
+        provider,
+        model,
+        allowed_models,
+        api_key_env,
+        base_url,
+        max_tokens,
+    } = request;
+    let mut profile = parse_update_profile(LlmProviderUpdateRequest {
+        provider,
+        model,
+        allowed_models,
+        api_key_env,
+        base_url,
+        max_tokens,
+    })?;
+    profile.name = name;
+    Ok(profile)
+}
+
+/// `GET /api/config/llm` — cấu hình LLM runtime, đã khử secret.
+pub(super) async fn get_llm_config(
+    State(state): State<WebState>,
+    jar: CookieJar,
+) -> ApiResult<Json<LlmConfigResponse>> {
+    let _ = require_user(&state, &jar).await?;
+    llm_config_response(&state).map(Json)
 }
 
 /// `PUT /api/config/llm/model` — đổi model runtime (cùng nguồn với `/model`).
@@ -115,43 +249,94 @@ pub(super) async fn update_llm_provider(
         .as_deref()
         .map(str::trim)
         .filter(|m| !m.is_empty());
-    let snapshot =
-        state
-            .router
-            .switch_llm_provider(profile, model)
-            .map_err(|error| match error {
-                bean_core::RouterError::ProfileNotFound(_) => ApiFailure::new(
-                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-                    "profile_not_found",
-                    "profile không tồn tại trong cấu hình",
-                ),
-                bean_core::RouterError::ModelNotAllowed(_) => ApiFailure::new(
-                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-                    "model_not_allowed",
-                    "model không nằm trong allowed_models của profile",
-                ),
-                bean_core::RouterError::LlmProvider(_) => ApiFailure::new(
-                    axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-                    "provider_build_failed",
-                    "không dựng được provider — kiểm tra biến môi trường API key",
-                ),
-                _ => ApiFailure::internal(),
-            })?;
-    let providers = state
+    state
         .router
-        .llm_profiles()
-        .map_err(|_| ApiFailure::internal())?
-        .into_iter()
-        .map(provider_info)
-        .collect();
-    Ok(Json(LlmConfigResponse {
-        provider: snapshot.provider.as_str().to_string(),
-        model: snapshot.model,
-        allowed_models: snapshot.allowed_models,
-        api_key_env: snapshot.api_key_env,
-        base_url: snapshot.base_url,
-        max_tokens: snapshot.max_tokens,
-        key_configured: snapshot.key_configured,
-        providers,
-    }))
+        .switch_llm_provider(profile, model)
+        .map_err(|error| match error {
+            bean_core::RouterError::ProfileNotFound(_) => ApiFailure::new(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "profile_not_found",
+                "profile không tồn tại trong cấu hình",
+            ),
+            bean_core::RouterError::ModelNotAllowed(_) => ApiFailure::new(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "model_not_allowed",
+                "model không nằm trong allowed_models của profile",
+            ),
+            bean_core::RouterError::LlmProvider(_) => ApiFailure::new(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_build_failed",
+                "không dựng được provider — kiểm tra biến môi trường API key",
+            ),
+            _ => ApiFailure::internal(),
+        })?;
+    llm_config_response(&state).map(Json)
+}
+
+/// `POST /api/config/llm/providers` — thêm profile vào `[[llm.providers]]` của
+/// `bean.toml` (persist TRƯỚC khi cập nhật RAM — lỗi đĩa giữ nguyên trạng thái).
+pub(super) async fn create_llm_provider_profile(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Json(request): Json<LlmProviderCreateRequest>,
+) -> ApiResult<(axum::http::StatusCode, Json<LlmConfigResponse>)> {
+    let _ = require_user(&state, &jar).await?;
+    ensure_profiles_writable(&state)?;
+    let profile = parse_create_profile(request)?;
+    state
+        .router
+        .add_llm_provider(profile)
+        .map_err(map_profile_error)?;
+    let snapshot = llm_config_response(&state)?;
+    Ok((axum::http::StatusCode::CREATED, Json(snapshot)))
+}
+
+/// `PUT /api/config/llm/providers/{name}` — sửa profile. Tên lấy từ đường dẫn;
+/// nếu profile đang active, runtime rebuild provider với trường mới ngay.
+pub(super) async fn update_llm_provider_profile(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(name): Path<String>,
+    Json(request): Json<LlmProviderUpdateRequest>,
+) -> ApiResult<Json<LlmConfigResponse>> {
+    let _ = require_user(&state, &jar).await?;
+    ensure_profiles_writable(&state)?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_required",
+            "profile không được rỗng",
+        ));
+    }
+    let profile = parse_update_profile(request)?;
+    state
+        .router
+        .update_llm_provider(name, profile)
+        .map_err(map_profile_error)?;
+    llm_config_response(&state).map(Json)
+}
+
+/// `DELETE /api/config/llm/providers/{name}` — xoá profile; chặn xoá profile
+/// đang active (409 `profile_active`), không tự fallback.
+pub(super) async fn delete_llm_provider_profile(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(name): Path<String>,
+) -> ApiResult<Json<LlmConfigResponse>> {
+    let _ = require_user(&state, &jar).await?;
+    ensure_profiles_writable(&state)?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ApiFailure::new(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "profile_required",
+            "profile không được rỗng",
+        ));
+    }
+    state
+        .router
+        .delete_llm_provider(name)
+        .map_err(map_profile_error)?;
+    llm_config_response(&state).map(Json)
 }

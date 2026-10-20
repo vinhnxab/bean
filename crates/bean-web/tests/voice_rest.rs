@@ -53,6 +53,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
     let skills = SkillCatalog::load_with_paths(&[], draft.clone(), draft);
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let router = Arc::new(Router::new(RouterDeps {
+        config_path: None,
         default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store.clone(),

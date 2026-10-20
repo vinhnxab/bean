@@ -66,7 +66,7 @@ impl Router {
     ///
     /// Gọi khi đang giữ lock config — chỉ đọc tên, không mutate. Lỗi đĩa trả
     /// [`RouterError::Persist`] để caller từ chối nguyên thay đổi (transactional).
-    fn persist_llm_state(&self, profile: &str, model: &str) -> Result<(), RouterError> {
+    pub(super) fn persist_llm_state(&self, profile: &str, model: &str) -> Result<(), RouterError> {
         let Some(path) = &self.inner.llm_state_path else {
             return Ok(());
         };
@@ -168,38 +168,6 @@ impl Router {
             *current = provider;
         }
         self.llm_config()
-    }
-
-    /// Danh sách profile có thể switch, kèm trạng thái key + active — đã khử secret.
-    ///
-    /// # Errors
-    /// [`RouterError::StatePoisoned`] nếu không đọc được cấu hình.
-    pub fn llm_profiles(&self) -> Result<Vec<LlmProfileInfo>, RouterError> {
-        let config = read_lock(&self.inner.config)?;
-        let active = config.llm.active_profile_name().to_string();
-        let mut out = Vec::new();
-        // `default` là snapshot gốc, không phải `[llm]` hiện tại (đã có thể bị apply).
-        let mut push = |profile: &bean_types::config::LlmProfile| {
-            let key_configured = profile.api_key_env.trim().is_empty()
-                || std::env::var(&profile.api_key_env).is_ok_and(|value| !value.trim().is_empty());
-            out.push(LlmProfileInfo {
-                name: profile.name.clone(),
-                provider: profile.provider,
-                model: profile.model.clone(),
-                allowed_models: profile.effective_allowed_models(),
-                base_url: profile.base_url.clone(),
-                api_key_env: profile.api_key_env.clone(),
-                key_configured,
-                active: profile.name == active,
-            });
-        };
-        push(&self.inner.default_profile);
-        for profile in &config.llm.providers {
-            if profile.name != bean_types::config::DEFAULT_PROFILE_NAME {
-                push(profile);
-            }
-        }
-        Ok(out)
     }
 
     /// Đọc snapshot run/confirm hiện tại cho WebSocket `Sync`.

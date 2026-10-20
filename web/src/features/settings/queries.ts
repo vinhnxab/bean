@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LlmModelUpdateRequest, LlmProviderSwitchRequest } from "@/api/bindings";
+import type {
+  LlmModelUpdateRequest,
+  LlmProviderCreateRequest,
+  LlmProviderSwitchRequest,
+  LlmProviderUpdateRequest,
+} from "@/api/bindings";
 import { api } from "@/api/client";
 import { queryKeys } from "@/features/auth/queries";
 
@@ -46,6 +51,48 @@ export function useSwitchLlmProvider() {
       queryClient.setQueryData(queryKeys.llmConfig, snapshot);
       void queryClient.invalidateQueries({ queryKey: queryKeys.status });
       void queryClient.invalidateQueries({ queryKey: queryKeys.system });
+    },
+  });
+}
+
+/**
+ * Thêm profile provider mới (ghi vào `[[llm.providers]]` của bean.toml).
+ *
+ * Server trả snapshot sau khi thêm — ghi đè cache `llmConfig` một lần thay vì
+ * refetch, vì danh sách profile vừa đổi phía server.
+ */
+export function useCreateLlmProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: LlmProviderCreateRequest) => api.createLlmProvider(request),
+    onSuccess: (snapshot) => {
+      queryClient.setQueryData(queryKeys.llmConfig, snapshot);
+    },
+  });
+}
+
+/** Sửa profile (tên là định danh, không đổi). Xem `useCreateLlmProvider` về cache. */
+export function useUpdateLlmProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, request }: { name: string; request: LlmProviderUpdateRequest }) =>
+      api.updateLlmProviderProfile(name, request),
+    onSuccess: (snapshot) => {
+      queryClient.setQueryData(queryKeys.llmConfig, snapshot);
+      // Profile active có thể vừa đổi model → hai query hiển thị model cần làm mới.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.status });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.system });
+    },
+  });
+}
+
+/** Xoá profile; server chặn 409 nếu profile đang active. Xem `useCreateLlmProvider`. */
+export function useDeleteLlmProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.deleteLlmProviderProfile(name),
+    onSuccess: (snapshot) => {
+      queryClient.setQueryData(queryKeys.llmConfig, snapshot);
     },
   });
 }

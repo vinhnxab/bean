@@ -101,6 +101,8 @@ pub struct LlmProviderInfo {
     pub allowed_models: Vec<String>,
     /// Base URL ghi đè; `null` khi dùng mặc định.
     pub base_url: Option<String>,
+    /// Trần token cho mỗi lượt gọi của profile.
+    pub max_tokens: u32,
     /// Tên biến môi trường chứa API key; rỗng = provider không cần key.
     pub api_key_env: String,
     /// Biến môi trường (nếu cần) có giá trị trong process hay không.
@@ -119,6 +121,55 @@ pub struct LlmProviderSwitchRequest {
     /// Model muốn dùng; `null` = model mặc định của profile.
     #[serde(default)]
     pub model: Option<String>,
+}
+
+/// Request tạo profile provider mới. API key không đi qua đây — chỉ khai báo tên
+/// biến môi trường; giá trị resolve phía server (mục 15.6).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct LlmProviderCreateRequest {
+    /// Tên profile mới; kebab-case, không được là `"default"` hay trùng tên sẵn có.
+    pub name: String,
+    /// Provider LLM (`anthropic` | `openai_compat`).
+    pub provider: String,
+    /// Model mặc định của profile.
+    pub model: String,
+    /// Model được phép chọn trong profile; rỗng = chỉ model mặc định.
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    /// Tên biến môi trường chứa API key; rỗng = provider không cần key.
+    #[serde(default)]
+    pub api_key_env: String,
+    /// Base URL ghi đè; `null` = dùng mặc định của provider.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Trần token output; `null` = mặc định 4096.
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+}
+
+/// Request sửa profile provider. Tên không đổi được — nó là định danh trong URL.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct LlmProviderUpdateRequest {
+    /// Provider LLM (`anthropic` | `openai_compat`).
+    pub provider: String,
+    /// Model mặc định của profile.
+    pub model: String,
+    /// Model được phép chọn trong profile; rỗng = chỉ model mặc định.
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    /// Tên biến môi trường chứa API key; rỗng = provider không cần key.
+    #[serde(default)]
+    pub api_key_env: String,
+    /// Base URL ghi đè; `null` = dùng mặc định của provider.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Trần token output; `null` = mặc định 4096.
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
 }
 
 /// Request đổi model runtime; model phải nằm trong `allowed_models`.
