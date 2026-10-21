@@ -18,6 +18,9 @@ use super::llm::{LlmProfile, default_max_tokens};
 /// File chưa tồn tại ⇒ tạo mới với đúng phần `[[llm.providers]]`. Danh sách
 /// rỗng ⇒ xoá khoá `providers` khỏi `[llm]` (nếu có) thay vì ghi mảng rỗng.
 ///
+/// Khi có ít nhất một profile chứa API key dán trực tiếp (`api_key`), file được
+/// đặt quyền `0600` — chỉ owner đọc/ghi được vì key nằm plaintext trong file.
+///
 /// # Errors
 /// [`std::io::Error`] khi file tồn tại nhưng không parse được TOML, hoặc không
 /// ghi được file.
@@ -65,6 +68,12 @@ pub fn write_llm_providers(path: &Path, providers: &[LlmProfile]) -> std::io::Re
     if let Ok(meta) = std::fs::metadata(path) {
         let _ = std::fs::set_permissions(&tmp, meta.permissions());
     }
+    // Có key plaintext trong file ⇒ siết quyền còn 0600 (chỉ owner đọc/ghi).
+    #[cfg(unix)]
+    if providers.iter().any(|profile| profile.api_key.is_some()) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -85,6 +94,9 @@ fn profile_to_table(profile: &LlmProfile) -> toml_edit::Table {
     }
     if !profile.api_key_env.is_empty() {
         table["api_key_env"] = toml_edit::value(profile.api_key_env.as_str());
+    }
+    if let Some(key) = &profile.api_key {
+        table["api_key"] = toml_edit::value(key.as_str());
     }
     if let Some(base_url) = &profile.base_url {
         table["base_url"] = toml_edit::value(base_url.as_str());

@@ -89,6 +89,7 @@ export const testServer = setupServer(
       model: string;
       allowed_models?: string[];
       api_key_env?: string;
+      api_key?: string | null;
       base_url?: string | null;
       max_tokens?: number | null;
     };
@@ -111,7 +112,8 @@ export const testServer = setupServer(
             base_url: body.base_url ?? null,
             max_tokens: body.max_tokens ?? 4096,
             api_key_env: body.api_key_env ?? "",
-            key_configured: (body.api_key_env ?? "") !== "",
+            key_configured: (body.api_key_env ?? "") !== "" || (body.api_key ?? "") !== "",
+            api_key_hint: body.api_key ? `••••${body.api_key.slice(-4)}` : null,
             active: false,
           },
         ],
@@ -126,6 +128,7 @@ export const testServer = setupServer(
       model: string;
       allowed_models?: string[];
       api_key_env?: string;
+      api_key?: string | null;
       base_url?: string | null;
       max_tokens?: number | null;
     };
@@ -148,6 +151,12 @@ export const testServer = setupServer(
       model: body.model,
       allowed_models: body.allowed_models ?? [],
       api_key_env: body.api_key_env ?? "",
+      api_key_hint:
+        body.api_key && body.api_key !== ""
+          ? `••••${body.api_key.slice(-4)}`
+          : body.api_key === ""
+            ? null
+            : (target.api_key_hint ?? null),
       base_url: body.base_url ?? null,
     };
     return HttpResponse.json({
@@ -205,6 +214,7 @@ export const LLM_CONFIG_FIXTURE = {
       max_tokens: 16384,
       api_key_env: "OPENROUTER_API_KEY",
       key_configured: true,
+      api_key_hint: null,
       active: true,
     },
     {
@@ -216,6 +226,7 @@ export const LLM_CONFIG_FIXTURE = {
       max_tokens: 4096,
       api_key_env: "",
       key_configured: true,
+      api_key_hint: null,
       active: false,
     },
   ],

@@ -16,6 +16,10 @@ pub struct LlmConfig {
     pub allowed_models: Vec<String>,
     /// Tên biến môi trường chứa API key (**không** phải key).
     pub api_key_env: String,
+    /// API key đặt trực tiếp qua UI (G3b), lưu trong `bean.toml` — file tự chmod
+    /// 0600 khi có key. `None` ⇒ resolve từ `api_key_env`. Ưu tiên: `api_key` > env.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     /// Ghi đè base URL (dùng cho endpoint không phải OpenAI chính thức / Ollama).
     pub base_url: Option<String>,
     /// Trần token cho mỗi lượt gọi.
@@ -59,6 +63,10 @@ pub struct LlmProfile {
     /// Tên biến môi trường chứa API key; rỗng ⇒ provider không cần key (Ollama/vLLM).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub api_key_env: String,
+    /// API key dán trực tiếp qua UI (G3b), lưu trong `bean.toml` — file tự chmod 0600
+    /// khi có key. `None` ⇒ resolve từ `api_key_env`. Ưu tiên: `api_key` > env.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     /// Base URL ghi đè (endpoint tự host / gateway).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -117,6 +125,22 @@ impl LlmProfile {
                 "api_key_env",
                 "phải là tên biến môi trường dạng NAME_ENV",
             ));
+        }
+        if let Some(key) = &self.api_key {
+            if key.trim().is_empty() {
+                return Err(invalid(
+                    "api_key",
+                    "không được rỗng — muốn xoá key đã lưu thì bỏ hẳn trường này",
+                ));
+            }
+            // Key chứa ký tự điều khiển/ẩn (thường do copy-paste lỗi) khiến provider
+            // trả 401 "Malformed authentication credential" — chặn ngay ở biên.
+            if key.chars().any(char::is_control) {
+                return Err(invalid(
+                    "api_key",
+                    "chứa ký tự điều khiển/ẩn — dán lại key từ nguồn đáng tin cậy",
+                ));
+            }
         }
         if let Some(base_url) = &self.base_url {
             let rest = base_url
@@ -198,6 +222,7 @@ impl Default for LlmConfig {
             model: "claude-sonnet-5".to_string(),
             allowed_models: Vec::new(),
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            api_key: None,
             base_url: None,
             max_tokens: 4096,
             providers: Vec::new(),
@@ -259,6 +284,7 @@ impl LlmConfig {
             model: self.model.clone(),
             allowed_models: self.allowed_models.clone(),
             api_key_env: self.api_key_env.clone(),
+            api_key: self.api_key.clone(),
             base_url: self.base_url.clone(),
             max_tokens: self.max_tokens,
         }
@@ -271,6 +297,7 @@ impl LlmConfig {
         self.model = profile.model.clone();
         self.allowed_models = profile.allowed_models.clone();
         self.api_key_env = profile.api_key_env.clone();
+        self.api_key = profile.api_key.clone();
         self.base_url = profile.base_url.clone();
         self.max_tokens = profile.max_tokens;
         self.active_profile = profile.name.clone();

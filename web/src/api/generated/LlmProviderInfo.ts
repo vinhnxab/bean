@@ -37,6 +37,12 @@ api_key_env: string,
  */
 key_configured: boolean, 
 /**
+ * 4 ký tự cuối của key đã lưu trực tiếp trong `bean.toml` (vd `"••••ed6"`);
+ * `null` = profile không có key trong file (resolve từ env). Giá trị key
+ * nguyên vẹn không bao giờ được trả về client.
+ */
+api_key_hint: string | null, 
+/**
  * Profile đang có hiệu lực.
  */
 active: boolean, };

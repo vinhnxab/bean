@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ServerMsg } from "@/api/bindings";
 import { parseServerMessage } from "@/api/ws";
@@ -181,5 +181,73 @@ describe("chat event state", () => {
     expect(run?.status).toBe("running");
     expect(run?.runId).toBe("run-3");
     expect(run?.errorCode).toBeNull();
+  });
+
+  it("startedAt: đặt mốc lúc gửi, giữ nguyên qua queued/tool, xoá khi final", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().markSubmitting(1);
+    const startedAt = useChatStore.getState().runsBySession[1]?.startedAt;
+    expect(startedAt).not.toBeNull();
+
+    useChatStore
+      .getState()
+      .applyServerMessage({ type: "queued", session_id: 1, run_id: "run-1", position: 1 });
+    expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(startedAt);
+
+    useChatStore.getState().applyServerMessage({
+      type: "tool_start",
+      session_id: 1,
+      run_id: "run-1",
+      id: "call-1",
+      tool: "read_file",
+      summary: "read_file",
+      args_preview: "",
+    });
+    expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(startedAt);
+
+    // Run khởi động không qua gửi tay (scheduler, tab khác) vẫn phải có mốc giờ.
+    useChatStore.getState().applyServerMessage({
+      type: "tool_start",
+      session_id: 2,
+      run_id: "run-2",
+      id: "call-2",
+      tool: "web_fetch",
+      summary: "web_fetch",
+      args_preview: "",
+    });
+    expect(useChatStore.getState().runsBySession[2]?.startedAt).not.toBeNull();
+
+    useChatStore
+      .getState()
+      .applyServerMessage({ type: "final", session_id: 1, run_id: "run-1", message_id: 9, text: "xong" });
+    expect(useChatStore.getState().runsBySession[1]?.startedAt).toBeNull();
+  });
+
+  it("applySync: giữ mốc giờ của run đang chạy; run khác run_id thì lấy mốc mới", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T08:00:00Z"));
+      useChatStore.getState().reset();
+      useChatStore.getState().markSubmitting(1);
+      const startedAt = useChatStore.getState().runsBySession[1]?.startedAt;
+      useChatStore
+        .getState()
+        .applySync(
+          { type: "sync", running: [{ session_id: 1, run_id: "run-1", role: null }], pending_confirms: [] },
+          true,
+        );
+      expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(startedAt);
+
+      vi.advanceTimersByTime(5000);
+      useChatStore
+        .getState()
+        .applySync(
+          { type: "sync", running: [{ session_id: 1, run_id: "run-9", role: null }], pending_confirms: [] },
+          true,
+        );
+      expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(Date.parse("2026-10-21T08:00:05Z"));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

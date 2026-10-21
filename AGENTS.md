@@ -13,6 +13,13 @@
 7. **Cuối mỗi milestone** báo cáo ngắn: đã làm gì, chạy lệnh nào để kiểm tra, còn tồn đọng gì.
 8. **Rust:** không `unwrap()`/`expect()`/`panic!` trong code không phải test (trừ khi có comment giải thích bất biến); `#![forbid(unsafe_code)]` trừ khi có lý do được duyệt.
 9. **Web:** TypeScript `strict`, không `any`, không `dangerouslySetInnerHTML`, không tải tài nguyên từ CDN/domain ngoài, không sửa tay file sinh tự động.
+10. **Thiết kế hướng đối tượng + SOLID** — áp dụng theo idiom Rust/TypeScript (struct + trait + composition), không ép kiểu kế thừa class như Java:
+    - **SRP:** mỗi struct/trait/hàm một trách nhiệm. Struct mà vừa đụng DB vừa HTTP vừa policy là dấu hiệu phải tách.
+    - **OCP:** mở rộng bằng cách thêm trait implementation rồi đăng ký vào registry (`Tool`, `LlmProvider`, `Channel`…), không sửa nhánh `match`/`if` cứng mỗi lần thêm loại mới.
+    - **LSP:** mọi implementation của một trait phải thay thế lẫn nhau trong mọi ngữ cảnh, kể cả test; không ép caller biết kiểu cụ thể qua `is_xxx()`/downcast nếu không bất tránh.
+    - **ISP:** trait hẹp, đúng một vai trò — theo mẫu sẵn có (`Clock`, `RunIo`, `Tool`); không tạo trait "tất cả trong một".
+    - **DIP:** module cấp cao phụ thuộc trait, không phụ thuộc struct cụ thể; inject qua constructor (`Arc<dyn Trait>`) để thay được `FakeProvider`/`Clock` giả trong test.
+    - **Encapsulation:** state nội bộ để private, `pub(crate)` là mặc định, chỉ mở `pub` API thật cần; frontend tách logic khỏi component và khỏi I/O (fetch/WS) để test được.
 
 ---
 

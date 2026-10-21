@@ -107,6 +107,11 @@ pub struct LlmProviderInfo {
     pub api_key_env: String,
     /// Biến môi trường (nếu cần) có giá trị trong process hay không.
     pub key_configured: bool,
+    /// 4 ký tự cuối của key đã lưu trực tiếp trong `bean.toml` (vd `"••••ed6"`);
+    /// `null` = profile không có key trong file (resolve từ env). Giá trị key
+    /// nguyên vẹn không bao giờ được trả về client.
+    #[serde(default)]
+    pub api_key_hint: Option<String>,
     /// Profile đang có hiệu lực.
     pub active: bool,
 }
@@ -123,8 +128,11 @@ pub struct LlmProviderSwitchRequest {
     pub model: Option<String>,
 }
 
-/// Request tạo profile provider mới. API key không đi qua đây — chỉ khai báo tên
-/// biến môi trường; giá trị resolve phía server (mục 15.6).
+/// Request tạo profile provider mới.
+///
+/// Ranh giới secret: `api_key` là trường **ghi một chiều** — client gửi key mới qua
+/// body đúng một lúc lưu xuống `bean.toml` (file tự chmod 0600); mọi GET trả về
+/// chỉ có `api_key_hint` (4 ký tự cuối), không bao giờ key nguyên vẹn.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -141,6 +149,9 @@ pub struct LlmProviderCreateRequest {
     /// Tên biến môi trường chứa API key; rỗng = provider không cần key.
     #[serde(default)]
     pub api_key_env: String,
+    /// API key dán trực tiếp để lưu trong `bean.toml`; `null` = resolve từ env.
+    #[serde(default)]
+    pub api_key: Option<String>,
     /// Base URL ghi đè; `null` = dùng mặc định của provider.
     #[serde(default)]
     pub base_url: Option<String>,
@@ -150,6 +161,9 @@ pub struct LlmProviderCreateRequest {
 }
 
 /// Request sửa profile provider. Tên không đổi được — nó là định danh trong URL.
+///
+/// `api_key` có ba semantics: `null` = giữ key hiện tại (Keep), `""` = xoá key
+/// đã lưu (Clear), chuỗi khác = ghi đè (Set). Đặc tả trong [`bean_core::ApiKeyUpdate`].
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -164,6 +178,9 @@ pub struct LlmProviderUpdateRequest {
     /// Tên biến môi trường chứa API key; rỗng = provider không cần key.
     #[serde(default)]
     pub api_key_env: String,
+    /// `null` = giữ key hiện tại; `""` = xoá; chuỗi khác = ghi đè key trong file.
+    #[serde(default)]
+    pub api_key: Option<String>,
     /// Base URL ghi đè; `null` = dùng mặc định của provider.
     #[serde(default)]
     pub base_url: Option<String>,

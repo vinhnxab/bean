@@ -273,6 +273,7 @@ describe("SettingsPage — Providers CRUD", () => {
                 base_url: null,
                 api_key_env: "OPENROUTER_API_KEY",
                 key_configured: true,
+                api_key_hint: null,
                 active: false,
               },
             ],
@@ -297,6 +298,7 @@ describe("SettingsPage — Providers CRUD", () => {
       model: "anthropic/claude-sonnet-5",
       allowed_models: [],
       api_key_env: "OPENROUTER_API_KEY",
+      api_key: null,
       base_url: null,
       max_tokens: null,
     });
@@ -304,6 +306,53 @@ describe("SettingsPage — Providers CRUD", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(await screen.findByRole("radio", { name: "openrouter" })).toBeInTheDocument();
     expect(screen.getByText("Đã thêm profile vào bean.toml.")).toBeInTheDocument();
+  });
+
+  it("thêm profile với key dán trực tiếp: POST chứa api_key, card hiển thị hint 4 ký tự cuối", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.post("/api/config/llm/providers", async ({ request }) => {
+        sent = await request.json();
+        const body = sent as { name: string; api_key: string | null };
+        return HttpResponse.json(
+          {
+            ...LLM_CONFIG_FIXTURE,
+            providers: [
+              ...LLM_CONFIG_FIXTURE.providers,
+              {
+                name: body.name,
+                provider: "openai_compat",
+                model: "m",
+                allowed_models: ["m"],
+                base_url: null,
+                api_key_env: "",
+                key_configured: true,
+                api_key_hint: body.api_key ? `••••${body.api_key.slice(-4)}` : null,
+                active: false,
+              },
+            ],
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Thêm profile" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Tên profile"), "paid-key");
+    await user.type(within(dialog).getByLabelText("Model"), "m");
+    const keyInput = within(dialog).getByLabelText("API key");
+    expect(keyInput).toHaveAttribute("type", "password");
+    await user.type(keyInput, "sk-test-abcd");
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toMatchObject({ api_key: "sk-test-abcd" });
+    // Key nguyên vẹn không bao giờ hiển thị lại — chỉ hint 4 ký tự cuối.
+    expect(await screen.findByText("Đã lưu trực tiếp trong bean.toml (••••abcd)")).toBeInTheDocument();
+    expect(screen.queryByText("sk-test-abcd")).not.toBeInTheDocument();
   });
 
   it("sửa profile: PUT đúng tên trên đường dẫn, body không có trường tên", async () => {
@@ -335,8 +384,73 @@ describe("SettingsPage — Providers CRUD", () => {
 
     await waitFor(() => expect(sent).not.toBeNull());
     expect(path).toBe("ollama");
-    expect(sent).toMatchObject({ provider: "openai_compat", model: "qwen3:32b" });
+    expect(sent).toMatchObject({ provider: "openai_compat", model: "qwen3:32b", api_key: null });
     expect(await screen.findByText("Đã cập nhật profile trong bean.toml.")).toBeInTheDocument();
+  });
+
+  it("sửa profile có key đã lưu: ô trống giữ nguyên key (Keep), placeholder hiện hint", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.get("/api/config/llm", () =>
+        HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          providers: LLM_CONFIG_FIXTURE.providers.map((p) =>
+            p.name === "ollama" ? { ...p, api_key_hint: "••••abcd" } : p,
+          ),
+        }),
+      ),
+      http.put("/api/config/llm/providers/:name", async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(LLM_CONFIG_FIXTURE);
+      }),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Sửa profile" }));
+    const dialog = await screen.findByRole("dialog");
+    // Placeholder phản chiếu key đã lưu — người dùng biết để trống là giữ nguyên.
+    expect(within(dialog).getByLabelText("API key")).toHaveAttribute(
+      "placeholder",
+      "Đã lưu ••••abcd — để trống giữ nguyên",
+    );
+    expect(within(dialog).getByRole("button", { name: "Xoá key đã lưu" })).toBeInTheDocument();
+
+    // Submit không dán gì ⇒ api_key: null = Keep (không xoá key đã lưu).
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toMatchObject({ api_key: null });
+  });
+
+  it("nút Xoá key đã lưu: vô hiệu ô nhập, submit gửi chuỗi rỗng (Clear)", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.get("/api/config/llm", () =>
+        HttpResponse.json({
+          ...LLM_CONFIG_FIXTURE,
+          providers: LLM_CONFIG_FIXTURE.providers.map((p) =>
+            p.name === "ollama" ? { ...p, api_key_hint: "••••abcd" } : p,
+          ),
+        }),
+      ),
+      http.put("/api/config/llm/providers/:name", async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json(LLM_CONFIG_FIXTURE);
+      }),
+    );
+    renderProviders();
+
+    await user.click(await screen.findByRole("button", { name: "Sửa profile" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Xoá key đã lưu" }));
+
+    const keyInput = within(dialog).getByLabelText("API key");
+    expect(keyInput).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toMatchObject({ api_key: "" });
   });
 
   it("xoá profile không active: DELETE được gọi, card biến mất", async () => {

@@ -7,16 +7,13 @@ import { BeanMark } from "@/components/brand/BeanMark";
 import { Composer } from "@/components/chat/Composer";
 import { ConfirmCard } from "@/components/chat/ConfirmCard";
 import { MessageRow } from "@/components/chat/MessageRow";
-import { QueuePill, StreamingCaret, ThinkingIndicator } from "@/components/chat/RunStatus";
-import { ToolCard } from "@/components/chat/ToolCard";
+import { QueuePill, ThinkingIndicator } from "@/components/chat/RunStatus";
 import { SafeMarkdown } from "@/components/markdown/SafeMarkdown";
 import {
   deduplicateMessages,
-  formatJson,
+  isWorkMessage,
   parseStoredMessage,
   type StoredMessage,
-  type StoredToolCall,
-  textFromDto,
 } from "@/features/chat/messages";
 import { useSessionMessages, useVoiceStatus } from "@/features/chat/queries";
 import { useRealtime } from "@/features/chat/RealtimeProvider";
@@ -57,14 +54,11 @@ function ChatSession({ sessionId }: { sessionId: number }) {
     () => deduplicateMessages(history.data?.pages.flatMap((page) => page.messages) ?? []),
     [history.data?.pages],
   );
-  const toolResults = useMemo(() => buildToolResults(messages), [messages]);
-  const liveToolIds = useMemo(() => new Set(Object.keys(run?.liveTools ?? {})), [run?.liveTools]);
   const confirms = useMemo(
     () => Object.values(allConfirms).filter((item) => item.session_id === sessionId),
     [allConfirms, sessionId],
   );
 
-  const liveToolCount = liveToolIds.size;
   const confirmCount = confirms.length;
 
   // --- Hoạt ảnh "tin mới" --------------------------------------------------
@@ -74,14 +68,14 @@ function ChatSession({ sessionId }: { sessionId: number }) {
   // (cùng vị trí route), nên state theo phiên phải reset ngay tại render.
   const seeded = useRef<SeedState | null>(null);
   // Khối lượng nội dung để effect cuộn biết có thứ mới được CHÈN vào.
-  const volume = useRef({ messages: 0, tools: 0, confirms: 0, hydrated: false });
+  const volume = useRef({ messages: 0, confirms: 0, hydrated: false });
   const scrollTween = useRef<ScrollTween | null>(null);
   // Đặt khi người dùng bấm nút xuống đáy: effect kế tiếp phải nhả tay để tween
   // trượt nốt, không đè xuống nhảy tức thì.
   const manualScroll = useRef(false);
   if (seeded.current === null || seeded.current.sessionId !== sessionId) {
     seeded.current = seedTracker(sessionId);
-    volume.current = { messages: 0, tools: 0, confirms: 0, hydrated: false };
+    volume.current = { messages: 0, confirms: 0, hydrated: false };
     manualScroll.current = false;
     scrollTween.current?.kill();
     scrollTween.current = null;
@@ -111,22 +105,21 @@ function ChatSession({ sessionId }: { sessionId: number }) {
   }
 
   // Trạng thái run cũng nằm trong khóa: gửi tin nhắn là chủ đích "xem câu trả
-  // lời mới nhất", nên suy nghĩ/xếp hàng phải nằm trong khung nhìn ngay sau commit
-  // render — không được chờ tới delta đầu tiên mới nhảy xuống.
-  const scrollKey = `${messages.length}:${run?.streamText ?? ""}:${liveToolCount}:${confirmCount}:${run?.status ?? "idle"}:${run?.queuePosition ?? ""}`;
+  // lời mới nhất", nên thẻ suy nghĩ/xếp hàng phải nằm trong khung nhìn ngay sau
+  // commit render. Text của run không render nữa (chỉ hiện kết quả cuối cùng
+  // lấy từ DB khi `final`), nên không cần đưa vào khóa.
+  const scrollKey = `${messages.length}:${confirmCount}:${run?.status ?? "idle"}:${run?.queuePosition ?? ""}`;
 
   useEffect(() => {
     void scrollKey;
     const element = scrollRef.current;
     if (!element) return;
     const before = volume.current;
-    const appended =
-      messages.length > before.messages || liveToolCount > before.tools || confirmCount > before.confirms;
+    const appended = messages.length > before.messages || confirmCount > before.confirms;
     // Lần vẽ đầu là lần đầu thấy lịch sử THẬT (đã hydrate), không phải lần effect
     // đầu với danh sách còn rỗng khi request còn pending.
     const firstPaint = !before.hydrated;
     before.messages = messages.length;
-    before.tools = liveToolCount;
     before.confirms = confirmCount;
     before.hydrated = before.hydrated || !history.isPending;
 
@@ -161,7 +154,7 @@ function ChatSession({ sessionId }: { sessionId: number }) {
       // Delta streaming / lần vẽ đầu: bám tức thì để chữ chạy tới đâu thấy tới đó.
       element.scrollTop = element.scrollHeight;
     }
-  }, [atBottom, scrollKey, history.isPending, messages.length, liveToolCount, confirmCount]);
+  }, [atBottom, scrollKey, history.isPending, messages.length, confirmCount]);
 
   /** Người dùng tự cuộn: biết mình đang ở đâu để quyết định có cuộn theo không. */
   function onScroll() {
@@ -271,43 +264,19 @@ function ChatSession({ sessionId }: { sessionId: number }) {
               </button>
             ) : null}
             {!history.isPending && messages.length === 0 ? <EmptyChat onPick={setText} /> : null}
-            <div className="space-y-1">
+            <div className="space-y-6">
               {messages.map((message) => {
-                // `HistoryMessage` tự trả `null` cho vài trường hợp; bọc `<Enter>`
-                // trực tiếp sẽ để lại div rỗng, làm hở dòng do `space-y-1` — nên
-                // lọc trước khi bọc.
+                // `HistoryMessage` tự trả `null` cho tin quá trình (lời gọi tool,
+                // kết quả tool); lọc trước khi bọc — bọc `<Enter>` quanh `null` sẽ
+                // để lại div rỗng làm hở dòng do `space-y-6`.
                 const parsed = parseStoredMessage(message);
-                const orphanTool = parsed?.role === "tool" && !toolResults.get(parsed.toolCallId ?? "");
-                if (!parsed || orphanTool) return null;
+                if (!parsed || isWorkMessage(parsed)) return null;
                 return (
                   <Enter key={message.id} when={isNew(message.id)} kind="rise">
-                    <HistoryMessage dto={message} toolResults={toolResults} liveToolIds={liveToolIds} />
+                    <HistoryMessage dto={message} />
                   </Enter>
                 );
               })}
-              {Object.values(run?.liveTools ?? {})
-                .filter((tool) => !toolResults.has(tool.id))
-                .map((tool) => (
-                  // Thẻ tool của run hiện tại luôn animate khi sinh ra: đó là
-                  // lúc người dùng đang theo dõi, mỗi thẻ mới là một mốc tiến trình.
-                  <Enter key={`${tool.runId}:${tool.id}`} kind="rise">
-                    <ToolCard
-                      name={tool.tool}
-                      summary={tool.summary}
-                      argsPreview={tool.argsPreview}
-                      outputPreview={tool.outputPreview}
-                      status={tool.status}
-                    />
-                  </Enter>
-                ))}
-              {run?.streamText ? (
-                <Enter kind="rise">
-                  <MessageRow author="assistant" headingId="stream-text">
-                    <SafeMarkdown>{run.streamText}</SafeMarkdown>
-                    {run.status === "running" || run.status === "stopping" ? <StreamingCaret /> : null}
-                  </MessageRow>
-                </Enter>
-              ) : null}
               {confirms.map((confirm) => (
                 <Enter key={confirm.confirm_id} kind="pop">
                   <ConfirmCard
@@ -323,13 +292,13 @@ function ChatSession({ sessionId }: { sessionId: number }) {
                 <QueuePill position={run.queuePosition} />
               </Enter>
             ) : null}
-            {/* "Đang suy nghĩ" hiện cả khi vừa gửi (`submitting`) để có phản hồi
-                tức thì, và khi run chạy mà chưa có chữ streaming. Khi chữ đã bắt
-                đầu tới thì chính nó (kèm chỏ nháy) là tín hiệu sống — thêm ba
-                chấm nữa chỉ là nhiễu. */}
-            {run && (run.status === "submitting" || run.status === "running") && !run.streamText ? (
+            {/* Quá trình trung gian (text suy nghĩ, tool đang chạy) không hiển thị —
+                chỉ pill "Đang suy nghĩ" với đồng hồ trôi. Hiện ngay từ lúc gửi
+                (`submitting`) để có phản hồi tức thì; khi `stopping` đổi nhãn thành
+                "Đang dừng…". Kết quả cuối cùng xuất hiện khi `final` nạp lại lịch sử. */}
+            {run && (run.status === "submitting" || run.status === "running" || run.status === "stopping") ? (
               <Enter kind="rise" className="mt-4 flex justify-center">
-                <ThinkingIndicator />
+                <ThinkingIndicator startedAt={run.startedAt} stopping={run.status === "stopping"} />
               </Enter>
             ) : null}
             {run && (run.error || run.errorCode === "interrupted") ? (
@@ -478,64 +447,25 @@ function InvalidSession() {
   );
 }
 
-function buildToolResults(messages: MessageDto[]): Map<string, { call: StoredToolCall; result: MessageDto }> {
-  const calls = new Map<string, StoredToolCall>();
-  for (const dto of messages) {
-    const parsed = parseStoredMessage(dto);
-    if (parsed?.role === "assistant") for (const call of parsed.toolCalls) calls.set(call.id, call);
-  }
-  const result = new Map<string, { call: StoredToolCall; result: MessageDto }>();
-  for (const dto of messages) {
-    const parsed = parseStoredMessage(dto);
-    const call = parsed?.role === "tool" ? calls.get(parsed.toolCallId ?? "") : undefined;
-    if (call) result.set(call.id, { call, result: dto });
-  }
-  return result;
-}
-
-function HistoryMessage({
-  dto,
-  toolResults,
-  liveToolIds,
-}: {
-  dto: MessageDto;
-  toolResults: Map<string, { call: StoredToolCall; result: MessageDto }>;
-  liveToolIds: Set<string>;
-}) {
+function HistoryMessage({ dto }: { dto: MessageDto }) {
   const parsed = parseStoredMessage(dto);
-  if (!parsed) return null;
+  if (!parsed || isWorkMessage(parsed)) return null;
   if (parsed.role === "tool") {
-    const result = toolResults.get(parsed.toolCallId ?? "");
-    return result ? (
-      <ToolCard
-        name={result.call.name}
-        summary={result.call.name}
-        argsPreview={formatJson(result.call.args)}
-        outputPreview={textFromDto(result.result)}
-        status={parsed.isError ? "error" : "ok"}
-        messageId={dto.id}
-        image={parsed.image}
-      />
-    ) : null;
-  }
-  if (parsed.role === "assistant" && parsed.toolCalls.length > 0) {
+    // Tới đây chỉ còn kết quả tool mang ảnh (M26 — `browser_screenshot`): ảnh là
+    // nội dung người dùng cần xem, không phải nhiễu quá trình, nên hiện thẳng
+    // thay vì bọc thẻ tool. `mediaType`/`data` đã được kiệm ở biên
+    // (`parseImage`), `src` luôn là URI `data:` — điều CSP `img-src 'self' data:`
+    // chốt lại thành lớp thứ hai. Không dùng `dangerouslySetInnerHTML`.
+    const image = parsed.image;
+    if (!image) return null;
     return (
-      <div className="space-y-3">
-        {parsed.text ? <MessageBubble messageRole="assistant">{parsed.text}</MessageBubble> : null}
-        {parsed.toolCalls.map((call) => {
-          const result = toolResults.get(call.id);
-          return result || liveToolIds.has(call.id) ? null : (
-            <ToolCard
-              key={call.id}
-              name={call.name}
-              summary={call.name}
-              argsPreview={formatJson(call.args)}
-              outputPreview=""
-              status="running"
-            />
-          );
-        })}
-      </div>
+      <MessageRow author="assistant" headingId={`tool-img-${dto.id}`}>
+        <img
+          src={`data:${image.mediaType};base64,${image.data}`}
+          alt={parsed.text || "browser_screenshot"}
+          className="max-h-96 w-full max-w-xl rounded-lg border border-border object-contain"
+        />
+      </MessageRow>
     );
   }
   return <MessageBubble messageRole={parsed.role}>{parsed.text}</MessageBubble>;
@@ -543,7 +473,7 @@ function HistoryMessage({
 
 function MessageBubble({ messageRole, children }: { messageRole: StoredMessage["role"]; children: string }) {
   // Tin lịch sử đi qua `MessageRow` để có tên người gửi + nút sao chép khi rê.
-  // `role="tool"` không render ở đây — kết quả tool nằm trong `ToolCard`.
+  // `role="tool"` không bao giờ tới đây — tin quá trình bị chặn ở `isWorkMessage`.
   if (messageRole === "tool") return null;
   return (
     <MessageRow author={messageRole} headingId={`msg-${messageRole}-${children.slice(0, 8)}`}>

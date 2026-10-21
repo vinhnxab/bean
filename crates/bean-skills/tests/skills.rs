@@ -191,6 +191,41 @@ async fn load_skill_is_safe_and_create_skill_is_confirm() {
 }
 
 #[test]
+fn bundled_skills_in_repository_all_parse() {
+    let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills");
+    let directories: Vec<String> = fs::read_dir(&bundled)
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            entry
+                .file_type()
+                .unwrap()
+                .is_dir()
+                .then(|| entry.file_name().to_string_lossy().into_owned())
+        })
+        .filter(|name| name != "_drafts")
+        .collect();
+    assert!(
+        !directories.is_empty(),
+        "repo phải có ít nhất một skill bundled"
+    );
+
+    // Loader bỏ qua skill lỗi một cách im lặng nên phải so với danh sách thư mục thật.
+    let catalog = SkillCatalog::load(std::slice::from_ref(&bundled));
+    for name in &directories {
+        let loaded = catalog.get(name);
+        assert!(
+            loaded.is_ok(),
+            "skill bundled `{name}` không nạp được: {:?}",
+            loaded.err()
+        );
+        let skill = loaded.unwrap();
+        assert_eq!(skill.name, *name, "tên skill phải khớp thư mục");
+        assert!(!skill.description.is_empty());
+    }
+}
+
+#[test]
 fn draft_stays_inactive_until_approve_and_reload() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("skills");

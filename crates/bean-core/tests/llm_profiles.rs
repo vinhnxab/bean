@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicUsize;
 
 use async_trait::async_trait;
 use bean_core::RouterError;
-use bean_core::router::{Router, RouterDeps, RouterOptions};
+use bean_core::router::{ApiKeyUpdate, Router, RouterDeps, RouterOptions};
 use bean_core::store::MemoryStore;
 use bean_llm::{ChatRequest, LlmError, LlmProvider};
 use bean_security::CapWorkspace;
@@ -19,7 +19,7 @@ use bean_tools::ToolRegistry;
 use bean_types::Config;
 use bean_types::LlmResponse;
 use bean_types::config::{LlmProfile, LlmProviderKind};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
 /// Provider test phân biệt được qua `name()`.
 #[derive(Debug)]
@@ -157,6 +157,7 @@ fn setup_ram_only() -> (tempfile::TempDir, Router) {
         provider: LlmProviderKind::OpenAiCompat,
         model: "qwen3:14b".to_string(),
         allowed_models: vec!["qwen3:14b".to_string()],
+        api_key: None,
         api_key_env: String::new(),
         base_url: None,
         max_tokens: 4096,
@@ -191,6 +192,7 @@ fn new_profile(name: &str, model: &str) -> LlmProfile {
         provider: LlmProviderKind::OpenAiCompat,
         model: model.to_string(),
         allowed_models: vec![model.to_string()],
+        api_key: None,
         api_key_env: String::new(),
         base_url: None,
         max_tokens: 4096,
@@ -275,7 +277,10 @@ fn update_persists_and_reflects() {
     updated.allowed_models = vec!["qwen3:32b".to_string()];
     updated.base_url = Some("http://127.0.0.1:9/v2".to_string());
 
-    setup.router.update_llm_provider("ollama", updated).unwrap();
+    setup
+        .router
+        .update_llm_provider("ollama", updated, ApiKeyUpdate::Keep)
+        .unwrap();
 
     let profiles = setup.router.llm_profiles().unwrap();
     let ollama = profiles.iter().find(|p| p.name == "ollama").unwrap();
@@ -314,6 +319,7 @@ fn update_active_profile_rebuilds_provider() {
         .update_llm_provider_with(
             "ollama",
             new_profile("ollama", "qwen3:32b"),
+            ApiKeyUpdate::Keep,
             &|config, key| rebuild_factory.build(config, key),
         )
         .unwrap();
@@ -353,6 +359,7 @@ fn update_active_with_failing_factory_keeps_old_state() {
         .update_llm_provider_with(
             "ollama",
             new_profile("ollama", "qwen3:32b"),
+            ApiKeyUpdate::Keep,
             &|config, key| fail_factory.build(config, key),
         )
         .unwrap_err();
@@ -370,7 +377,7 @@ fn update_default_is_readonly() {
     let setup = setup(false);
     let error = setup
         .router
-        .update_llm_provider("default", new_profile("default", "m"))
+        .update_llm_provider("default", new_profile("default", "m"), ApiKeyUpdate::Keep)
         .unwrap_err();
     assert!(matches!(error, RouterError::DefaultProfileReadonly));
     assert_eq!(error.code(), "default_readonly");
@@ -381,7 +388,11 @@ fn update_unknown_fails() {
     let setup = setup(false);
     let error = setup
         .router
-        .update_llm_provider("khong-ton-tai", new_profile("khong-ton-tai", "m"))
+        .update_llm_provider(
+            "khong-ton-tai",
+            new_profile("khong-ton-tai", "m"),
+            ApiKeyUpdate::Keep,
+        )
         .unwrap_err();
     assert!(matches!(error, RouterError::ProfileNotFound(_)));
 }
@@ -394,7 +405,7 @@ fn update_body_name_is_ignored() {
     mismatched.name = "tên-khác".to_string();
     setup
         .router
-        .update_llm_provider("ollama", mismatched)
+        .update_llm_provider("ollama", mismatched, ApiKeyUpdate::Keep)
         .unwrap();
     let profiles = setup.router.llm_profiles().unwrap();
     assert!(profiles.iter().any(|p| p.name == "ollama"));
@@ -510,4 +521,171 @@ fn add_profile_normalizes_allowed_models() {
     // File persist chứa danh sách đã chuẩn hoá (model mặc định đứng đầu).
     let stored = std::fs::read_to_string(&setup.config_path).unwrap();
     assert!(stored.contains("allowed_models = [\"llama-4-8b\", \"llama-4-8b;\"]"));
+}
+
+/// Factory ghi lại API key nhận được để chứng minh thứ tự ưu tiên resolve.
+struct KeyCaptureFactory {
+    seen_keys: Mutex<Vec<Option<String>>>,
+}
+
+impl KeyCaptureFactory {
+    fn build(
+        &self,
+        _config: &bean_types::config::LlmConfig,
+        key: Option<SecretString>,
+    ) -> Result<Arc<dyn LlmProvider>, LlmError> {
+        self.seen_keys
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(key.as_ref().map(|k| k.expose_secret().to_string()));
+        Ok(Arc::new(TagProvider {
+            tag: "key-capture",
+            calls: AtomicUsize::new(0),
+        }))
+    }
+}
+
+#[test]
+fn stored_key_thang_env_va_hint_4_ky_tu_cuoi() {
+    let setup = setup(false);
+    let mut with_key = new_profile("paid", "anthropic/claude-opus-5");
+    with_key.provider = LlmProviderKind::Anthropic;
+    with_key.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
+    with_key.api_key = Some("sk-file-key-abcd".to_string());
+    setup.router.add_llm_provider(with_key).unwrap();
+
+    // Danh sách profile: key_configured = true vì key nằm trong file, hint = 4
+    // ký tự cuối, và không bao giờ lộ key nguyên vẹn.
+    let profiles = setup.router.llm_profiles().unwrap();
+    let paid = profiles.iter().find(|p| p.name == "paid").unwrap();
+    assert!(paid.key_configured);
+    assert_eq!(paid.api_key_hint.as_deref(), Some("••••abcd"));
+    let raw = std::fs::read_to_string(&setup.config_path).unwrap();
+    assert!(raw.contains("api_key = \"sk-file-key-abcd\""));
+    assert!(!raw.contains("api_key_hint"));
+
+    // Env biến KHÔNG tồn tại mà resolve vẫn ra key file ⇒ đường file được ưu tiên
+    // trước đường env (file-key trả về dù env vắng).
+    let capture = KeyCaptureFactory {
+        seen_keys: Mutex::new(Vec::new()),
+    };
+    setup
+        .router
+        .switch_llm_provider_with("paid", None, &|config, key| capture.build(config, key))
+        .unwrap();
+    assert_eq!(
+        capture.seen_keys.lock().unwrap().as_slice(),
+        [Some("sk-file-key-abcd".to_string())]
+    );
+}
+
+#[test]
+fn env_thieu_tra_none_khi_khong_co_key_file() {
+    let setup = setup(false);
+    // Profile không key file + biến env chưa từng tồn tại ⇒ resolve None. Đường
+    // env được consult sau đường file; giá trị env thật không test được vì
+    // workspace `forbid(unsafe_code)` chặn set_var trong edition 2024.
+    let mut profile_env = new_profile("paid-env", "claude-opus-5");
+    profile_env.provider = LlmProviderKind::Anthropic;
+    profile_env.api_key_env = "BEAN_TEST_MISSING_XYZ_9ZQ".to_string();
+    setup.router.add_llm_provider(profile_env).unwrap();
+    let capture = KeyCaptureFactory {
+        seen_keys: Mutex::new(Vec::new()),
+    };
+    setup
+        .router
+        .switch_llm_provider_with("paid-env", None, &|config, key| capture.build(config, key))
+        .unwrap();
+    assert_eq!(capture.seen_keys.lock().unwrap().as_slice(), [None]);
+}
+
+#[test]
+fn update_key_set_keep_clear() {
+    let setup = setup(false);
+    let mut paid = new_profile("paid", "claude-opus-5");
+    paid.provider = LlmProviderKind::Anthropic;
+    paid.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
+    setup.router.add_llm_provider(paid).unwrap();
+
+    // SET: dán key mới qua update.
+    let mut updated = new_profile("paid", "claude-opus-5");
+    updated.provider = LlmProviderKind::Anthropic;
+    updated.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
+    setup
+        .router
+        .update_llm_provider("paid", updated, ApiKeyUpdate::Set("sk-new-key-7777".into()))
+        .unwrap();
+    let raw = std::fs::read_to_string(&setup.config_path).unwrap();
+    assert!(raw.contains("api_key = \"sk-new-key-7777\""));
+    let profiles = setup.router.llm_profiles().unwrap();
+    assert_eq!(
+        profiles
+            .iter()
+            .find(|p| p.name == "paid")
+            .unwrap()
+            .api_key_hint
+            .as_deref(),
+        Some("••••7777")
+    );
+
+    // KEEP: form để trống ⇒ key cũ phải còn nguyên (không bị xoá).
+    let mut edited = new_profile("paid", "claude-opus-5");
+    edited.provider = LlmProviderKind::Anthropic;
+    edited.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
+    setup
+        .router
+        .update_llm_provider("paid", edited, ApiKeyUpdate::Keep)
+        .unwrap();
+    let raw = std::fs::read_to_string(&setup.config_path).unwrap();
+    assert!(
+        raw.contains("api_key = \"sk-new-key-7777\""),
+        "Keep phải giữ key cũ"
+    );
+
+    // CLEAR: nút "Xoá key" ⇒ bỏ trường khỏi TOML, quay lại resolve env.
+    let mut cleared = new_profile("paid", "claude-opus-5");
+    cleared.provider = LlmProviderKind::Anthropic;
+    cleared.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
+    setup
+        .router
+        .update_llm_provider("paid", cleared, ApiKeyUpdate::Clear)
+        .unwrap();
+    let config = Config::load(&setup.config_path).unwrap();
+    assert!(config.llm.providers.iter().all(|p| p.api_key.is_none()));
+    let profiles = setup.router.llm_profiles().unwrap();
+    let paid = profiles.iter().find(|p| p.name == "paid").unwrap();
+    assert_eq!(paid.api_key_hint, None);
+    // Env không có ⇒ key_configured false (api_key_env không rỗng và key file trống).
+    assert!(!paid.key_configured);
+}
+
+#[test]
+fn update_set_key_rong_bi_chuan_hoa_thanh_clear() {
+    // Set chuỗi chỉ khoảng trắng bị router normalize về None — giống Clear.
+    let setup = setup(false);
+    let mut edited = new_profile("ollama", "qwen3:32b");
+    edited.allowed_models = vec!["qwen3:32b".to_string()];
+    setup
+        .router
+        .update_llm_provider("ollama", edited, ApiKeyUpdate::Set("   ".into()))
+        .unwrap();
+    let config = Config::load(&setup.config_path).unwrap();
+    assert!(config.llm.providers.iter().all(|p| p.api_key.is_none()));
+}
+
+#[test]
+fn key_co_ky_tu_dieu_khien_bi_tu_choi_khi_update() {
+    let setup = setup(false);
+    let mut bad = new_profile("ollama", "qwen3:32b");
+    bad.allowed_models = vec!["qwen3:32b".to_string()];
+    let error = setup
+        .router
+        .update_llm_provider("ollama", bad, ApiKeyUpdate::Set("sk-bad\nkey".into()))
+        .unwrap_err();
+    assert!(matches!(error, RouterError::ProfileInvalid(_)));
+    // Nguyên trạng: TOML không bị ghi.
+    assert_eq!(
+        count_provider_entries(&std::fs::read_to_string(&setup.config_path).unwrap()),
+        1
+    );
 }

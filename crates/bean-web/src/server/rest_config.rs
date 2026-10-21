@@ -2,11 +2,12 @@
 //!
 //! # Ranh giới secret (mục 15.6)
 //!
-//! API key **không bao giờ** đi qua HTTP: GET trả cờ `key_configured` thay vì giá
-//! trị, PUT chỉ đổi model trong danh sách `allowed_models` đã khai báo trong
-//! `bean.toml`. Hot-swap provider (PUT `/api/config/llm/provider`) nhận **tên**
-//! profile đã khai báo sẵn trong `[[llm.providers]]` — key mới được resolve từ
-//! biến môi trường phía server, không bao giờ nhận qua body.
+//! API key là **ghi một chiều** qua HTTP: GET trả cờ `key_configured` + hint 4
+//! ký tự cuối thay vì giá trị; PUT/POST nhận key mới qua body đúng một lần để
+//! lưu vào `bean.toml` (file tự chmod 0600), không bao giờ trả key nguyên vẹn.
+//! Hot-swap provider (PUT `/api/config/llm/provider`) nhận **tên** profile đã
+//! khai báo sẵn trong `[[llm.providers]]` — key mới được resolve phía server
+//! (file key trước, env sau), không nhận qua body.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -31,6 +32,7 @@ fn provider_info(profile: bean_core::LlmProfileInfo) -> LlmProviderInfo {
         max_tokens: profile.max_tokens,
         api_key_env: profile.api_key_env,
         key_configured: profile.key_configured,
+        api_key_hint: profile.api_key_hint,
         active: profile.active,
     }
 }
@@ -133,33 +135,47 @@ fn map_profile_error(error: bean_core::RouterError) -> ApiFailure {
     }
 }
 
-/// Dựng [`bean_types::config::LlmProfile`] từ request sửa. Trim mọi trường chuỗi
-/// trước khi dựng — validate_for_storage kiểm tra chuỗi nguyên bản nên phải làm
-/// sạch ở biên giới HTTP.
-fn parse_update_profile(request: LlmProviderUpdateRequest) -> Result<LlmProfile, ApiFailure> {
+/// Dựng ([`bean_types::config::LlmProfile`], [`bean_core::ApiKeyUpdate`]) từ
+/// request sửa. Trim mọi trường chuỗi trước khi dựng — validate_for_storage kiểm
+/// tra chuỗi nguyên bản nên phải làm sạch ở biên giới HTTP.
+///
+/// `api_key`: `None` ⇒ Keep, `Some("")` ⇒ Clear, `Some(k)` ⇒ Set.
+fn parse_update_profile(
+    request: LlmProviderUpdateRequest,
+) -> Result<(LlmProfile, bean_core::ApiKeyUpdate), ApiFailure> {
     let LlmProviderUpdateRequest {
         provider,
         model,
         allowed_models,
         api_key_env,
+        api_key,
         base_url,
         max_tokens,
     } = request;
-    Ok(bean_types::config::LlmProfile {
-        name: String::new(), // router gán lại từ tên trên đường dẫn API
-        provider: parse_provider_kind(provider.trim())?,
-        model: model.trim().to_string(),
-        allowed_models: allowed_models
-            .into_iter()
-            .map(|entry| entry.trim().to_string())
-            .filter(|entry| !entry.is_empty())
-            .collect(),
-        api_key_env: api_key_env.trim().to_string(),
-        base_url: base_url
-            .map(|url| url.trim().to_string())
-            .filter(|url| !url.is_empty()),
-        max_tokens: max_tokens.unwrap_or_else(bean_types::config::default_max_tokens),
-    })
+    let key_update = match api_key {
+        None => bean_core::ApiKeyUpdate::Keep,
+        Some(key) if key.trim().is_empty() => bean_core::ApiKeyUpdate::Clear,
+        Some(key) => bean_core::ApiKeyUpdate::Set(key.trim().to_string()),
+    };
+    Ok((
+        bean_types::config::LlmProfile {
+            name: String::new(), // router gán lại từ tên trên đường dẫn API
+            provider: parse_provider_kind(provider.trim())?,
+            model: model.trim().to_string(),
+            allowed_models: allowed_models
+                .into_iter()
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .collect(),
+            api_key_env: api_key_env.trim().to_string(),
+            api_key: None, // key đi qua `key_update`, không qua profile thô
+            base_url: base_url
+                .map(|url| url.trim().to_string())
+                .filter(|url| !url.is_empty()),
+            max_tokens: max_tokens.unwrap_or_else(bean_types::config::default_max_tokens),
+        },
+        key_update,
+    ))
 }
 
 /// Dựng [`bean_types::config::LlmProfile`] từ request tạo. Tên giữ nguyên bản —
@@ -172,18 +188,24 @@ fn parse_create_profile(request: LlmProviderCreateRequest) -> Result<LlmProfile,
         model,
         allowed_models,
         api_key_env,
+        api_key,
         base_url,
         max_tokens,
     } = request;
-    let mut profile = parse_update_profile(LlmProviderUpdateRequest {
+    let (mut profile, key_update) = parse_update_profile(LlmProviderUpdateRequest {
         provider,
         model,
         allowed_models,
         api_key_env,
+        api_key,
         base_url,
         max_tokens,
     })?;
     profile.name = name;
+    // Tạo profile: key truyền thẳng vào profile (router normalize + validate).
+    if let bean_core::ApiKeyUpdate::Set(key) = key_update {
+        profile.api_key = Some(key);
+    }
     Ok(profile)
 }
 
@@ -309,10 +331,10 @@ pub(super) async fn update_llm_provider_profile(
             "profile không được rỗng",
         ));
     }
-    let profile = parse_update_profile(request)?;
+    let (profile, key_update) = parse_update_profile(request)?;
     state
         .router
-        .update_llm_provider(name, profile)
+        .update_llm_provider(name, profile, key_update)
         .map_err(map_profile_error)?;
     llm_config_response(&state).map(Json)
 }

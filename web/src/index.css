@@ -218,6 +218,36 @@
   }
 }
 
+/* ==========================================================================
+   Hairline borders — viền mảnh hơn mặc định 1px của Tailwind.
+   Chỉ áp dụng trên màn hình HiDPI (mật độ ≥ 2dppx) nơi nửa pixel render được
+   thật; ở màn 1x giữ nguyên 1px vì 0.5px bị làm tròn về 0 — viền biến mất.
+   Chỉ đè utilities width thuần (physical properties, khớp đúng những gì
+   Tailwind v4 sinh — đã kiểm tra output build). `border-2`, `border-x-4`,
+   `ring-*`, `border-t-0`... giữ nguyên ý nghĩa của chúng vì class riêng.
+   Khai báo trong cùng layer `utilities` sau import → thắng built-in 1px
+   theo thứ tự nguồn.
+   ========================================================================== */
+@layer utilities {
+  @media (min-resolution: 2dppx) {
+    .border {
+      border-width: 0.5px;
+    }
+    .border-t {
+      border-top-width: 0.5px;
+    }
+    .border-b {
+      border-bottom-width: 0.5px;
+    }
+    .border-l {
+      border-left-width: 0.5px;
+    }
+    .border-r {
+      border-right-width: 0.5px;
+    }
+  }
+}
+
 /* Tôn trọng `prefers-reduced-motion`: tắt mọi animation không thiết yếu.
    Đặt ở cuối để đè lên mọi rule animation của shadcn/Tailwind. */
 @media (prefers-reduced-motion: reduce) {

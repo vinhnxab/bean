@@ -24,6 +24,8 @@ export type SessionRunState = {
   queuePosition: number | null;
   streamText: string;
   liveTools: Record<string, LiveTool>;
+  /** Mốc giờ (ms) run bắt đầu — cho đồng hồ "Đang suy nghĩ"; `null` khi không có run. */
+  startedAt: number | null;
   error: string | null;
   /** Mã lỗi server (ví dụ "llm") hoặc "interrupted" khi client tự phát hiện mất đồng bộ. */
   errorCode: string | null;
@@ -55,13 +57,21 @@ function idleRun(): SessionRunState {
     queuePosition: null,
     streamText: "",
     liveTools: {},
+    startedAt: null,
     error: null,
     errorCode: null,
   };
 }
 
 function runFor(state: ChatState, sessionId: number, update: Partial<SessionRunState> = {}): SessionRunState {
-  return { ...(state.runsBySession[sessionId] ?? idleRun()), ...update };
+  const previous = state.runsBySession[sessionId] ?? idleRun();
+  const merged: SessionRunState = { ...previous, ...update };
+  if (update.status !== undefined) {
+    // Run bắt đầu không qua gửi tay (scheduler, tab khác) vẫn cần mốc giờ cho
+    // đồng hồ "Đang suy nghĩ"; run kết thúc thì xoá mốc.
+    merged.startedAt = update.status === "idle" ? null : (previous.startedAt ?? Date.now());
+  }
+  return merged;
 }
 
 function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): string | null {
@@ -161,6 +171,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           errorCode: null,
           streamText: previous?.runId === item.run_id ? previous.streamText : "",
           liveTools: previous?.runId === item.run_id ? previous.liveTools : {},
+          // Cùng run_id: giữ mốc giờ cũ (tab mới nối lại không được reset đồng hồ);
+          // run lạ: bắt đầu đếm từ bây giờ.
+          startedAt: previous?.runId === item.run_id ? (previous.startedAt ?? Date.now()) : Date.now(),
         };
       }
       const confirms = { ...state.confirmsById };

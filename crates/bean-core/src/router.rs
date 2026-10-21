@@ -50,8 +50,8 @@ mod status;
 mod types;
 
 pub use types::{
-    Channel, Incoming, LlmProfileInfo, LlmRuntimeConfig, PendingConfirmInfo, RouterDeps,
-    RouterError, RouterOptions, RouterSnapshot, RunningInfo,
+    ApiKeyUpdate, Channel, Incoming, LlmProfileInfo, LlmRuntimeConfig, PendingConfirmInfo,
+    RouterDeps, RouterError, RouterOptions, RouterSnapshot, RunningInfo,
 };
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;

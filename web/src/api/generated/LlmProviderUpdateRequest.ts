@@ -2,6 +2,9 @@
 
 /**
  * Request sửa profile provider. Tên không đổi được — nó là định danh trong URL.
+ *
+ * `api_key` có ba semantics: `null` = giữ key hiện tại (Keep), `""` = xoá key
+ * đã lưu (Clear), chuỗi khác = ghi đè (Set). Đặc tả trong [`bean_core::ApiKeyUpdate`].
  */
 export type LlmProviderUpdateRequest = { 
 /**
@@ -20,6 +23,10 @@ allowed_models: Array<string>,
  * Tên biến môi trường chứa API key; rỗng = provider không cần key.
  */
 api_key_env: string, 
+/**
+ * `null` = giữ key hiện tại; `""` = xoá; chuỗi khác = ghi đè key trong file.
+ */
+api_key: string | null, 
 /**
  * Base URL ghi đè; `null` = dùng mặc định của provider.
  */

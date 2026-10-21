@@ -48,9 +48,10 @@ function mutationErrorMessage(error: unknown, fallback: string): string {
  *
  * Switch giữa các profile và thêm/sửa/xoá profile đều chạy ngay tại đây: CRUD ghi
  * thẳng `[[llm.providers]]` của `bean.toml` phía server (persist trước, áp dụng
- * runtime sau). API key **không bao giờ** được nhập/hiển thị tại đây — chỉ khai
- * báo *tên* biến môi trường, giá trị resolve phía server (mục 15.6). Máy chủ chạy
- * không biết đường `bean.toml` (CLI/test) sẽ trả 503 `config_readonly`.
+ * runtime sau). API key là ghi **một chiều**: có thể dán key mới để lưu trong
+ * `bean.toml`, nhưng giá trị không bao giờ được trả về UI — chỉ có hint 4 ký tự
+ * cuối (`api_key_hint`). Máy chủ chạy không biết đường `bean.toml` (CLI/test) sẽ
+ * trả 503 `config_readonly`.
  */
 export function ProvidersPanel() {
   const { t } = useI18n();
@@ -168,7 +169,11 @@ export function ProvidersPanel() {
                       {entry.provider}
                       {entry.base_url ? ` · ${entry.base_url}` : ""}
                     </span>
-                    <KeyStatus apiKeyEnv={entry.api_key_env} keyConfigured={entry.key_configured} />
+                    <KeyStatus
+                      apiKeyEnv={entry.api_key_env}
+                      keyConfigured={entry.key_configured}
+                      hint={entry.api_key_hint}
+                    />
                   </span>
                   {entry.name === "default" ? null : (
                     <span className="flex shrink-0 items-center gap-1">
@@ -343,18 +348,32 @@ export function ProvidersPanel() {
   );
 }
 
-/** Trạng thái API key của một provider: không cần / đã có / thiếu trong môi trường. */
+/**
+ * Trạng thái API key của một provider: không cần / đã lưu trong file / đã có trong
+ * môi trường / thiếu. `hint` là 4 ký tự cuối của key đã lưu trực tiếp (không bao
+ * giờ là giá trị nguyên vẹn).
+ */
 function KeyStatus({
   apiKeyEnv,
   keyConfigured,
+  hint,
   large = false,
 }: {
   apiKeyEnv: string;
   keyConfigured: boolean;
+  hint?: string | null;
   large?: boolean;
 }) {
   const { t } = useI18n();
   const base = large ? "mt-3 text-sm" : "mt-1.5 text-xs";
+  if (hint) {
+    return (
+      <span className={`${base} flex items-center gap-1.5 text-muted-foreground`}>
+        <CheckCircle2Icon className="size-3.5 shrink-0 text-live" aria-hidden="true" />
+        {t("providers.keyStored", { hint })}
+      </span>
+    );
+  }
   if (apiKeyEnv === "") {
     return (
       <span className={`${base} flex items-center gap-1.5 text-muted-foreground`}>
@@ -411,6 +430,12 @@ function ProviderFormDialog({
   const [model, setModel] = useState(editing?.model ?? "");
   const [allowedModels, setAllowedModels] = useState(editing?.allowed_models.join(", ") ?? "");
   const [apiKeyEnv, setApiKeyEnv] = useState(editing?.api_key_env ?? "");
+  // API key dán trực tiếp (ghi một chiều): trống = giữ nguyên hiện trạng; chỉ có
+  // giá trị khi người dùng chủ ý dán. `clearKey` tách riêng ý định xoá key đã lưu
+  // (submit gửi `""`) để xoá-by-form-trống không bao giờ xảy ra.
+  const [apiKey, setApiKey] = useState("");
+  const [clearKey, setClearKey] = useState(false);
+  const storedHint = editing?.api_key_hint ?? null;
   const [baseUrl, setBaseUrl] = useState(editing?.base_url ?? "");
   const [maxTokens, setMaxTokens] = useState(editing ? String(editing.max_tokens) : "");
   // Message lỗi của lần submit gần nhất; null = chưa lỗi. State nội bộ (không dựa
@@ -426,6 +451,16 @@ function ProviderFormDialog({
     const trimmedModel = model.trim();
     if (trimmedModel === "") return;
     setSubmitError(null);
+    const pastedKey = apiKey.trim();
+    const apiKeyUpdate = editing
+      ? clearKey
+        ? "" // người dùng bấm "Xoá key đã lưu" ⇒ Clear
+        : pastedKey === ""
+          ? null // form để trống ⇒ Keep (không đụng key đã lưu)
+          : pastedKey // dán key mới ⇒ Set
+      : pastedKey === ""
+        ? null // tạo mới không dán key ⇒ resolve từ env
+        : pastedKey;
     const request: LlmProviderUpdateRequest = {
       provider: providerKind,
       model: trimmedModel,
@@ -434,6 +469,7 @@ function ProviderFormDialog({
         .map((entry) => entry.trim())
         .filter((entry) => entry !== ""),
       api_key_env: apiKeyEnv.trim(),
+      api_key: apiKeyUpdate,
       base_url: baseUrl.trim() === "" ? null : baseUrl.trim(),
       max_tokens: maxTokens.trim() === "" ? null : Number(maxTokens.trim()),
     };
@@ -542,6 +578,52 @@ function ProviderFormDialog({
               className="font-mono"
             />
             <span className="text-xs text-muted-foreground">{t("providers.apiKeyEnvHint")}</span>
+          </div>
+
+          <div className="grid gap-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <label htmlFor="provider-api-key" className="text-sm font-medium">
+                {t("providers.apiKey")}
+              </label>
+              {editing && storedHint && !clearKey ? (
+                <button
+                  type="button"
+                  className="text-xs text-destructive hover:underline"
+                  data-slot="provider-api-key-clear"
+                  onClick={() => {
+                    setClearKey(true);
+                    setApiKey("");
+                  }}
+                >
+                  {t("providers.apiKeyClear")}
+                </button>
+              ) : null}
+            </div>
+            <Input
+              id="provider-api-key"
+              value={apiKey}
+              onChange={(event) => {
+                setApiKey(event.target.value);
+                // Nhập lại text sau khi đánh dấu xoá ⇒ ý định đổi thành dán key mới.
+                if (clearKey) setClearKey(false);
+              }}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={clearKey}
+              placeholder={
+                clearKey
+                  ? t("providers.apiKeyCleared")
+                  : storedHint
+                    ? t("providers.apiKeySavedPlaceholder", { hint: storedHint })
+                    : apiKeyEnv.trim() === ""
+                      ? t("providers.apiKeyPastePlaceholder")
+                      : t("providers.apiKeyEnvPlaceholder", { env: apiKeyEnv.trim() })
+              }
+              data-slot="provider-api-key"
+              className="font-mono"
+            />
+            <span className="text-xs text-muted-foreground">{t("providers.apiKeyHint")}</span>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

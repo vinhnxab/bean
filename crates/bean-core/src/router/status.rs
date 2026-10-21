@@ -28,8 +28,13 @@ impl Router {
             api_key_env: config.llm.api_key_env.clone(),
             base_url: config.llm.base_url.clone(),
             max_tokens: config.llm.max_tokens,
-            key_configured: std::env::var(&config.llm.api_key_env)
-                .is_ok_and(|value| !value.trim().is_empty()),
+            key_configured: config
+                .llm
+                .api_key
+                .as_deref()
+                .is_some_and(|key| !key.trim().is_empty())
+                || std::env::var(&config.llm.api_key_env)
+                    .is_ok_and(|value| !value.trim().is_empty()),
         })
     }
 
@@ -135,15 +140,8 @@ impl Router {
             }
             None => resolved.model.clone(),
         };
-        // 2) Key từ env theo đúng biến của profile — rỗng ⇒ provider không cần key.
-        let api_key = if resolved.api_key_env.trim().is_empty() {
-            None
-        } else {
-            std::env::var(&resolved.api_key_env)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .map(SecretString::from)
-        };
+        // 2) Key theo profile: key dán trực tiếp trong toml thắng env; rỗng ⇒ không cần key.
+        let api_key = Self::resolve_profile_api_key(&resolved);
         // Candidate config cho factory: chính là hình thái `[llm]` sẽ có sau khi apply.
         let candidate = {
             let mut candidate = config.llm.clone();

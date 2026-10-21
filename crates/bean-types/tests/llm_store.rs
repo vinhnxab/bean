@@ -13,6 +13,7 @@ fn profile(name: &str, model: &str) -> LlmProfile {
         provider: LlmProviderKind::OpenAiCompat,
         model: model.to_string(),
         allowed_models: vec![model.to_string()],
+        api_key: None,
         api_key_env: String::new(),
         base_url: None,
         max_tokens: 4096,
@@ -50,6 +51,7 @@ fn round_trip_giu_nguyen_phan_khong_dung_toi() {
 
     // Thêm một profile mới: ollama + paid phải còn nguyên, kèm profile mới.
     let paid = LlmProfile {
+        api_key: None,
         api_key_env: "ANTHROPIC_API_KEY".to_string(),
         ..profile("paid", "claude-opus-5")
     };
@@ -226,4 +228,74 @@ fn validate_ten_profile() {
     assert!(validate_profile_name("OpenRouter", &existing).is_err());
     assert!(validate_profile_name(" co.space ", &existing).is_err());
     assert!(validate_profile_name("ollama", &existing).is_err());
+}
+
+#[test]
+fn validate_api_key_trong_luu_tru() {
+    // Key hợp lệ.
+    let mut valid = profile("ok", "m");
+    valid.api_key = Some("sk-or-v1-abc123".to_string());
+    assert!(valid.validate_for_storage().is_ok());
+    // Key rỗng / chỉ khoảng trắng bị từ chối.
+    valid.api_key = Some(String::new());
+    assert_eq!(valid.validate_for_storage().unwrap_err().field, "api_key");
+    valid.api_key = Some("   ".to_string());
+    assert_eq!(valid.validate_for_storage().unwrap_err().field, "api_key");
+    // Key chứa ký tự điều khiển (copy-paste lỗi) bị từ chối — nguyên nhân 401
+    // "Malformed authentication credential" ngoài đời thật.
+    valid.api_key = Some("sk-key\n".to_string());
+    assert_eq!(valid.validate_for_storage().unwrap_err().field, "api_key");
+    valid.api_key = Some("sk-ke\u{200b}y".to_string());
+    assert!(
+        valid.validate_for_storage().is_ok(),
+        "zero-width space không phải control char"
+    );
+    // None = resolve từ env, hợp lệ.
+    valid.api_key = None;
+    assert!(valid.validate_for_storage().is_ok());
+}
+
+#[test]
+fn round_trip_api_key_va_chmod_0600() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bean.toml");
+    std::fs::write(&path, SAMPLE_TOML).unwrap();
+    // File bắt đầu 0644 như người dùng viết tay.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let mut paid = profile("paid", "claude-opus-5");
+    paid.api_key = Some("sk-test-key-1234".to_string());
+    let providers = vec![profile("ollama", "qwen3:14b"), paid];
+    write_llm_providers(&path, &providers).unwrap();
+
+    // TOML parse lại có api_key đúng, phần [agent]/comment giữ nguyên.
+    let config = bean_types::Config::load(&path).unwrap();
+    let saved = config
+        .llm
+        .providers
+        .iter()
+        .find(|p| p.name == "paid")
+        .unwrap();
+    assert_eq!(saved.api_key.as_deref(), Some("sk-test-key-1234"));
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("api_key = \"sk-test-key-1234\""));
+    assert!(raw.starts_with("# Cấu hình Bean của tôi"));
+
+    // Có key plaintext ⇒ file bị siết 0600.
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+
+    // Bỏ key hết ⇒ chmod giữ nguyên quyền file gốc (0600 đà trước), nội dung
+    // không còn trường api_key.
+    let providers = vec![profile("ollama", "qwen3:14b")];
+    write_llm_providers(&path, &providers).unwrap();
+    let config = bean_types::Config::load(&path).unwrap();
+    assert!(config.llm.providers.iter().all(|p| p.api_key.is_none()));
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("api_key = ")
+    );
 }

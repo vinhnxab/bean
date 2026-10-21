@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MessageDto } from "@/api/bindings";
-import { parseStoredMessage } from "@/features/chat/messages";
+import { isWorkMessage, parseStoredMessage } from "@/features/chat/messages";
 
 function dto(message: Record<string, unknown>): MessageDto {
   return {
@@ -75,5 +75,43 @@ describe("parseStoredMessage — khối ảnh (M26)", () => {
       );
       expect(parsed?.image?.mediaType).toBe(mediaType);
     }
+  });
+});
+
+describe("isWorkMessage — ẩn quá trình làm việc của Bean trong dòng chat", () => {
+  it("assistant kèm lời gọi tool là suy nghĩ trung gian → ẩn", () => {
+    const parsed = parseStoredMessage(
+      dto({
+        role: "assistant",
+        text: "để tôi xem file này",
+        tool_calls: [{ id: "c1", name: "read_file", args: {} }],
+      }),
+    );
+    expect(parsed && isWorkMessage(parsed)).toBe(true);
+  });
+
+  it("assistant không gọi tool là câu trả lời cuối → hiện", () => {
+    const parsed = parseStoredMessage(dto({ role: "assistant", text: "xong rồi" }));
+    expect(parsed && isWorkMessage(parsed)).toBe(false);
+  });
+
+  it("kết quả tool không kèm ảnh → ẩn; kèm ảnh → hiện (nội dung M26)", () => {
+    const withImage = parseStoredMessage(
+      dto({
+        role: "tool",
+        text: "ảnh chụp màn hình",
+        tool_call_id: "c1",
+        image: { media_type: "image/png", data: PNG_BASE64, sha256: "a" },
+      }),
+    );
+    expect(withImage && isWorkMessage(withImage)).toBe(false);
+
+    const noImage = parseStoredMessage(dto({ role: "tool", text: "output", tool_call_id: "c1" }));
+    expect(noImage && isWorkMessage(noImage)).toBe(true);
+  });
+
+  it("tin của người dùng luôn hiện", () => {
+    const parsed = parseStoredMessage(dto({ role: "user", text: "chào Bean" }));
+    expect(parsed && isWorkMessage(parsed)).toBe(false);
   });
 });

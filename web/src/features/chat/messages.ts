@@ -84,27 +84,14 @@ export function deduplicateMessages(messages: MessageDto[]): MessageDto[] {
   return [...byId.values()].sort((left, right) => left.seq - right.seq);
 }
 
-export function formatJson(value: JsonValue): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? "null";
-  } catch {
-    return String(value);
-  }
-}
-
-export function truncateChars(value: string, maxChars: number): string {
-  const characters = [...value];
-  if (characters.length <= maxChars) return value;
-  const hidden = characters.length - maxChars;
-  return `${characters.slice(0, maxChars).join("")}\n[+${hidden} ký tự]`;
-}
-
-export function textFromDto(dto: MessageDto): string {
-  const message = dto.message;
-  return typeof message === "object" &&
-    message !== null &&
-    !Array.isArray(message) &&
-    typeof message.text === "string"
-    ? message.text
-    : "";
+/**
+ * Tin "quá trình làm việc" của Bean: tin assistant kèm lời gọi tool (suy nghĩ
+ * trung gian) và kết quả tool. Dòng chat chỉ hiện kết quả cuối cùng nên các tin
+ * này bị ẩn. Riêng kết quả tool kèm ảnh (M26 — `browser_screenshot`) vẫn hiện:
+ * ảnh là nội dung người dùng cần xem, không phải nhiễu quá trình.
+ */
+export function isWorkMessage(message: StoredMessage): boolean {
+  if (message.role === "tool") return message.image === null;
+  if (message.role === "assistant") return message.toolCalls.length > 0;
+  return false;
 }

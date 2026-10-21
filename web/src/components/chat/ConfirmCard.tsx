@@ -54,6 +54,10 @@ export function ConfirmCard({
         : `${t("confirm.expires")} ${formatSeconds(remaining)}`;
   const riskClass =
     confirm.risk === "dangerous" ? "border-destructive/40 bg-destructive/10" : "border-need bg-need/10";
+  // Nhãn rủi ro đậm màu theo mức: chữ trên nền need/destructive phải dùng token
+  // `-ink`/`-foreground` riêng của từng chủ đề — nền trắng hardcode sẽ vô hình ở dark.
+  const riskBadgeClass =
+    confirm.risk === "dangerous" ? "bg-destructive text-destructive-foreground" : "bg-need text-need-ink";
   const riskText = t(`confirm.risk.${confirm.risk}`);
 
   function decide(decision: DecisionDto) {
@@ -71,12 +75,14 @@ export function ConfirmCard({
         <h2 id={`confirm-${confirm.confirm_id}`} className="font-semibold">
           {t("confirm.title")}
         </h2>
-        <span className="rounded-full bg-white/70 px-2 py-1 text-xs font-bold uppercase tracking-wide">
+        <span
+          className={`rounded-full px-2 py-1 text-xs font-bold uppercase tracking-wide ${riskBadgeClass}`}
+        >
           {riskText}
         </span>
       </div>
       <p className="mb-1 text-xs font-medium opacity-70">{t("confirm.action")}</p>
-      <pre className="whitespace-pre-wrap break-words rounded-lg bg-white/70 p-3 font-mono text-sm">
+      <pre className="whitespace-pre-wrap break-words rounded-lg border border-rule bg-surface-raised p-3 font-mono text-sm">
         {confirm.prompt}
       </pre>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -107,7 +113,7 @@ export function ConfirmCard({
               type="button"
               onClick={() => decide("deny")}
               disabled={confirm.resolution === "submitting" || remaining === 0}
-              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-white/60 disabled:opacity-50"
+              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-surface-hover disabled:opacity-50"
             >
               {t("confirm.deny")}
             </button>

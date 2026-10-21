@@ -312,8 +312,23 @@ pub struct LlmProfileInfo {
     pub api_key_env: String,
     /// `true` khi biến môi trường (nếu cần) có giá trị trong process.
     pub key_configured: bool,
+    /// 4 ký tự cuối của key đã lưu trực tiếp (vd `"ed6"` bọc thành `"••••ed6"`);
+    /// `None` = profile không có key trong `bean.toml` (resolve từ env).
+    pub api_key_hint: Option<String>,
     /// `true` khi profile đang có hiệu lực.
     pub active: bool,
+}
+
+/// Ý định thay đổi API key của profile khi sửa từ UI — tách bạch ba semantics
+/// "giữ nguyên / xoá / thay mới" để form để trống không vô tình xoá key đã lưu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiKeyUpdate {
+    /// Body không gửi trường `api_key` ⇒ giữ key hiện tại của profile.
+    Keep,
+    /// Body gửi chuỗi rỗng ⇒ xoá key đã lưu (quay lại resolve từ env).
+    Clear,
+    /// Body gửi key mới ⇒ ghi đè key trong `bean.toml`.
+    Set(String),
 }
 
 /// Confirm đang chờ, dùng để đồng bộ sau reconnect.
