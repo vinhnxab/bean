@@ -1,0 +1,51 @@
+# bean-user.service — bản systemd USER service cho máy cá nhân (khác bản
+# deploy server bean.service: User=bean, /srv/bean, hardening chặt).
+#
+# Cài đặt:
+#   cp deploy/systemd/bean-user.service ~/.config/systemd/user/bean.service
+#   systemctl --user daemon-reload
+#   scripts/beanctl stop                       # dừng instance manual đang chạy
+#   systemctl --user enable --now bean.service
+#
+# Restart về sau:
+#   systemctl --user restart bean.service
+# Xem log:
+#   journalctl --user -u bean.service -f
+#
+# Chạy cả khi chưa đăng nhập (đã bật linger cho vinhnx):
+#   sudo loginctl enable-linger vinhnx         # chỉ cần làm 1 lần
+
+[Unit]
+Description=Bean personal AI agent (user instance)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# beanctl run: source env (dạng `export ...` mà EnvironmentFile không parse
+# được), fallback DISPLAY/XAUTHORITY cho chrome MCP, rồi exec bean foreground.
+ExecStart=/home/vinhnx/dev/BeanAgent/scripts/beanctl run
+# QUAN TRỌNG: Bean nạp bundled skills theo CWD (`PathBuf::from("skills")`
+# trong crates/bean/src/mcp.rs), nên phải chạy đúng từ repo root.
+WorkingDirectory=/home/vinhnx/dev/BeanAgent
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+
+# KHÔNG dùng PrivateTmp/ProtectHome/ProtectSystem=strict/RestrictNamespaces
+# cho bản user này vì:
+# - chrome MCP cần X11 socket (/tmp/.X11-unix — PrivateTmp ẩn mất), profile
+#   Chrome ở ~/.cache và cửa sổ GUI thật;
+# - MCP server REA chạy qua npx, cần cache ~/.npm;
+# - sandbox run_shell dùng docker, cần /var/run/docker.sock và mount bind.
+# Đây là tradeoff chấp nhận được cho một service cá nhân chạy bằng chính user
+# của người vận hành; bản deploy server (bean.service) giữ hardening đầy đủ.
+
+[Install]
+WantedBy=default.target

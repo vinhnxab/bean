@@ -13,6 +13,7 @@
 #   beanctl stop      # dừng hẳn
 #   beanctl status    # xem đang chạy gì
 #   beanctl restart   # = stop + start
+#   beanctl run       # chạy FOREGROUND — dành cho systemd user service làm supervisor
 
 set -uo pipefail
 
@@ -102,5 +103,22 @@ case "${1:-start}" in
     done
     ss -ltn 2>/dev/null | grep -E '127.0.0.1:(7878|7879)' | sed 's/^/  /' || true
     ;;
-  *) echo "Dùng: beanctl {start|stop|restart|status}" >&2; exit 2 ;;
+  run)
+    # Foreground cho `systemd --user` (deploy/systemd/bean-user.service).
+    # KHÔNG setsid/disown: systemd cần process chính là con trực tiếp để quản
+    # vòng đời (stop/restart/Restart=on-failure). Log đi vào journald.
+    require_key
+    ( set -a; . "$ENV_FILE"; set +a
+      export RUST_LOG="${RUST_LOG:-info,bean_security=warn}"
+      # systemd user manager không có biến phiên đồ họa; chrome MCP cần X11.
+      # Fallback chuẩn desktop đơn người dùng — nếu XAUTHORITY khác (Wayland),
+      # đặt Environment=DISPLAY=… XAUTHORITY=… trong unit.
+      if [ -z "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then export DISPLAY=:0; fi
+      if [ -z "${XAUTHORITY:-}" ] && [ -f "$HOME/.Xauthority" ]; then
+        export XAUTHORITY="$HOME/.Xauthority"
+      fi
+      exec "$BIN" --config "$CONFIG" serve
+    )
+    ;;
+  *) echo "Dùng: beanctl {start|stop|restart|status|run}" >&2; exit 2 ;;
 esac
