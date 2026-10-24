@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { ToolDto, ToolListResponse } from "@/api/bindings";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState, PageShell, Panel } from "@/components/ui/Page";
-import { riskTone, useTools } from "@/features/tools/queries";
+import { Switch } from "@/components/ui/switch";
+import { riskTone, useSetToolEnabled, useTools } from "@/features/tools/queries";
 import { type Translate, useI18n } from "@/i18n";
 
 /**
@@ -25,6 +26,9 @@ export function ToolsPage() {
   const tools = useTools();
   const [query, setQuery] = useState("");
   const data = tools.data;
+  // Toggle chỉ dành cho admin: RBAC tắt (một người dùng) thì chủ sở hữu là admin;
+  // bật thì role của người gọi phải là "admin" — cùng ngữ nghĩa với gate phía server.
+  const isAdmin = data ? !data.rbac_enabled || data.viewer_role === "admin" : false;
 
   const visible = useMemo(() => {
     const list = data?.tools ?? [];
@@ -63,7 +67,7 @@ export function ToolsPage() {
           ) : (
             <ul className="grid gap-3 lg:grid-cols-2">
               {visible.map((tool) => (
-                <ToolCard key={tool.name} tool={tool} t={t} />
+                <ToolCard key={tool.name} tool={tool} isAdmin={isAdmin} t={t} />
               ))}
             </ul>
           )}
@@ -127,10 +131,13 @@ function RiskPill({ risk, count, t }: { risk: ToolDto["risk"]; count: number; t:
   );
 }
 
-function ToolCard({ tool, t }: { tool: ToolDto; t: Translate }) {
+function ToolCard({ tool, isAdmin, t }: { tool: ToolDto; isAdmin: boolean; t: Translate }) {
   const tone = riskTone(tool.risk);
+  const toggle = useSetToolEnabled();
   return (
-    <Panel className="flex flex-col gap-2">
+    // Tool bị tắt vẫn hiển thị (để bật lại được) nhưng nhạt đi — không ẩn card,
+    // vì ẩn là cách khiến người dùng không nhớ tool mình từng tắt.
+    <Panel className={`flex flex-col gap-2 ${tool.enabled ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-mono text-sm font-semibold break-all">{tool.name}</h2>
         <Badge tone={tone}>
@@ -140,8 +147,23 @@ function ToolCard({ tool, t }: { tool: ToolDto; t: Translate }) {
         {tool.source === "mcp" && tool.mcp_server ? (
           <span className="font-mono text-xs text-muted-foreground">MCP · {tool.mcp_server}</span>
         ) : null}
+        <span className="ms-auto flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {tool.enabled ? t("tools.state.on") : t("tools.state.off")}
+          </span>
+          <Switch
+            checked={tool.enabled}
+            disabled={!isAdmin || toggle.isPending}
+            aria-label={t("tools.toggleAria", { name: tool.name })}
+            title={isAdmin ? undefined : t("tools.adminOnly")}
+            onCheckedChange={(enabled) => {
+              toggle.mutate({ name: tool.name, enabled });
+            }}
+          />
+        </span>
       </div>
       <p className="text-sm text-muted-foreground">{tool.description}</p>
+      {toggle.isError ? <p className="text-xs text-alert">{t("tools.toggleFailed")}</p> : null}
       <div className="flex flex-wrap items-center gap-1.5">
         {tool.untrusted ? (
           <span className="rounded-md border border-need/50 px-2 py-0.5 text-xs text-need">

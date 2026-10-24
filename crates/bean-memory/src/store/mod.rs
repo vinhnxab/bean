@@ -105,5 +105,5 @@ pub use types::{
 
 pub use crate::traits::traits::{
     McpClientStore, MemoryStore as MemoryOpsStore, MessageStore, OutboxStore, SessionStore,
-    TaskStore, UsageStore, WebSessionStore,
+    TaskStore, ToolOverride, ToolOverrideStore, UsageStore, WebSessionStore,
 };

@@ -75,6 +75,10 @@ pub struct MemoryStore {
     usage_by_role: RwLock<BTreeMap<(String, String), Usage>>,
     web_sessions: RwLock<Vec<(Vec<u8>, WebSessionInfo)>>,
     mcp_clients: RwLock<Vec<(String, McpClientInfo)>>,
+    /// Override bật/tắt tool (runtime toggle từ UI): tên → `enabled`. Vắng mặt =
+    /// theo seed; khớp schema `tool_overrides` của SqliteStore — hai bản cài đặt
+    /// không được lệch ngữ nghĩa (test dùng chung trong `tests.rs`).
+    tool_overrides: RwLock<BTreeMap<String, bool>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
     next_task_id: RwLock<u64>,
@@ -93,6 +97,7 @@ impl Default for MemoryStore {
             usage_by_role: RwLock::new(BTreeMap::new()),
             web_sessions: RwLock::new(Vec::new()),
             mcp_clients: RwLock::new(Vec::new()),
+            tool_overrides: RwLock::new(BTreeMap::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
             next_task_id: RwLock::new(1),
@@ -923,6 +928,35 @@ impl McpClientStore for MemoryStore {
         let before = clients.len();
         clients.retain(|(_, info)| info.name != name);
         Ok(clients.len() != before)
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolOverrideStore for MemoryStore {
+    async fn set_tool_enabled(
+        &self,
+        name: &str,
+        enabled: bool,
+        _updated_by: &str,
+    ) -> Result<(), StoreError> {
+        self.tool_overrides
+            .write()
+            .await
+            .insert(name.to_string(), enabled);
+        Ok(())
+    }
+
+    async fn tool_overrides(&self) -> Result<Vec<ToolOverride>, StoreError> {
+        Ok(self
+            .tool_overrides
+            .read()
+            .await
+            .iter()
+            .map(|(name, enabled)| ToolOverride {
+                name: name.clone(),
+                enabled: *enabled,
+            })
+            .collect())
     }
 }
 

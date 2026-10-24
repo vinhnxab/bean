@@ -58,6 +58,8 @@ export type { TaskUpdateRequest } from "./generated/TaskUpdateRequest";
 export type { TelegramChannelDto } from "./generated/TelegramChannelDto";
 export type { ToolDto } from "./generated/ToolDto";
 export type { ToolListResponse } from "./generated/ToolListResponse";
+export type { ToolToggleRequest } from "./generated/ToolToggleRequest";
+export type { ToolToggleResponse } from "./generated/ToolToggleResponse";
 export type { UpdateSessionRequest } from "./generated/UpdateSessionRequest";
 export type { UsageDayDto } from "./generated/UsageDayDto";
 export type { UsageListResponse } from "./generated/UsageListResponse";

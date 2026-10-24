@@ -31,6 +31,7 @@ use super::q_task::{
     claim_task, create_task, delete_task, delete_task_for_session, due_tasks, list_tasks,
     list_tasks_for_session, set_task_enabled, set_task_status,
 };
+use super::q_tool::{set_tool_enabled, tool_overrides};
 use super::q_usage_web::{
     add_usage, add_usage_by_role, create_web_session, delete_all_web_sessions, delete_web_session,
     get_web_session, read_usage, read_usage_by_role, touch_web_session,
@@ -297,6 +298,17 @@ pub(super) fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         }
         DbCommand::DeleteMcpClient { name, reply } => {
             let _ = reply.send(delete_mcp_client(conn, &name));
+        }
+        DbCommand::SetToolEnabled {
+            name,
+            enabled,
+            updated_by,
+            reply,
+        } => {
+            let _ = reply.send(set_tool_enabled(conn, &name, enabled, &updated_by));
+        }
+        DbCommand::ToolOverrides { reply } => {
+            let _ = reply.send(tool_overrides(conn));
         }
         DbCommand::MemorySave { text, tags, reply } => {
             let _ = reply.send(memory_save_row(conn, &text, &tags));

@@ -280,6 +280,7 @@ export const TOOLS_FIXTURE = {
       required_tags: [],
       extra_tags: [],
       untrusted: true,
+      enabled: true,
     },
     {
       name: "run_shell",
@@ -290,6 +291,7 @@ export const TOOLS_FIXTURE = {
       required_tags: ["dev-write"],
       extra_tags: [],
       untrusted: true,
+      enabled: false,
     },
     {
       name: "mcp__siem__cve_lookup",
@@ -300,6 +302,7 @@ export const TOOLS_FIXTURE = {
       required_tags: ["infra-read"],
       extra_tags: [],
       untrusted: true,
+      enabled: true,
     },
   ],
   total: 5,

@@ -222,6 +222,11 @@ export const en: Record<MessageKey, string> = {
   "tools.empty.description": "The registry is empty — check the tool groups in [tools].enabled.",
   "tools.noMatch.title": "No matches",
   "tools.noMatch.description": "Try another term; name, description and tags are all searchable.",
+  "tools.state.on": "Enabled",
+  "tools.state.off": "Disabled",
+  "tools.toggleAria": "Enable/disable tool {name}",
+  "tools.adminOnly": "Only an admin can enable or disable tools",
+  "tools.toggleFailed": "Could not change the tool state — try again.",
   "mcp.title": "MCP servers",
   "mcp.description": "External servers Bean loads into the registry at startup.",
   "mcp.hint":

@@ -809,6 +809,9 @@ pub struct ToolDto {
     /// Tool trả nội dung từ nguồn ngoài lõi và được bọc `<untrusted_content>`
     /// (mục 15.4) — lý do nó có thể dẫn tới prompt injection.
     pub untrusted: bool,
+    /// Tool đang bật không? `false` = quản trị viên đã tắt runtime: tool bị ẩn khỏi
+    /// payload model và lời gọi bị chặn ở tầng thực thi (khoá theo tên trong DB).
+    pub enabled: bool,
 }
 
 /// Response của `GET /api/tools`.
@@ -827,6 +830,22 @@ pub struct ToolListResponse {
     /// RBAC có bật không (`agent.user_roles` khác rỗng). `false` ⇒ một người dùng,
     /// mọi tool đều thấy.
     pub rbac_enabled: bool,
+}
+
+/// Request của `PUT /api/tools/{name}/enabled` (runtime toggle từ màn Tools).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ToolToggleRequest {
+    /// `true` = bật lại (xoá override), `false` = tắt (ghi override).
+    pub enabled: bool,
+}
+
+/// Response của `PUT /api/tools/{name}/enabled`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ToolToggleResponse {
+    pub name: String,
+    pub enabled: bool,
 }
 
 // ───────────────────────────── MCP servers (read-only) ──────────────────────

@@ -18,6 +18,10 @@
 //! ├── WebSessionStore (5 methods) - web session management
 //! └── McpClientStore (4 methods)  - MCP client management
 //! ```
+//!
+//! (Runtime tool toggle) `ToolOverrideStore` ghi đè bật/tắt tool từ UI: hàng tồn
+//! tại trong `tool_overrides` nghĩa là tool **bị tắt**, vắng mặt là bật — schema
+//! đồng bộ với registry (xem `bean-tools/src/registry.rs`).
 
 use crate::store::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
@@ -309,6 +313,37 @@ pub trait WebSessionStore: Send + Sync {
 
     /// Xoá toàn bộ phiên đăng nhập (khi đổi mật khẩu).
     async fn delete_all_web_sessions(&self) -> Result<(), StoreError>;
+}
+
+// ============================================================================ //
+// TOOL OVERRIDE STORE - Single Responsibility: runtime enable/disable tool
+// ============================================================================ //
+
+/// Một dòng trong `tool_overrides`: tool được ghi đè bật/tắt tại runtime (UI).
+///
+/// Vắng mặt trong danh sách ⇒ tool theo **seed** từ `[tools].enabled`; có mặt ⇒
+/// override **thắng** seed, `enabled` quyết định trạng thái thật (2 chiều).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolOverride {
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[async_trait::async_trait]
+pub trait ToolOverrideStore: Send + Sync {
+    /// Bật/tắt một tool tại runtime; `updated_by` là ai đã ra quyết định (audit).
+    ///
+    /// Override là **2 chiều**: cả bật lẫn tắt đều ghi hàng (`enabled` 0/1) — để
+    /// thắng được seed từ `[tools].enabled` ở cả hai phía. Idempotent (UPSERT).
+    async fn set_tool_enabled(
+        &self,
+        name: &str,
+        enabled: bool,
+        updated_by: &str,
+    ) -> Result<(), StoreError>;
+
+    /// Mọi override đã lưu (sort theo tên) — nạp lúc khởi động vào registry.
+    async fn tool_overrides(&self) -> Result<Vec<ToolOverride>, StoreError>;
 }
 
 // ============================================================================ //

@@ -60,6 +60,29 @@ impl<'a> Agent<'a> {
             return Ok(());
         }
 
+        // (Runtime toggle) Chốt chặn thứ ba: tool bị quản trị viên tắt qua UI. `specs()`
+        // đã ẩn tool khỏi payload model, nhưng `args` là JSON không tin cậy và tool có
+        // thể bị tắt giữa chừng một lượt đang chạy — model phải đọc được thông báo rõ
+        // ràng để tự đổi cách thay vì gọi lại lệnh vừa chặn (agents.md mục 6).
+        if registry.is_disabled(&call.name) {
+            let message = format!(
+                "Tool `{}` đã bị tắt bởi quản trị viên. Hãy làm nhiệm vụ theo cách khác, \
+                 không thử gọi lại tool này.",
+                call.name
+            );
+            tracing::warn!(tool = %call.name, "chặn tool call bị tắt runtime");
+            append_run_message(
+                store,
+                session,
+                &mut state.transcript,
+                Message::tool_error(call.id.clone(), message.clone()),
+            )
+            .await?;
+            io.on_tool_start(&call.id, &call.name, Risk::Dangerous, &call.name, "");
+            io.on_tool_end(&call.id, &call.name, false, &message);
+            return Ok(());
+        }
+
         let risk = registry
             .get(&call.name)
             .map_or(bean_types::Risk::Safe, |tool| tool.risk(&call.args));

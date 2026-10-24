@@ -6,16 +6,16 @@
 //! list lọc theo quyen RBAC cua user dang goi, khong phai tool nao cung ton tai.
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum_extra::extract::cookie::CookieJar;
 use bean_types::Risk;
 
 use crate::api_types::{
     AuditListResponse, AuditQuery, McpServerDto, McpServerListResponse, RiskDto, ToolDto,
-    ToolListResponse,
+    ToolListResponse, ToolToggleRequest, ToolToggleResponse,
 };
 
-use super::{ApiResult, WebState, require_user};
+use super::{ApiFailure, ApiResult, WebState, require_user};
 pub(super) async fn list_audit(
     State(state): State<WebState>,
     jar: CookieJar,
@@ -84,6 +84,7 @@ pub(super) async fn list_tools(
         .filter_map(|name| registry.get(&name))
         .map(|tool| {
             let spec = tool.spec();
+            let enabled = !registry.is_disabled(&spec.name);
             let (source, mcp_server) = tool_origin(&spec.name);
             ToolDto {
                 name: spec.name,
@@ -108,6 +109,7 @@ pub(super) async fn list_tools(
                     .map(|tag| String::from(*tag))
                     .collect(),
                 untrusted: tool.marks_untrusted(),
+                enabled,
             }
         })
         .collect();
@@ -117,6 +119,68 @@ pub(super) async fn list_tools(
         viewer_role: permissions.role,
         rbac_enabled: state.config.rbac_enabled(),
     }))
+}
+
+/// `PUT /api/tools/{name}/enabled` — bật/tắt tool runtime (màn Tools).
+///
+/// Chỉ admin: RBAC tắt (một người dùng) thì chủ sở hữu phiên web là admin; RBAC
+/// bật thì role của người gọi phải là `admin`. Thứ tự bắt buộc: **persist DB trước,
+/// mutate registry sau** — lỗi đĩa giữ nguyên trạng thái RAM (mẫu `rest_config.rs`).
+pub(super) async fn set_tool_enabled(
+    State(state): State<WebState>,
+    jar: CookieJar,
+    Path(name): Path<String>,
+    Json(request): Json<ToolToggleRequest>,
+) -> ApiResult<Json<ToolToggleResponse>> {
+    let user_id = require_user(&state, &jar).await?;
+    let permissions = state.config.permissions_for(&user_id);
+    if state.config.rbac_enabled() && permissions.role != "admin" {
+        return Err(ApiFailure::new(
+            axum::http::StatusCode::FORBIDDEN,
+            "admin_required",
+            "chỉ admin được bật/tắt tool",
+        ));
+    }
+    let name = name.trim().to_string();
+    let registry = state.router.registry();
+    if registry.get(&name).is_none() {
+        return Err(ApiFailure::new(
+            axum::http::StatusCode::NOT_FOUND,
+            "tool_not_found",
+            "tool không tồn tại trong registry",
+        ));
+    }
+    // Persist trước: DB là nguồn sự thật lúc khởi động lại, registry chỉ là bản cache.
+    state
+        .store
+        .set_tool_enabled(&name, request.enabled, &user_id)
+        .await
+        .map_err(|_| ApiFailure::internal())?;
+    registry.set_tool_enabled(&name, request.enabled);
+    record_toggle_audit(&state, &user_id, &name, request.enabled);
+    Ok(Json(ToolToggleResponse {
+        name,
+        enabled: request.enabled,
+    }))
+}
+
+/// Ghi audit cho mỗi lần toggle (mục 15.8): ai quyết định, tool nào, bật hay tắt.
+fn record_toggle_audit(state: &WebState, user_id: &str, name: &str, enabled: bool) {
+    let Some(log) = state.audit.as_ref() else {
+        return;
+    };
+    let mut entry = bean_security::entry_now(
+        0,
+        "web",
+        "tools.toggle",
+        &serde_json::json!({ "tool": name, "enabled": enabled }),
+    );
+    entry.ok = Some(true);
+    entry.decision = "allow";
+    entry.decided_by = user_id.to_string();
+    if let Err(error) = log.record(&entry) {
+        tracing::warn!(error = %error, "không ghi được audit toggle tool");
+    }
 }
 
 /// `GET /api/mcp` — server đã khai báo + trạng thái **suy ra từ registry**.

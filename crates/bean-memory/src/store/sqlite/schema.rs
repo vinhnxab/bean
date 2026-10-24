@@ -127,6 +127,14 @@ CREATE TABLE IF NOT EXISTS mcp_clients (
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL DEFAULT ''
 );
+-- Runtime bật/tắt tool qua UI. Hàng tồn tại = override, cột `enabled` 0/1 quyết
+-- định trạng thái và **thắng** seed từ `[tools].enabled`; vắng mặt = theo seed.
+CREATE TABLE IF NOT EXISTS tool_overrides (
+  name TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT ''
+);
 ";
 
 /// Pragma bắt buộc (agents.md mục 8.1): WAL cho đọc/ghi song song, khoá ngoại bật.

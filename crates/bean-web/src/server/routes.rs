@@ -12,7 +12,7 @@ use axum::middleware;
 use axum::routing::{any, delete, get, patch, post, put};
 
 use super::guard::security_headers;
-use super::rest_audit_tools::{list_audit, list_mcp_servers, list_tools};
+use super::rest_audit_tools::{list_audit, list_mcp_servers, list_tools, set_tool_enabled};
 use super::rest_auth_status::{auth_me, list_agents, login, logout, status};
 use super::rest_config::{
     create_llm_provider_profile, delete_llm_provider_profile, get_llm_config, update_llm_model,
@@ -48,6 +48,7 @@ pub fn build_router(state: WebState) -> AxumRouter {
             put(update_llm_provider_profile).delete(delete_llm_provider_profile),
         )
         .route("/tools", get(list_tools))
+        .route("/tools/{name}/enabled", put(set_tool_enabled))
         .route("/mcp", get(list_mcp_servers))
         .route("/usage", get(usage_history))
         .route("/voice", get(voice_status))

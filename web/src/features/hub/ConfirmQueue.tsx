@@ -26,7 +26,7 @@ export function ConfirmQueue() {
     <section
       aria-labelledby="hub-confirm-title"
       data-testid="hub-confirm-queue"
-      className="rounded-md border border-need bg-surface-raised p-4 sm:p-5"
+      className="rounded-md bg-need/8 p-4 sm:p-5"
     >
       <h2 id="hub-confirm-title" className="text-sm font-semibold text-need">
         {t("hub.confirm.title", { count: String(pending.length) })}

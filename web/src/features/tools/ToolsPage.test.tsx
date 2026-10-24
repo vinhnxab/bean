@@ -73,4 +73,67 @@ describe("ToolsPage", () => {
     expect(await screen.findByText("Không có tool nào")).toBeInTheDocument();
     expect(screen.getByText(/Registry trống/)).toBeInTheDocument();
   });
+
+  it("hiển thị đúng trạng thái bật/tắt từng tool", async () => {
+    testServer.use(http.get("/api/tools", () => HttpResponse.json(TOOLS_FIXTURE)));
+    renderManagement(<ToolsPage />);
+    await screen.findByText("read_file");
+    expect(screen.getAllByText("Đang bật")).toHaveLength(2);
+    expect(screen.getByText("Đang tắt")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Bật/tắt tool run_shell" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
+  it("role không phải admin thấy switch khoá và không gọi được API", async () => {
+    let toggles = 0;
+    testServer.use(
+      http.get("/api/tools", () => HttpResponse.json(TOOLS_FIXTURE)),
+      http.put("/api/tools/:name/enabled", () => {
+        toggles += 1;
+        return HttpResponse.json({ name: "run_shell", enabled: true });
+      }),
+    );
+    const user = userEvent.setup();
+    renderManagement(<ToolsPage />);
+    await screen.findByText("read_file");
+
+    const switchInput = screen.getByRole("switch", { name: "Bật/tắt tool run_shell" });
+    expect(switchInput).toBeDisabled();
+    await user.click(switchInput);
+    expect(toggles).toBe(0);
+  });
+
+  it("admin gạt switch thì gọi PUT và nạp lại danh sách", async () => {
+    let toggles = 0;
+    let toolLists = 0;
+    testServer.use(
+      http.get("/api/tools", () => {
+        toolLists += 1;
+        return HttpResponse.json({
+          ...TOOLS_FIXTURE,
+          viewer_role: "admin",
+          rbac_enabled: false,
+        });
+      }),
+      http.put("/api/tools/:name/enabled", async ({ request }) => {
+        toggles += 1;
+        const url = new URL(request.url);
+        const name = url.pathname.split("/")[3];
+        const body = (await request.json()) as { enabled: boolean };
+        return HttpResponse.json({ name, enabled: body.enabled });
+      }),
+    );
+    const user = userEvent.setup();
+    renderManagement(<ToolsPage />);
+    await screen.findByText("read_file");
+    expect(toolLists).toBe(1);
+
+    await user.click(screen.getByRole("switch", { name: "Bật/tắt tool run_shell" }));
+    expect(toggles).toBe(1);
+    // Mutation thành công → invalidate → nạp lại danh sách (GET thứ hai).
+    expect(await screen.findByText("Đang tắt")).toBeInTheDocument();
+    expect(toolLists).toBe(2);
+  });
 });

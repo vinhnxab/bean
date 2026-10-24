@@ -52,13 +52,19 @@ export function ConfirmCard({
             ? t("confirm.denied")
             : t("confirm.expired")
         : `${t("confirm.expires")} ${formatSeconds(remaining)}`;
-  const riskClass =
-    confirm.risk === "dangerous" ? "border-destructive/40 bg-destructive/10" : "border-need bg-need/10";
-  // Nhãn rủi ro đậm màu theo mức: chữ trên nền need/destructive phải dùng token
-  // `-ink`/`-foreground` riêng của từng chủ đề — nền trắng hardcode sẽ vô hình ở dark.
-  const riskBadgeClass =
-    confirm.risk === "dangerous" ? "bg-destructive text-destructive-foreground" : "bg-need text-need-ink";
+  // TINH TẾ: không viền, không shadow, không accent — chỉ một lớp wash rất nhạt
+  // mang màu ngữ nghĩa; chấm màu ở badge lo phần còn lại. Thêm khung là quay
+  // lại kiểu "thẻ SaaS" giữa luồng chat đã nhiều đường kẻ.
+  const riskClass = confirm.risk === "dangerous" ? "bg-alert/8" : "bg-need/8";
+  // Nhãn rủi ro hết lặng hơn pill nền đặc: chấm màu + chữ màu. Chữ trên nền
+  // app dùng đúng token `-alert`/`-need` của từng chủ đề, không hardcode.
+  const riskTextClass = confirm.risk === "dangerous" ? "text-alert" : "text-need";
+  const riskDotClass = confirm.risk === "dangerous" ? "bg-alert" : "bg-need";
   const riskText = t(`confirm.risk.${confirm.risk}`);
+  // Trạng thái sau khi giải quyết mang màu ngữ nghĩa: allowed = `--live` (xong),
+  // denied/expired = mực mờ (đã đóng). Số đếm ngược dùng chữ số tabular để
+  // không giật cột mỗi giây.
+  const statusClass = confirm.resolution === "allowed" ? "text-live" : resolved ? "text-ink-muted" : "";
 
   function decide(decision: DecisionDto) {
     if (confirm.resolution !== "pending" || remaining === 0) return;
@@ -67,7 +73,7 @@ export function ConfirmCard({
 
   return (
     <section
-      className={`rounded-lg border p-4 shadow-sm ${riskClass}`}
+      className={`rounded-lg p-4 ${riskClass}`}
       role="alertdialog"
       aria-labelledby={`confirm-${confirm.confirm_id}`}
     >
@@ -76,17 +82,18 @@ export function ConfirmCard({
           {t("confirm.title")}
         </h2>
         <span
-          className={`rounded-full px-2 py-1 text-xs font-bold uppercase tracking-wide ${riskBadgeClass}`}
+          className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${riskTextClass}`}
         >
+          <span aria-hidden="true" className={`size-1.5 rounded-full ${riskDotClass}`} />
           {riskText}
         </span>
       </div>
-      <p className="mb-1 text-xs font-medium opacity-70">{t("confirm.action")}</p>
-      <pre className="whitespace-pre-wrap break-words rounded-lg border border-rule bg-surface-raised p-3 font-mono text-sm">
+      <p className="mb-1 text-xs font-medium text-ink-muted">{t("confirm.action")}</p>
+      <pre className="whitespace-pre-wrap break-words rounded-md bg-surface-raised p-3 font-mono text-sm">
         {confirm.prompt}
       </pre>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <span className="text-sm font-medium" aria-live="polite">
+        <span className={`hub-num text-sm font-medium ${statusClass}`} aria-live="polite">
           {status}
         </span>
         {!resolved ? (
@@ -95,7 +102,7 @@ export function ConfirmCard({
               type="button"
               onClick={() => decide("allow")}
               disabled={confirm.resolution === "submitting" || remaining === 0}
-              className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50"
+              className="rounded-md bg-brand px-3 py-2 text-sm font-medium text-brand-ink hover:bg-brand-strong disabled:opacity-50"
             >
               {t("confirm.allow")}
             </button>
@@ -104,7 +111,7 @@ export function ConfirmCard({
                 type="button"
                 onClick={() => decide("allow_in_session")}
                 disabled={confirm.resolution === "submitting" || remaining === 0}
-                className="rounded-lg border border-brand px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-wash disabled:opacity-50"
+                className="rounded-md border border-brand px-3 py-2 text-sm font-medium text-brand hover:bg-brand-wash disabled:opacity-50"
               >
                 {t("confirm.allowSession")}
               </button>
@@ -113,7 +120,7 @@ export function ConfirmCard({
               type="button"
               onClick={() => decide("deny")}
               disabled={confirm.resolution === "submitting" || remaining === 0}
-              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold hover:bg-surface-hover disabled:opacity-50"
+              className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-surface-hover disabled:opacity-50"
             >
               {t("confirm.deny")}
             </button>

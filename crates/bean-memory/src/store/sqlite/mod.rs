@@ -34,6 +34,7 @@ mod q_memory_outbox;
 mod q_message;
 mod q_session;
 mod q_task;
+mod q_tool;
 mod q_usage_web;
 pub(crate) mod schema;
 mod worker;

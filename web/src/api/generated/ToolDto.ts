@@ -48,4 +48,9 @@ extra_tags: Array<string>,
  * Tool trả nội dung từ nguồn ngoài lõi và được bọc `<untrusted_content>`
  * (mục 15.4) — lý do nó có thể dẫn tới prompt injection.
  */
-untrusted: boolean, };
+untrusted: boolean, 
+/**
+ * Tool đang bật không? `false` = quản trị viên đã tắt runtime: tool bị ẩn khỏi
+ * payload model và lời gọi bị chặn ở tầng thực thi (khoá theo tên trong DB).
+ */
+enabled: boolean, };

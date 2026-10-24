@@ -143,6 +143,36 @@ pub(super) fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         .map_err(|err| StoreError::Internal(format!("migration v6 mcp_clients thất bại: {err}")))?;
         conn.pragma_update(None, "user_version", 6)
             .map_err(internal)?;
+        version = 6;
+    }
+    if version < 7 {
+        // Runtime enable/disable tool qua UI (xem `schema.rs` — hàng tồn tại = tool bị tắt).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tool_overrides (
+               name TEXT PRIMARY KEY,
+               updated_at TEXT NOT NULL,
+               updated_by TEXT NOT NULL DEFAULT ''
+             );",
+        )
+        .map_err(|err| {
+            StoreError::Internal(format!("migration v7 tool_overrides thất bại: {err}"))
+        })?;
+        conn.pragma_update(None, "user_version", 7)
+            .map_err(internal)?;
+        version = 7;
+    }
+    if version < 8 {
+        // Runtime toggle 2 chiều: hàng tồn tại = override, cột `enabled` 0/1 quyết
+        // định (thắng seed `[tools].enabled`). Hàng từ v7 (tồn tại = bị tắt) giữ
+        // nguyên ý — thành `enabled = 0`.
+        add_column_if_missing(
+            conn,
+            "tool_overrides",
+            "enabled",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        conn.pragma_update(None, "user_version", 8)
+            .map_err(internal)?;
     }
     Ok(())
 }

@@ -36,6 +36,7 @@ pub trait Store:
     + crate::traits::traits::OutboxStore
     + crate::traits::traits::WebSessionStore
     + crate::traits::traits::McpClientStore
+    + crate::traits::traits::ToolOverrideStore
     + Send
     + Sync
 {

@@ -229,6 +229,11 @@ export const vi = {
   "tools.empty.description": "Registry trống — kiểm tra nhóm tool trong [tools].enabled.",
   "tools.noMatch.title": "Không có kết quả",
   "tools.noMatch.description": "Thử từ khoá khác; tìm được theo tên, mô tả hoặc tag.",
+  "tools.state.on": "Đang bật",
+  "tools.state.off": "Đang tắt",
+  "tools.toggleAria": "Bật/tắt tool {name}",
+  "tools.adminOnly": "Chỉ admin mới bật/tắt được tool",
+  "tools.toggleFailed": "Không đổi được trạng thái tool — thử lại.",
   "mcp.title": "MCP server",
   "mcp.description": "Server ngoài mà Bean nạp tool vào registry lúc khởi động.",
   "mcp.hint":

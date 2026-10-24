@@ -30,7 +30,10 @@ use crate::safe_cut::check_no_orphan_result;
 // Refactor tách trait `Store` thành các sub-trait (traits/traits.rs). Method gọi trực tiếp trên
 // struct cụ thể (`SqliteStore`/`MemoryStore`) cần sub-trait tương ứng trong scope. `MemoryStore as _`
 // tránh đụng tên struct in-memory `MemoryStore` khi vẫn đưa trait vào scope cho method resolution.
-use crate::traits::{MemoryStore as _, MessageStore, OutboxStore, SessionStore, UsageStore};
+use crate::traits::{
+    MemoryStore as _, MessageStore, OutboxStore, SessionStore, ToolOverride, ToolOverrideStore,
+    UsageStore,
+};
 
 fn db_path(dir: &TempDir) -> PathBuf {
     dir.path().join("bean.db")
@@ -225,8 +228,8 @@ async fn migration_v2_resumes_after_partial_schema_change() {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    // 6 = đã chạy tới migration `mcp_clients` (M25).
-    assert_eq!(version, 6);
+    // 8 = đã chạy tới migration mới nhất (`tool_overrides` 2 chiều — runtime toggle).
+    assert_eq!(version, 8);
 }
 
 /// M21.7: ngân sách token **tách theo role** — role này dùng hết hạn mức thì role
@@ -592,4 +595,143 @@ async fn memory_store_behaves_like_sqlite_for_basic_ops() {
         .unwrap();
     assert_eq!(store.count(SessionId::new(99)).await.unwrap(), 1);
     assert!(store.summary(SessionId::new(99)).await.unwrap().is_none());
+}
+
+/// (Runtime toggle) Hai bản cài đặt phải cùng ngữ nghĩa: override **2 chiều** —
+/// cả bật lẫn tắt đều ghi hàng (`enabled` 0/1), thắng seed từ config; vắng mặt =
+/// theo seed; sort theo tên ổn định.
+#[tokio::test]
+async fn tool_override_semantics_match_between_stores() {
+    // SQLite: persist qua khởi động lại (mở lại store mới cùng file).
+    let dir = TempDir::new().unwrap();
+    {
+        let store = open(&dir);
+        store
+            .set_tool_enabled("web_fetch", false, "web:admin")
+            .await
+            .unwrap();
+        store
+            .set_tool_enabled("run_shell", false, "web:admin")
+            .await
+            .unwrap();
+        // Tắt lần nữa là idempotent (UPSERT), không lỗi, không trùng.
+        store
+            .set_tool_enabled("run_shell", false, "web:admin")
+            .await
+            .unwrap();
+        // Bật một tool khác — override 2 chiều: vẫn tạo hàng enabled = 1 (phải
+        // thắng được seed khi config khởi động tắt tool này).
+        store
+            .set_tool_enabled("read_file", true, "web:admin")
+            .await
+            .unwrap();
+    }
+    let reopened = open(&dir);
+    assert_eq!(
+        reopened.tool_overrides().await.unwrap(),
+        vec![
+            ToolOverride {
+                name: "read_file".to_string(),
+                enabled: true,
+            },
+            ToolOverride {
+                name: "run_shell".to_string(),
+                enabled: false,
+            },
+            ToolOverride {
+                name: "web_fetch".to_string(),
+                enabled: false,
+            },
+        ],
+        "sort theo tên, giữ 2 chiều qua khởi động lại"
+    );
+    reopened
+        .set_tool_enabled("web_fetch", true, "web:admin")
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.tool_overrides().await.unwrap(),
+        vec![
+            ToolOverride {
+                name: "read_file".to_string(),
+                enabled: true,
+            },
+            ToolOverride {
+                name: "run_shell".to_string(),
+                enabled: false,
+            },
+            ToolOverride {
+                name: "web_fetch".to_string(),
+                enabled: true,
+            },
+        ],
+        "bật/tắt cập nhật đúng hàng, không xoá"
+    );
+
+    // In-memory: cùng ngữ nghĩa.
+    let memory = MemoryStore::new();
+    assert!(memory.tool_overrides().await.unwrap().is_empty());
+    memory
+        .set_tool_enabled("mcp__x__y", false, "web:admin")
+        .await
+        .unwrap();
+    assert_eq!(
+        memory.tool_overrides().await.unwrap(),
+        vec![ToolOverride {
+            name: "mcp__x__y".to_string(),
+            enabled: false,
+        }]
+    );
+    memory
+        .set_tool_enabled("mcp__x__y", true, "web:admin")
+        .await
+        .unwrap();
+    assert_eq!(
+        memory.tool_overrides().await.unwrap(),
+        vec![ToolOverride {
+            name: "mcp__x__y".to_string(),
+            enabled: true,
+        }]
+    );
+}
+
+/// Migration v7 → v8: DB cũ (hàng tồn tại = tool bị tắt, không cột `enabled`)
+/// phải mở được và hàng cũ trở thành `enabled = false` — đúng nghĩa cũ, không mất.
+#[tokio::test]
+async fn migration_v7_rows_become_disabled_overrides_in_v8() {
+    let dir = TempDir::new().unwrap();
+    {
+        let conn = rusqlite::Connection::open(db_path(&dir)).unwrap();
+        configure(&conn).unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        // Giả lập DB v7: bảng không cột `enabled`, một hàng = tool bị tắt.
+        conn.execute_batch(
+            "ALTER TABLE tool_overrides DROP COLUMN enabled;
+             INSERT INTO tool_overrides(name, updated_at, updated_by)
+               VALUES ('run_shell', '2026-10-22T00:00:00Z', 'web:admin');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 7).unwrap();
+    }
+    let store = open(&dir);
+    assert_eq!(
+        store.tool_overrides().await.unwrap(),
+        vec![ToolOverride {
+            name: "run_shell".to_string(),
+            enabled: false,
+        }],
+        "hàng v7 (tồn tại = bị tắt) thành override enabled = false"
+    );
+    // Ghi mới sau migration dùng schema v8 bình thường.
+    store
+        .set_tool_enabled("run_shell", true, "web:admin")
+        .await
+        .unwrap();
+    assert_eq!(
+        store.tool_overrides().await.unwrap(),
+        vec![ToolOverride {
+            name: "run_shell".to_string(),
+            enabled: true,
+        }]
+    );
 }

@@ -236,6 +236,16 @@ pub(super) enum DbCommand {
         name: String,
         reply: Reply<bool>,
     },
+    // (Runtime toggle) Bật/tắt tool từ UI: hàng tồn tại = tool bị tắt.
+    SetToolEnabled {
+        name: String,
+        enabled: bool,
+        updated_by: String,
+        reply: Reply<()>,
+    },
+    ToolOverrides {
+        reply: Reply<Vec<crate::traits::traits::ToolOverride>>,
+    },
     MemorySave {
         text: String,
         tags: String,

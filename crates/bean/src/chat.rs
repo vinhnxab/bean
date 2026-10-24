@@ -28,13 +28,16 @@ use bean_core::{
 };
 use bean_llm::{FakeProvider, LlmProvider};
 use bean_marketing::{PublishClient, marketing_draft, marketing_publish};
+use bean_memory::{ToolOverride, ToolOverrideStore};
 use bean_qa::{SuiteCatalog, qa_test};
 use bean_scan::{ScanScope, ScannerCmd, security_scan};
 use bean_security::{
     AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
 };
 use bean_skills::{SkillCatalog, skill_tools};
-use bean_tools::{ToolRegistry, builtin::memory_query, mcp::McpRuntime, strip_terminal_escapes};
+use bean_tools::{
+    Tool, ToolRegistry, builtin::memory_query, mcp::McpRuntime, strip_terminal_escapes,
+};
 use bean_types::{Config, Outbound, RunEvent, RunId};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -256,64 +259,90 @@ pub(crate) async fn build_registry(
             )),
         );
     }
-    if config.tools.enabled.iter().any(|g| g == "files") {
-        for tool in bean_tools::builtin::file_tools() {
-            registry
-                .register(tool)
-                .context("đăng ký tool file thất bại")?;
-        }
-    }
-    if config.tools.enabled.iter().any(|g| g == "shell") {
-        let sandbox = Arc::new(Sandbox::new(
-            config.security.sandbox.clone(),
-            config.agent.workspace.clone(),
-        ));
-        registry
-            .register(run_shell_for_projects(sandbox, project_sandboxes))
-            .context("đăng ký run_shell thất bại")?;
-    }
-    if config.tools.enabled.iter().any(|g| g == "web") {
-        let client = Arc::new(
-            SafeHttpClient::new().context("không dựng được HTTP client an toàn cho web tools")?,
-        );
-        registry
-            .register(web_fetch(client))
-            .context("đăng ký web_fetch thất bại")?;
-        registry
-            .register(web_search(&config.tools.web_search, web_search_api_key)?)
-            .context("đăng ký web_search thất bại")?;
-    }
-    if config.tools.enabled.iter().any(|g| g == "memory") {
-        for tool in memory_tools(store.clone()) {
-            registry
-                .register(tool)
-                .context("đăng ký tool memory thất bại")?;
-        }
-        // (M25) `memory_query` là tool chỉ đọc, tách khỏi `memory_save`/`memory_search`:
-        // đây là tool duy nhất về bộ nhớ được expose qua MCP server, và nó không chạm
-        // database nên vẫn dùng được khi chưa cấu hình store.
-        registry
-            .register(memory_query())
-            .context("đăng ký tool memory_query thất bại")?;
-    }
-    if config.tools.enabled.iter().any(|g| g == "skills") {
-        for tool in skill_tools(skills) {
-            registry
-                .register(tool)
-                .context("đăng ký tool skill thất bại")?;
-        }
-    }
-    if config.tools.enabled.iter().any(|g| g == "schedule") {
-        for tool in schedule_tools(
+    // (Runtime toggle 2 chiều) Mọi nhóm tool builtin **luôn được đăng ký**; `[tools].enabled`
+    // chỉ là **seed**: nhóm không có trong danh sách ⇒ tool khởi động ở trạng thái TẮT
+    // (vẫn hiện trong màn Tools để bật lại, hot-swap không cần restart). Override đã lưu
+    // trong `tool_overrides` (UI) thắng seed. Domain đặc biệt (billing/qa/marketing/
+    // security_scan/browser) vẫn đăng ký theo flag riêng — cần credential/flag mới có nghĩa.
+    let enabled_groups = &config.tools.enabled;
+    let mut seed_disabled: Vec<String> = Vec::new();
+    register_group(
+        &mut registry,
+        bean_tools::builtin::file_tools(),
+        "files",
+        enabled_groups,
+        &mut seed_disabled,
+        "file",
+    )?;
+
+    let sandbox = Arc::new(Sandbox::new(
+        config.security.sandbox.clone(),
+        config.agent.workspace.clone(),
+    ));
+    register_group(
+        &mut registry,
+        vec![run_shell_for_projects(sandbox, project_sandboxes)],
+        "shell",
+        enabled_groups,
+        &mut seed_disabled,
+        "run_shell",
+    )?;
+
+    let client = Arc::new(
+        SafeHttpClient::new().context("không dựng được HTTP client an toàn cho web tools")?,
+    );
+    register_group(
+        &mut registry,
+        vec![web_fetch(client)],
+        "web",
+        enabled_groups,
+        &mut seed_disabled,
+        "web_fetch",
+    )?;
+    let search = web_search(&config.tools.web_search, web_search_api_key)?;
+    register_group(
+        &mut registry,
+        vec![search],
+        "web",
+        enabled_groups,
+        &mut seed_disabled,
+        "web_search",
+    )?;
+    // (M25) `memory_query` là tool chỉ đọc, tách khỏi `memory_save`/`memory_search`:
+    // đây là tool duy nhất về bộ nhớ được expose qua MCP server, và nó không chạm
+    // database nên vẫn dùng được khi chưa cấu hình store.
+    let mut memory_all = memory_tools(store.clone());
+    memory_all.push(memory_query());
+    register_group(
+        &mut registry,
+        memory_all,
+        "memory",
+        enabled_groups,
+        &mut seed_disabled,
+        "memory",
+    )?;
+
+    register_group(
+        &mut registry,
+        skill_tools(skills),
+        "skills",
+        enabled_groups,
+        &mut seed_disabled,
+        "skill",
+    )?;
+
+    register_group(
+        &mut registry,
+        schedule_tools(
             store.clone(),
             config.agent.timezone.clone(),
             Arc::new(SystemClock),
-        ) {
-            registry
-                .register(tool)
-                .context("đăng ký tool scheduler thất bại")?;
-        }
-    }
+        ),
+        "schedule",
+        enabled_groups,
+        &mut seed_disabled,
+        "scheduler",
+    )?;
     // (M22a) Domain tài chính read-only. Chỉ đăng ký khi `billing.enabled` **và** nhóm tool
     // `billing` bật; credential đọc từ biến môi trường riêng (validate đã chặn dùng chung).
     if config.billing.enabled && config.tools.enabled.iter().any(|g| g == "billing") {
@@ -427,11 +456,52 @@ pub(crate) async fn build_registry(
         }
     }
     let mcp = McpRuntime::load(&config.mcp_servers, &mut registry).await;
+    // (Runtime toggle) Trạng thái khởi động: seed từ `[tools].enabled` trước, rồi
+    // override đã lưu trong `tool_overrides` **thắng** — hành động mới nhất trên UI
+    // là ý cuối cùng. Áp SAU khi mọi registration xong (kể cả MCP đăng ký muộn).
+    for name in &seed_disabled {
+        registry.set_tool_enabled(name, false);
+    }
+    let overrides = store
+        .tool_overrides()
+        .await
+        .context("nạp tool_overrides từ store thất bại")?;
+    for ToolOverride { name, enabled } in overrides {
+        registry.set_tool_enabled(&name, enabled);
+    }
+    if !seed_disabled.is_empty() {
+        tracing::info!(
+            tools = %seed_disabled.join(", "),
+            "tool khởi động ở trạng thái tắt theo [tools].enabled (bật lại được từ màn Tools)"
+        );
+    }
     Ok(BuiltRegistry {
         registry,
         mcp,
         browser: browser_session,
     })
+}
+
+/// Đăng ký một nhóm tool builtin và ghi tên tool vào `seed_disabled` khi nhóm không
+/// có trong `[tools].enabled` — tool vẫn tồn tại trong registry nhưng khởi động ở
+/// trạng thái TẮT, hiện trong màn Tools để bật lại (hot-swap, không cần restart).
+fn register_group(
+    registry: &mut ToolRegistry,
+    tools: Vec<Arc<dyn Tool>>,
+    group: &str,
+    enabled_groups: &[String],
+    seed_disabled: &mut Vec<String>,
+    label: &str,
+) -> Result<()> {
+    if !enabled_groups.iter().any(|enabled| enabled == group) {
+        seed_disabled.extend(tools.iter().map(|tool| tool.spec().name.clone()));
+    }
+    for tool in tools {
+        registry
+            .register(tool)
+            .with_context(|| format!("đăng ký tool {label} thất bại"))?;
+    }
+    Ok(())
 }
 
 /// Hàng đợi stdin cho chế độ pipe; confirm và lượt user dùng chung một nguồn.
@@ -808,10 +878,51 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use std::collections::BTreeSet;
+    use std::sync::Arc;
 
+    use bean_security::CapWorkspace;
+    use bean_tools::ToolRegistry;
     use bean_types::{RunEvent, RunId, SessionId};
 
-    use super::{render_event, untrusted_tool_names};
+    use super::{register_group, render_event, untrusted_tool_names};
+
+    /// Seed logic thuần: nhóm có trong `[tools].enabled` không seed; nhóm thiếu thì
+    /// mọi tool của nhóm vào seed, nhưng tool vẫn được đăng ký (len tăng).
+    #[test]
+    fn register_group_seeds_tools_of_missing_group_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap());
+        let mut registry = ToolRegistry::with_workspace(ws);
+        let enabled = &["memory".to_string()];
+
+        let mut seed: Vec<String> = Vec::new();
+        register_group(
+            &mut registry,
+            vec![bean_tools::builtin::memory_query()],
+            "memory",
+            enabled,
+            &mut seed,
+            "memory_query",
+        )
+        .unwrap();
+        assert!(seed.is_empty(), "nhóm được bật ⇒ không seed");
+
+        let files = bean_tools::builtin::file_tools();
+        let file_count = files.len();
+        assert!(file_count > 0);
+        let len_before = registry.len();
+        register_group(&mut registry, files, "files", enabled, &mut seed, "file").unwrap();
+        assert_eq!(
+            seed.len(),
+            file_count,
+            "nhóm không bật ⇒ toàn bộ tool vào seed"
+        );
+        assert_eq!(
+            registry.len(),
+            len_before + file_count,
+            "tool vẫn được đăng ký — chỉ là khởi động tắt"
+        );
+    }
 
     /// S2: payload thật của kẻ tấn công — OSC 52 cài clipboard + CSI xoá màn hình để che
     /// prompt xác nhận (đúng kịch bản `docs/security-review.md` mục 3.2).

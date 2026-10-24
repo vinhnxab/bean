@@ -35,6 +35,7 @@ import type {
   TaskRequest,
   TaskUpdateRequest,
   ToolListResponse,
+  ToolToggleResponse,
   UpdateSessionRequest,
   UsageListResponse,
   VoiceStatusResponse,
@@ -165,6 +166,16 @@ export const api = {
    * người dùng tưởng Bean chỉ có 12 tool.
    */
   listTools: (signal?: AbortSignal) => requestJson<ToolListResponse>("/api/tools", { signal }),
+
+  /**
+   * Bật/tắt tool runtime (chỉ admin). Server persist DB trước, mutate registry sau;
+   * tool bị tắt biến mất khỏi payload model và bị chặn ở tầng thực thi.
+   */
+  setToolEnabled: (name: string, enabled: boolean) =>
+    requestJson<ToolToggleResponse>(`/api/tools/${encodeURIComponent(name)}/enabled`, {
+      method: "PUT",
+      body: { enabled },
+    }),
 
   /**
    * MCP server đã khai báo + trạng thái suy ra từ registry.

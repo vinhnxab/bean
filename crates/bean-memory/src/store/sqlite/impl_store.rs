@@ -581,6 +581,31 @@ impl McpClientStore for SqliteStore {
 }
 
 #[async_trait::async_trait]
+impl ToolOverrideStore for SqliteStore {
+    async fn set_tool_enabled(
+        &self,
+        name: &str,
+        enabled: bool,
+        updated_by: &str,
+    ) -> Result<(), StoreError> {
+        let name = name.to_string();
+        let updated_by = updated_by.to_string();
+        self.request(move |reply| DbCommand::SetToolEnabled {
+            name,
+            enabled,
+            updated_by,
+            reply,
+        })
+        .await
+    }
+
+    async fn tool_overrides(&self) -> Result<Vec<ToolOverride>, StoreError> {
+        self.request(move |reply| DbCommand::ToolOverrides { reply })
+            .await
+    }
+}
+
+#[async_trait::async_trait]
 impl Store for SqliteStore {
     async fn compact(
         &self,
