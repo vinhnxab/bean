@@ -20,6 +20,7 @@
     - **ISP:** trait hẹp, đúng một vai trò — theo mẫu sẵn có (`Clock`, `RunIo`, `Tool`); không tạo trait "tất cả trong một".
     - **DIP:** module cấp cao phụ thuộc trait, không phụ thuộc struct cụ thể; inject qua constructor (`Arc<dyn Trait>`) để thay được `FakeProvider`/`Clock` giả trong test.
     - **Encapsulation:** state nội bộ để private, `pub(crate)` là mặc định, chỉ mở `pub` API thật cần; frontend tách logic khỏi component và khỏi I/O (fetch/WS) để test được.
+11. **UI một màn hình:** mọi màn hình nằm gọn trong một viewport — cửa sổ trình duyệt không bao giờ cuộn. Nội dung dài hơn màn hình (danh sách, log, output) thì khung chứa phải bó chiều cao (`max-h`/`flex` + `min-h-0`) và chỉ **component con** được cuộn bên trong (`overflow-y-auto`); không để trang hay panel phình theo dữ liệu. Chi tiết ở mục 12.1.
 
 ---
 
@@ -510,6 +511,8 @@ Quy tắc:
 
 Yêu cầu chung: giao diện **mặc định là tối** (đen + nâu đỏ), người dùng đổi sang sáng được bằng nút chuyển chủ đề — **KHÔNG** phụ thuộc cài đặt hệ thống. **responsive** (dùng được trên điện thoại), truy cập bàn phím và `aria` cơ bản, hai ngôn ngữ `vi` (mặc định) và `en`, thời gian hiển thị theo múi giờ trình duyệt.
 
+**Ứng dụng một màn hình (bắt buộc):** mọi UI nằm gọn trong một viewport; cửa sổ trình duyệt không bao giờ cuộn (`html, body { overflow: hidden }` — đã khoá sẵn trong `web/src/index.css`). Khi nội dung dài hơn màn hình, khung chứa bó chiều cao (`max-h`/`flex` + `min-h-0`) và chỉ **component con** cuộn bên trong (`overflow-y-auto`) — panel danh sách không được phình theo dữ liệu làm cả trang dài ra. Ví dụ mẫu: `SessionList` (cuộn trong `nav`) và `MemoryList` (cuộn trong panel, `max-h-[calc(100svh_-_16rem)]`).
+
 **Hệ màu và chủ đề (Token):**
 - Nền tối nằm ở `:root`, chủ đề sáng bật bằng class `.light` trên `<html>` (xem `web/src/index.css`).
 - Màu chủ đạo: **đen** (nền) + **nâu đỏ** (`--brand`). Phân biệt rõ: **hành động** (nút bấm, dòng đang chọn) dùng `--brand`; **trạng thái** (`--live` đang chạy, `--need` chờ duyệt, `--alert` nguy hiểm) dùng màu riêng, tách sắc khỏi thương hiệu.
@@ -772,6 +775,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 17. **SPA fallback nuốt lỗi 404 của API**, làm giao diện hiển thị HTML thay vì lỗi JSON.
 18. **Kiểu TS viết tay lệch với Rust:** chỉ dùng kiểu sinh bởi `ts-rs`.
 19. **Nhân đôi tin nhắn** khi nối lại WS nếu vừa nạp REST vừa nhận sự kiện: khử trùng theo `message_id`/`run_id`.
+20. **Trang phình theo dữ liệu:** panel danh sách (ghi nhớ, phiên, audit, tasks…) không bó chiều cao khiến cả trang dài ra — mọi danh sách phải bó `max-h` + `flex` + `min-h-0` + `overflow-y-auto` để chỉ cuộn bên trong (quy tắc 11, mục 12.1). Class Tailwind tùy ý kiểu `max-h-[calc(...)]` phải kiểm chứng được sinh ra trong CSS build — lỗi này im lặng, TypeScript vẫn xanh.
 
 ---
 
