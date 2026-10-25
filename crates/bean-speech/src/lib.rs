@@ -86,17 +86,23 @@ pub trait SpeechProvider: Send + Sync {
     async fn synthesize(&self, text: &str) -> Result<AudioOutput, SpeechError>;
 }
 
-/// Dựng provider theo cấu hình; trả `None` khi voice tắt.
+/// Dựng provider theo cấu hình; trả `None` khi `[voice]` chưa khai báo đủ.
+///
+/// Tách "đã cấu hình" khỏi "đang bật": provider dựng khi cấu hình đầy đủ **kể cả khi
+/// `enabled = false`** — nhờ vậy toggle trong UI (`PATCH /api/voice`) bật lại được
+/// không cần restart. Cờ `enabled` chỉ còn là trạng thái runtime, được kiểm tra tại
+/// từng request trong `bean-web`.
 ///
 /// # Errors
-/// [`SpeechError::NotConfigured`] khi bật `api` mà thiếu API key — lỗi **lúc khởi động**,
-/// không âm thầm fallback (D6.4).
+/// [`SpeechError::NotConfigured`] khi chế độ `api` thiếu API key. `serve` dịch điều này
+/// thành "chưa cấu hình" (warn + `None`) khi seed tắt; chỉ fail khởi động tường minh
+/// (D6.4) khi seed `[voice].enabled = true`.
 pub fn build_speech(
     config: &Config,
     api_key: Option<SecretString>,
 ) -> Result<Option<Arc<dyn SpeechProvider>>, SpeechError> {
     let voice = &config.voice;
-    if !voice.enabled {
+    if !config.voice_configured() {
         return Ok(None);
     }
     let timeout = Duration::from_secs(voice.timeout_seconds.max(1));

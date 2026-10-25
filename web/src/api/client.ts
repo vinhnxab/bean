@@ -43,6 +43,7 @@ import type {
   VoiceSynthesizeResponse,
   VoiceTranscribeRequest,
   VoiceTranscribeResponse,
+  VoiceUpdateRequest,
 } from "@/api/bindings";
 import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
 
@@ -333,6 +334,14 @@ export const api = {
    * Voice tắt vẫn trả 200 với `enabled: false` — không phải lỗi.
    */
   voiceStatus: (signal?: AbortSignal) => requestJson<VoiceStatusResponse>("/api/voice", { signal }),
+
+  /**
+   * Bật/tắt voice lúc chạy (chỉ admin). Provider STT/TTS phải đã dựng được lúc
+   * khởi động (`configured = true`), nếu không server trả 409 `voice_not_configured`.
+   * Trạng thái persist vào file state nên giữ nguyên sau restart.
+   */
+  updateVoice: (request: VoiceUpdateRequest) =>
+    requestJson<VoiceStatusResponse>("/api/voice", { method: "PATCH", body: request }),
 
   /** STT: audio base64 trong JSON (xem `VoiceTranscribeRequest`). */
   transcribe: (request: VoiceTranscribeRequest) =>

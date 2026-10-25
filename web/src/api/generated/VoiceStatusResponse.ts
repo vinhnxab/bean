@@ -8,9 +8,15 @@
  */
 export type VoiceStatusResponse = { 
 /**
- * Voice có bật trong cấu hình không (`[voice].enabled`).
+ * Voice đang có hiệu lực lúc chạy: provider đã dựng được **và** chưa bị tắt qua UI.
+ * UI dùng để ẩn/hiện nút mic.
  */
 enabled: boolean, 
+/**
+ * Provider STT/TTS đã dựng được lúc khởi động (`[voice]` khai báo đủ). `false` ⇒
+ * `PATCH /api/voice` bị chặn — cần hoàn thiện `[voice]` trong `bean.toml` rồi restart.
+ */
+configured: boolean, 
 /**
  * Nhà cung cấp STT/TTS (`local` | `api`).
  */

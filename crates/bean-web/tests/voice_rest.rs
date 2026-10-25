@@ -45,6 +45,9 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
     config.web.public_origin = ORIGIN.to_string();
     config.web.session_ttl_hours = 1;
     config.agent.allowed_users = vec!["web:admin".into()];
+    // Mirror serve.rs: voice khai báo đủ + seed bật khi fixture dựng provider;
+    // `None` = `[voice]` chưa cấu hình (không có model/key nào để dựng).
+    config.voice.enabled = speech_enabled;
 
     set_password(&config.data.dir, PASSWORD).unwrap();
     let workspace_fs = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
@@ -105,6 +108,19 @@ fn post_json(path: &str, token: &str, body: &str) -> Request<Body> {
         .header(header::COOKIE, format!("bean_session={token}"))
         .body(Body::from(body.to_owned()))
         .unwrap()
+}
+
+fn patch_json(path: &str, token: Option<&str>, body: &str) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("PATCH")
+        .uri(path)
+        .header(header::HOST, HOST)
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(token) = token {
+        builder = builder.header(header::COOKIE, format!("bean_session={token}"));
+    }
+    builder.body(Body::from(body.to_owned())).unwrap()
 }
 
 async fn login(app: &AxumRouter) -> String {
@@ -237,4 +253,104 @@ async fn transcribe_rejects_invalid_base64_without_panic() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let payload = body_string(response).await;
     assert!(payload.contains("invalid_audio"), "{payload}");
+}
+
+#[tokio::test]
+async fn voice_update_requires_auth() {
+    let (_dir, app) = fixture(true).await;
+    let response = app
+        .clone()
+        .oneshot(patch_json("/api/voice", None, r#"{"enabled":false}"#))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+// Toggle từ UI: tắt ⇒ GET enabled:false và STT/TTS fail-closed; bật lại ⇒ dùng được
+// ngay. File `voice-state.json` phải được ghi để trạng thái sống sót qua restart.
+#[tokio::test]
+async fn voice_toggle_persists_and_gates_stt_tts() {
+    let (dir, app) = fixture(true).await;
+    let token = login(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":false}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_string(response).await;
+    assert!(payload.contains("\"enabled\":false"), "{payload}");
+    assert!(payload.contains("\"configured\":true"), "{payload}");
+
+    let status = app
+        .clone()
+        .oneshot(get_request("/api/voice", Some(&token)))
+        .await
+        .unwrap();
+    assert!(body_string(status).await.contains("\"enabled\":false"));
+
+    for path in ["/api/voice/transcribe", "/api/voice/synthesize"] {
+        let body = if path.ends_with("transcribe") {
+            format!(r#"{{"audio_base64":"{AUDIO_B64}","mime":"audio/webm"}}"#)
+        } else {
+            r#"{"text":"xin chào"}"#.to_string()
+        };
+        let response = app
+            .clone()
+            .oneshot(post_json(path, &token, &body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        let payload = body_string(response).await;
+        assert!(payload.contains("voice_disabled"), "{payload}");
+    }
+
+    let state_file = dir.path().join("data").join("voice-state.json");
+    let saved = std::fs::read_to_string(&state_file).unwrap();
+    assert!(saved.contains("\"enabled\":false"), "{saved}");
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let transcript = app
+        .clone()
+        .oneshot(post_json(
+            "/api/voice/transcribe",
+            &token,
+            &format!(r#"{{"audio_base64":"{AUDIO_B64}","mime":"audio/webm"}}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(transcript.status(), StatusCode::OK);
+    assert!(body_string(transcript).await.contains("xin chào"));
+}
+
+#[tokio::test]
+async fn voice_update_rejected_when_not_configured() {
+    let (_dir, app) = fixture(false).await;
+    let token = login(&app).await;
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let payload = body_string(response).await;
+    assert!(payload.contains("voice_not_configured"), "{payload}");
 }

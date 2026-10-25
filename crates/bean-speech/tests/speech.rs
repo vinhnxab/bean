@@ -179,6 +179,29 @@ fn build_speech_api_requires_key() {
     assert!(matches!(err, SpeechError::NotConfigured(_)), "{err:?}");
 }
 
+// Toggle từ UI (PATCH /api/voice) phải bật lại được không cần restart: provider được
+// dựng khi `[voice]` khai báo đủ, bất kể cờ `enabled` (serve chỉ coi `enabled` là
+// trạng thái runtime, kiểm tra tại từng request trong bean-web).
+#[test]
+fn build_speech_builds_when_disabled_but_configured() {
+    let mut config = Config::default();
+    config.voice.enabled = false;
+    config.voice.whisper_model = "/tmp/ggml-vi.bin".into();
+    config.voice.piper_model = "/tmp/vi.onnx".into();
+    assert!(config.voice_configured());
+    let provider = bean_speech::build_speech(&config, None).unwrap();
+    assert!(provider.is_some(), "provider phải dựng được dù seed tắt");
+}
+
+#[test]
+fn build_speech_none_when_fields_incomplete() {
+    let mut config = Config::default();
+    config.voice.enabled = true;
+    // Thiếu model local ⇒ chưa cấu hình đủ, dù cờ enabled bật.
+    let provider = bean_speech::build_speech(&config, None).unwrap();
+    assert!(provider.is_none());
+}
+
 #[test]
 fn truncate_utf8_boundary() {
     assert_eq!(bean_speech::truncate_utf8("abc", 10), "abc");

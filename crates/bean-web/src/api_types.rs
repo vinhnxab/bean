@@ -1050,14 +1050,28 @@ pub struct SystemResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct VoiceStatusResponse {
-    /// Voice có bật trong cấu hình không (`[voice].enabled`).
+    /// Voice đang có hiệu lực lúc chạy: provider đã dựng được **và** chưa bị tắt qua UI.
+    /// UI dùng để ẩn/hiện nút mic.
     pub enabled: bool,
+    /// Provider STT/TTS đã dựng được lúc khởi động (`[voice]` khai báo đủ). `false` ⇒
+    /// `PATCH /api/voice` bị chặn — cần hoàn thiện `[voice]` trong `bean.toml` rồi restart.
+    pub configured: bool,
     /// Nhà cung cấp STT/TTS (`local` | `api`).
     pub provider: String,
     /// Mã ngôn ngữ ISO gửi cho STT/TTS (`vi`, `en`...).
     pub language: String,
     /// Trần ký tự gửi đi TTS.
     pub max_speak_chars: u32,
+}
+
+/// `PATCH /api/voice` — bật/tắt voice runtime (màn Cài đặt), persist qua restart ở
+/// `data.dir/voice-state.json`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct VoiceUpdateRequest {
+    /// `true` = bật nút mic push-to-talk; `false` = tắt (ẩn mic, chặn STT/TTS).
+    pub enabled: bool,
 }
 
 /// `POST /api/voice/transcribe` — audio gửi lên **dạng base64 trong JSON**.

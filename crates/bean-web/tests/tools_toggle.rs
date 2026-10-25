@@ -18,7 +18,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use bean_core::{Router, RouterDeps};
 use bean_llm::FakeProvider;
-use bean_memory::{MemoryStore, Store, ToolOverride, ToolOverrideStore};
+use bean_memory::{MemoryStore, Store, ToolOverride};
 use bean_security::CapWorkspace;
 use bean_skills::SkillCatalog;
 use bean_tools::{ToolRegistry, builtin::files::tool::read_file};

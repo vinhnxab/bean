@@ -186,9 +186,16 @@ export const testServer = setupServer(
     });
   }),
   // (M27) Mặc định voice TẮT: màn chat luôn hỏi trạng thái này để quyết định có hiện
-  // nút mic. Test nào cần bật thì `testServer.use(...)` ghi đè.
+  // nút mic. Test nào cần bật thì `testServer.use(...)` ghi đè. `configured: true`
+  // mô phỏng `[voice]` đã khai báo đủ trong bean.toml (provider dựng được lúc khởi động).
   http.get("/api/voice", () =>
-    HttpResponse.json({ enabled: false, provider: "local", language: "vi", max_speak_chars: 400 }),
+    HttpResponse.json({
+      enabled: false,
+      configured: true,
+      provider: "local",
+      language: "vi",
+      max_speak_chars: 400,
+    }),
   ),
 );
 

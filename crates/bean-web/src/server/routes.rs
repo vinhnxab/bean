@@ -27,7 +27,7 @@ use super::rest_skills::{
 };
 use super::rest_tasks::{create_task, delete_task, list_tasks, update_task};
 use super::rest_usage_system::{system_info, usage_history};
-use super::rest_voice::{voice_status, voice_synthesize, voice_transcribe};
+use super::rest_voice::{voice_status, voice_synthesize, voice_transcribe, voice_update};
 use super::ui_assets::{api_not_found, ui_handler};
 use super::ws::ws_handler;
 use super::{MAX_BODY_BYTES, WebState, request_guard};
@@ -51,7 +51,7 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/tools/{name}/enabled", put(set_tool_enabled))
         .route("/mcp", get(list_mcp_servers))
         .route("/usage", get(usage_history))
-        .route("/voice", get(voice_status))
+        .route("/voice", get(voice_status).patch(voice_update))
         .route("/voice/transcribe", post(voice_transcribe))
         .route("/voice/synthesize", post(voice_synthesize))
         .route("/agents", get(list_agents))

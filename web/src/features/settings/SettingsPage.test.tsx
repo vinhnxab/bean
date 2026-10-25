@@ -500,3 +500,127 @@ describe("SettingsPage — Providers CRUD", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
+
+/**
+ * Section Giọng nói: PATCH /api/voice bật/tắt lúc chạy (M27+). Fixture mặc định
+ * đã `configured: true, enabled: false` — các test ghi đè bằng `testServer.use`.
+ */
+function renderVoice() {
+  return renderManagement(
+    <Routes>
+      <Route path="/settings/:section" element={<SettingsPage />} />
+      <Route path="*" element={<div>fallback</div>} />
+    </Routes>,
+    ["/settings/voice"],
+  );
+}
+
+describe("SettingsPage — Voice", () => {
+  it("hiển thị trạng thái: provider, ngôn ngữ, switch phản chiếu enabled", async () => {
+    renderVoice();
+
+    expect(await screen.findByText("Giọng nói (push-to-talk)")).toBeInTheDocument();
+    expect(screen.getByText("local")).toBeInTheDocument();
+    expect(screen.getByText("vi")).toBeInTheDocument();
+    // Fixture mặc định: configured, đang tắt.
+    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).not.toBeChecked();
+    expect(screen.getByText("Đang tắt")).toBeInTheDocument();
+  });
+
+  it("bật voice: PATCH đúng body, switch và trạng thái cập nhật theo snapshot server", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.patch("/api/voice", async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({
+          enabled: true,
+          configured: true,
+          provider: "local",
+          language: "vi",
+          max_speak_chars: 400,
+        });
+      }),
+    );
+    renderVoice();
+
+    const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
+    await user.click(toggle);
+
+    await waitFor(() => expect(sent).toEqual({ enabled: true }));
+    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
+    expect(screen.getByText("Đang bật")).toBeInTheDocument();
+  });
+
+  it("server từ chối (422 voice_state_unwritable): alert lỗi, switch giữ nguyên", async () => {
+    const user = userEvent.setup();
+    testServer.use(
+      http.patch("/api/voice", () =>
+        HttpResponse.json(
+          { code: "voice_state_unwritable", message: "không ghi được file trạng thái voice" },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderVoice();
+
+    const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
+    await user.click(toggle);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("không ghi được file trạng thái voice");
+    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).not.toBeChecked();
+  });
+
+  it("chưa cấu hình [voice]: switch bị khoá kèm hướng dẫn, không gửi PATCH", async () => {
+    const user = userEvent.setup();
+    let patchCount = 0;
+    testServer.use(
+      http.get("/api/voice", () =>
+        HttpResponse.json({
+          enabled: false,
+          configured: false,
+          provider: "local",
+          language: "vi",
+          max_speak_chars: 400,
+        }),
+      ),
+      http.patch("/api/voice", () => {
+        patchCount += 1;
+        return HttpResponse.json({ code: "voice_not_configured", message: "chưa cấu hình" }, { status: 409 });
+      }),
+    );
+    renderVoice();
+
+    const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText("Chưa cấu hình")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Chưa khai báo đủ phần [voice] trong bean.toml — hoàn thiện cấu hình rồi khởi động lại Bean để bật được từ đây.",
+      ),
+    ).toBeInTheDocument();
+    // disabled ⇒ không thể click; guard phòng hờ: PATCH không bao giờ được gọi.
+    await user.click(toggle);
+    await waitFor(() => expect(patchCount).toBe(0));
+  });
+
+  it("provider api: hiện cảnh báo privacy bản ghi âm gửi lên dịch vụ ngoài", async () => {
+    testServer.use(
+      http.get("/api/voice", () =>
+        HttpResponse.json({
+          enabled: true,
+          configured: true,
+          provider: "api",
+          language: "vi",
+          max_speak_chars: 400,
+        }),
+      ),
+    );
+    renderVoice();
+
+    expect(await screen.findByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
+    expect(
+      screen.getByText("Bản ghi âm sẽ được gửi lên dịch vụ giọng nói bên ngoài để nhận dạng/phát âm thanh."),
+    ).toBeInTheDocument();
+  });
+});

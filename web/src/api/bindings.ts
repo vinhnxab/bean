@@ -68,4 +68,5 @@ export type { VoiceSynthesizeRequest } from "./generated/VoiceSynthesizeRequest"
 export type { VoiceSynthesizeResponse } from "./generated/VoiceSynthesizeResponse";
 export type { VoiceTranscribeRequest } from "./generated/VoiceTranscribeRequest";
 export type { VoiceTranscribeResponse } from "./generated/VoiceTranscribeResponse";
+export type { VoiceUpdateRequest } from "./generated/VoiceUpdateRequest";
 export type { WebChannelDto } from "./generated/WebChannelDto";

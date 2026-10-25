@@ -314,6 +314,21 @@ export const en: Record<MessageKey, string> = {
   "chat.voice.error": "Could not transcribe the audio. Try again.",
   "chat.voice.denied": "Microphone permission was denied.",
   "chat.voice.unsupported": "This browser does not support audio recording.",
+  // --- Voice settings (/settings/voice) ------------------------------------
+  "voice.panelTitle": "Voice (push-to-talk)",
+  "voice.panelHint":
+    "Toggle the mic button in the chat composer. Changes take effect immediately — no restart needed.",
+  "voice.pushToTalk": "Microphone recording",
+  "voice.state.on": "On",
+  "voice.state.off": "Off",
+  "voice.state.notConfigured": "Not configured",
+  "voice.provider": "STT/TTS provider",
+  "voice.language": "Language",
+  "voice.toggleAria": "Toggle voice",
+  "voice.notConfiguredHint":
+    "The [voice] section in bean.toml is incomplete — finish the configuration and restart Bean to enable it here.",
+  "voice.privacyApi": "Recordings are sent to an external speech service for transcription and synthesis.",
+  "voice.toggleFailed": "Could not change the voice state. Try again.",
   // --- Settings (/settings, nav lives in the right sidebar) ----------------
   "nav.settings": "Settings",
   "settings.title": "Settings",
@@ -323,6 +338,8 @@ export const en: Record<MessageKey, string> = {
   "settings.closeSidebar": "Close settings",
   "settings.section.providers": "Providers",
   "settings.section.providersDescription": "The model and API Bean reasons with.",
+  "settings.section.voice": "Voice",
+  "settings.section.voiceDescription": "Toggle the push-to-talk mic button.",
   "providers.sectionTitle": "Providers",
   "providers.profilesHint":
     "Choose which API setup Bean uses for reasoning. Changes take effect on the next chat turn.",

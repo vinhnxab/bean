@@ -1,17 +1,17 @@
-import { CpuIcon, type LucideIcon, XIcon } from "lucide-react";
+import { CpuIcon, type LucideIcon, MicIcon, XIcon } from "lucide-react";
 import { NavLink } from "react-router";
 
 import { useI18n } from "@/i18n";
 
 /**
  * Các mục cài đặt. Giống `NAV_ITEMS` của sidebar trái: một bảng, thêm/bớt mục
- * là thêm/bớt một dòng. v1 chỉ có Providers; các mục sau (Bảo mật, Giao diện…)
- * thêm route con `/settings/<section>` rồi khai báo ở đây.
+ * là thêm/bớt một dòng. Các mục sau (Bảo mật, Giao diện…) thêm route con
+ * `/settings/<section>` rồi khai báo ở đây.
  */
 const SETTINGS_SECTIONS: {
   to: string;
-  labelKey: "settings.section.providers";
-  descKey: "settings.section.providersDescription";
+  labelKey: "settings.section.providers" | "settings.section.voice";
+  descKey: "settings.section.providersDescription" | "settings.section.voiceDescription";
   icon: LucideIcon;
 }[] = [
   {
@@ -19,6 +19,12 @@ const SETTINGS_SECTIONS: {
     labelKey: "settings.section.providers",
     descKey: "settings.section.providersDescription",
     icon: CpuIcon,
+  },
+  {
+    to: "/settings/voice",
+    labelKey: "settings.section.voice",
+    descKey: "settings.section.voiceDescription",
+    icon: MicIcon,
   },
 ];
 

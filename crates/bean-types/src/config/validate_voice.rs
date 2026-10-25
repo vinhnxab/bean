@@ -17,10 +17,16 @@ impl Config {
     /// * chế độ `api` phải có `api_key_env` **riêng** (không trùng credential của LLM, web
     ///   search, Telegram, billing, marketing — D13.2) và `api_base_url` phải là http(s).
     pub(super) fn validate_voice(&self) -> Result<(), ConfigError> {
-        let voice = &self.voice;
-        if !voice.enabled {
+        if !self.voice.enabled {
             return Ok(());
         }
+        self.validate_voice_fields(&self.voice)
+    }
+
+    /// Kiểm tra các trường `[voice]` **bỏ qua** cờ `enabled` — cùng bộ điều kiện với
+    /// [`Config::validate_voice`] nhưng dùng được cả khi seed đang tắt, để
+    /// [`Config::voice_configured`] phân biệt "đã cấp phát" với "đang bật".
+    pub(super) fn validate_voice_fields(&self, voice: &VoiceConfig) -> Result<(), ConfigError> {
         if voice.language.trim().is_empty() {
             return Err(invalid("[voice].language rỗng — ví dụ `vi` hoặc `en`"));
         }
@@ -107,5 +113,21 @@ impl Config {
             }
         }
         Ok(())
+    }
+}
+
+impl Config {
+    /// `[voice]` đã khai báo đủ để dựng provider chưa — **bỏ qua** cờ `enabled`.
+    ///
+    /// Tách hai khái niệm vốn bị dính vào nhau trước đây:
+    /// * *cấp phát* (provisioning): binary/model/key đã khai báo đủ trong `bean.toml`;
+    /// * *bật* (enabled): trạng thái runtime, seed từ `[voice].enabled` và bị ghi đè bởi
+    ///   toggle trong UI (`data.dir/voice-state.json`, xem module [`super::voice_state`]).
+    ///
+    /// Provider được dựng lúc khởi động khi mục này `true`, kể cả khi `enabled = false` —
+    /// nhờ vậy bật lại từ UI không cần restart.
+    #[must_use]
+    pub fn voice_configured(&self) -> bool {
+        self.validate_voice_fields(&self.voice).is_ok()
     }
 }

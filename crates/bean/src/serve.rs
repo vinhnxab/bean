@@ -25,6 +25,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let mut config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
     let web_enabled = config.web.enabled;
     let telegram_enabled = config.telegram.enabled;
+    // Trạng thái bật/tắt voice persist qua restart (`data.dir/voice-state.json`) —
+    // toggle trong UI thắng seed `[voice].enabled`, giống `llm-state.json` với profile LLM.
+    let data_dir = chat::expand_tilde(&config.data.dir);
+    let _voice_applied = bean_types::config::apply_persisted_voice_state(&mut config, &data_dir);
     if !web_enabled && !telegram_enabled {
         bail!("không có kênh nào được bật: bật web.enabled hoặc telegram.enabled");
     }
@@ -128,15 +132,30 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
 
     let mut web_listener = None;
     if web_enabled {
-        // M27: dựng provider STT/TTS ngay lúc khởi động. `build_speech` trả `None` khi
-        // voice tắt; bật mà thiếu key/model là lỗi khởi động tường minh (D6.4) — không
-        // âm thầm chạy tiếp với nút mic không bao giờ hoạt động.
-        let voice_key = config
-            .resolve_voice_api_key()
-            .context("đọc voice API key thất bại")?;
-        let speech = bean_speech::build_speech(&config, voice_key)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))
-            .context("khởi tạo voice thất bại")?;
+        // M27: dựng provider STT/TTS ngay lúc khởi động khi `[voice]` khai báo đủ —
+        // kể cả khi `enabled = false`, để toggle trong UI (`PATCH /api/voice`) bật lại
+        // không cần restart. Seed bật mà thiếu key/model vẫn là lỗi khởi động tường
+        // minh (D6.4); seed tắt mà thiếu chỉ coi như "chưa cấu hình xong".
+        let voice_key = if config.voice.enabled {
+            config
+                .resolve_voice_api_key()
+                .context("đọc voice API key thất bại")?
+        } else {
+            config.resolve_voice_api_key_lenient()
+        };
+        let speech = match bean_speech::build_speech(&config, voice_key) {
+            Ok(speech) => speech,
+            Err(error) if !config.voice.enabled => {
+                tracing::warn!(
+                    error = %error,
+                    "voice khai báo trong bean.toml nhưng chưa đủ cấu hình — UI sẽ hiện 'chưa cấu hình'"
+                );
+                None
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(error.to_string())).context("khởi tạo voice thất bại");
+            }
+        };
         let state = WebState::new(WebStateDeps {
             config: config.clone(),
             store: store_dyn.clone(),

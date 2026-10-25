@@ -2,6 +2,7 @@ import { Navigate, useParams } from "react-router";
 
 import { PageShell } from "@/components/ui/Page";
 import { ProvidersPanel } from "@/features/settings/ProvidersPanel";
+import { VoicePanel } from "@/features/settings/VoicePanel";
 import { useI18n } from "@/i18n";
 
 /**
@@ -15,13 +16,13 @@ export function SettingsPage() {
   const { t } = useI18n();
   const { section } = useParams<{ section: string }>();
 
-  if (section !== "providers") {
+  if (section !== "providers" && section !== "voice") {
     return <Navigate to="/settings/providers" replace />;
   }
 
   return (
     <PageShell title={t("settings.title")} description={t("settings.description")}>
-      <ProvidersPanel />
+      {section === "voice" ? <VoicePanel /> : <ProvidersPanel />}
     </PageShell>
   );
 }

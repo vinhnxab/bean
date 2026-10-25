@@ -321,6 +321,20 @@ export const vi = {
   "chat.voice.error": "Không nhận dạng được giọng nói. Thử lại.",
   "chat.voice.denied": "Trình duyệt chưa được cấp quyền micro.",
   "chat.voice.unsupported": "Trình duyệt không hỗ trợ ghi âm.",
+  // --- Cài đặt giọng nói (màn /settings/voice) ------------------------------
+  "voice.panelTitle": "Giọng nói (push-to-talk)",
+  "voice.panelHint": "Bật/tắt nút mic trong ô chat. Đổi có hiệu lực ngay, không cần khởi động lại Bean.",
+  "voice.pushToTalk": "Ghi âm bằng micro",
+  "voice.state.on": "Đang bật",
+  "voice.state.off": "Đang tắt",
+  "voice.state.notConfigured": "Chưa cấu hình",
+  "voice.provider": "Nhà cung cấp STT/TTS",
+  "voice.language": "Ngôn ngữ",
+  "voice.toggleAria": "Bật/tắt giọng nói",
+  "voice.notConfiguredHint":
+    "Chưa khai báo đủ phần [voice] trong bean.toml — hoàn thiện cấu hình rồi khởi động lại Bean để bật được từ đây.",
+  "voice.privacyApi": "Bản ghi âm sẽ được gửi lên dịch vụ giọng nói bên ngoài để nhận dạng/phát âm thanh.",
+  "voice.toggleFailed": "Không đổi được trạng thái giọng nói. Thử lại.",
   // --- Cài đặt (màn /settings, nav nằm ở sidebar phải) ---------------------
   "nav.settings": "Cài đặt",
   "settings.title": "Cài đặt",
@@ -330,6 +344,8 @@ export const vi = {
   "settings.closeSidebar": "Đóng cài đặt",
   "settings.section.providers": "Nhà cung cấp",
   "settings.section.providersDescription": "Model và API mà Bean dùng để suy luận.",
+  "settings.section.voice": "Giọng nói",
+  "settings.section.voiceDescription": "Bật/tắt nút mic push-to-talk.",
   "providers.sectionTitle": "Nhà cung cấp",
   "providers.profilesHint":
     "Chọn cấu hình API mà Bean dùng để suy luận. Đổi có hiệu lực ngay cho lượt chat kế tiếp.",

@@ -50,6 +50,7 @@ mod validate;
 mod validate_integrations;
 mod validate_voice;
 mod voice;
+mod voice_state;
 
 pub use agent::{AgentConfig, DataConfig, ProjectConfig, RoleConfig};
 pub use channels::{TelegramConfig, WebConfig};
@@ -71,6 +72,9 @@ pub use products::{
 pub use tools::{SandboxConfig, SecurityConfig, ToolsConfig};
 pub use validate::validate_scope_value;
 pub use voice::VoiceConfig;
+pub use voice_state::{
+    VOICE_STATE_FILE, VoiceState, apply_persisted_voice_state, voice_state_path,
+};
 
 /// Tên file cấu hình mặc định ở gốc workspace.
 pub const DEFAULT_CONFIG_FILE: &str = "bean.toml";

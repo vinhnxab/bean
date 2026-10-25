@@ -104,6 +104,22 @@ impl Config {
         )?;
         Ok(Some(key))
     }
+
+    /// Như [`Config::resolve_voice_api_key`] nhưng **không lỗi khi thiếu**.
+    ///
+    /// Dùng khi seed `[voice].enabled = false` mà cấu hình vẫn đủ: `serve` vẫn dựng
+    /// provider để toggle trong UI bật lại được không cần restart. Thiếu key ở nhánh
+    /// này chỉ có nghĩa "chưa cấu hình xong" (UI hiện tương ứng), không phải lỗi vận hành.
+    #[must_use]
+    pub fn resolve_voice_api_key_lenient(&self) -> Option<SecretString> {
+        if self.voice.provider != SpeechProviderKind::Api {
+            return None;
+        }
+        read_optional(
+            &|name: &str| std::env::var(name).ok(),
+            &self.voice.api_key_env,
+        )
+    }
 }
 impl Config {
     /// Read optional API key for `web_search` from biến môi trường được cấu hình.
