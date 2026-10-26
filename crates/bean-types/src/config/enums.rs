@@ -45,6 +45,19 @@ impl SpeechProviderKind {
             Self::Api => "api",
         }
     }
+
+    /// Parse từ chuỗi cấu hình (`local` | `api`); `None` khi không nhận dạng được.
+    ///
+    /// Dùng cho `PATCH /api/voice` — request giữ provider dạng string để client cũ
+    /// không phải import enum.
+    #[must_use]
+    pub fn from_config_str(value: &str) -> Option<Self> {
+        match value.trim() {
+            "local" => Some(Self::Local),
+            "api" => Some(Self::Api),
+            _ => None,
+        }
+    }
 }
 
 /// Chế độ sandbox cho `run_shell` (agents.md mục 15.2).

@@ -87,15 +87,20 @@ impl Config {
 impl Config {
     /// Đọc credential ElevenLabs của `[voice]` (M27).
     ///
-    /// Trả `None` khi voice tắt hoặc chế độ `local` (không cần key). Khi voice **bật** ở
-    /// chế độ `api` mà biến chưa đặt thì báo lỗi lúc khởi động — người vận hành cần biết
-    /// ngay là chưa có key thay vì tưởng TTS/STT sẽ chạy được.
+    /// Trả `None` khi voice tắt hoặc chế độ `local` (không cần key). Ưu tiên key lưu
+    /// trực tiếp (`[voice].api_key` — từ UI qua `voice-state.json`), sau đó mới đến
+    /// biến môi trường `api_key_env`. Khi voice **bật** ở chế độ `api` mà cả hai
+    /// nguồn đều trống thì báo lỗi lúc khởi động — người vận hành cần biết ngay là
+    /// chưa có key thay vì tưởng TTS/STT sẽ chạy được.
     ///
     /// # Errors
     /// [`ConfigError::MissingEnv`] kể voice bật chế độ `api` mà `api_key_env` thiếu/rỗng.
     pub fn resolve_voice_api_key(&self) -> Result<Option<SecretString>, ConfigError> {
         if !self.voice.enabled || self.voice.provider != SpeechProviderKind::Api {
             return Ok(None);
+        }
+        if let Some(stored) = voice_stored_key(&self.voice) {
+            return Ok(Some(stored));
         }
         let key = read_required(
             &|name: &str| std::env::var(name).ok(),
@@ -115,11 +120,23 @@ impl Config {
         if self.voice.provider != SpeechProviderKind::Api {
             return None;
         }
+        if let Some(stored) = voice_stored_key(&self.voice) {
+            return Some(stored);
+        }
         read_optional(
             &|name: &str| std::env::var(name).ok(),
             &self.voice.api_key_env,
         )
     }
+}
+
+/// Key lưu trực tiếp trong `[voice]` (runtime từ UI/state file); `None` khi rỗng.
+fn voice_stored_key(voice: &VoiceConfig) -> Option<SecretString> {
+    voice
+        .api_key
+        .clone()
+        .filter(|key| !key.trim().is_empty())
+        .map(SecretString::from)
 }
 impl Config {
     /// Read optional API key for `web_search` from biến môi trường được cấu hình.

@@ -123,6 +123,7 @@ fn invalid_semantic_values_are_rejected() {
         ),
         ("[security.sandbox]\ncpus = 0.0\n", "cpus"),
         ("[web]\nsession_ttl_hours = 0\n", "session_ttl_hours"),
+        ("[web]\nui_dir = \"\"\n", "ui_dir"),
         ("[web]\npublic_origin = \"ftp://x\"\n", "public_origin"),
         ("[web]\nbind = \"0.0.0.0:7878\"\n", "allow_remote"),
         (
@@ -167,6 +168,23 @@ fn tilde_is_expanded_in_paths() {
     let loaded = Config::load(&path).unwrap();
     assert_eq!(loaded.data.dir, PathBuf::from(&home).join("bean-test"));
     assert_eq!(loaded.agent.workspace, PathBuf::from("/tmp/ws"));
+}
+
+#[test]
+fn web_ui_dir_is_optional_and_tilde_is_expanded() {
+    // Không đặt ⇒ `None` — binary dùng bản UI nhúng (mục 11.3).
+    let mut config = Config::default();
+    config.validate().unwrap();
+    assert!(config.web_ui_dir().is_none());
+
+    let home = std::env::var("HOME").unwrap();
+    let (_dir, path) =
+        write_config("[web]\nui_dir = \"~/bean/ui\"\n[agent]\nworkspace = \"/tmp/ws\"\n");
+    let loaded = Config::load(&path).unwrap();
+    assert_eq!(
+        loaded.web_ui_dir(),
+        Some(Path::new(&home).join("bean/ui").as_path())
+    );
 }
 
 #[test]

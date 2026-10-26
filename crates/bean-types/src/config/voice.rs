@@ -39,6 +39,14 @@ pub struct VoiceConfig {
     pub piper_model: String,
 
     // ---- Chế độ `api` (ElevenLabs) ----
+    /// API key ElevenLabs lưu trực tiếp, **ưu tiên hơn** `api_key_env`.
+    ///
+    /// Nguồn: `PATCH /api/voice` từ UI persist vào `data.dir/voice-state.json`
+    /// (quyền `0600`) rồi `apply_persisted_voice_state` gán vào đây lúc khởi động.
+    /// Cùng quy ước `[llm] api_key` (M25); `bean.toml` cũng chấp nhận trường này
+    /// nhưng `skip_serializing` để key không bao giờ được serialize ra ngoài.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     /// Tên biến môi trường chứa API key ElevenLabs **riêng**.
     ///
     /// `validate()` từ chối nếu trùng credential của LLM/web search/Telegram/billing/
@@ -69,6 +77,7 @@ impl Default for VoiceConfig {
             whisper_model: String::new(),
             piper_command: "piper".to_string(),
             piper_model: String::new(),
+            api_key: None,
             api_key_env: "ELEVENLABS_API_KEY".to_string(),
             api_base_url: "https://api.elevenlabs.io".to_string(),
             stt_model: "scribe_v2".to_string(),

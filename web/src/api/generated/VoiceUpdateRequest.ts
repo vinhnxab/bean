@@ -8,4 +8,19 @@ export type VoiceUpdateRequest = {
 /**
  * `true` = bật nút mic push-to-talk; `false` = tắt (ẩn mic, chặn STT/TTS).
  */
-enabled: boolean, };
+enabled: boolean, 
+/**
+ * Đổi nhà cung cấp STT/TTS (`local` | `api`); bỏ qua khi `None`. Đổi provider
+ * dựng lại provider ngay lúc chạy — không cần restart.
+ */
+provider?: string | null, 
+/**
+ * Đổi ngôn ngữ STT/TTS (ISO, vd `vi`); bỏ qua khi `None`.
+ */
+language?: string | null, 
+/**
+ * API key cho chế độ `api`. Server persist vào `voice-state.json` (`0600`) và
+ * **không bao giờ trả lại** — GET chỉ báo `api_key_set`. Chuỗi rỗng = ý định xoá
+ * key đã lưu (fallback về biến môi trường nếu còn).
+ */
+api_key?: string | null, };

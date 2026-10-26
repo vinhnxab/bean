@@ -130,4 +130,10 @@ impl Config {
     pub fn voice_configured(&self) -> bool {
         self.validate_voice_fields(&self.voice).is_ok()
     }
+
+    /// Thư mục UI trên đĩa (`[web].ui_dir`, đã mở rộng `~` sau validate) — `None`
+    /// khi không đặt, binary dùng bản UI nhúng (feature `ui`, mục 11.3).
+    pub fn web_ui_dir(&self) -> Option<&std::path::Path> {
+        self.web.ui_dir.as_deref()
+    }
 }

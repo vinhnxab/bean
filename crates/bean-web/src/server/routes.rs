@@ -10,6 +10,8 @@ use axum::Router as AxumRouter;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{any, delete, get, patch, post, put};
+use tower::Layer;
+use tower_http::services::{ServeDir, ServeFile};
 
 use super::guard::security_headers;
 use super::rest_audit_tools::{list_audit, list_mcp_servers, list_tools, set_tool_enabled};
@@ -28,9 +30,9 @@ use super::rest_skills::{
 use super::rest_tasks::{create_task, delete_task, list_tasks, update_task};
 use super::rest_usage_system::{system_info, usage_history};
 use super::rest_voice::{voice_status, voice_synthesize, voice_transcribe, voice_update};
-use super::ui_assets::{api_not_found, ui_handler};
+use super::ui_assets::{StaticRoot, api_not_found, cache_control_layer, ui_handler};
 use super::ws::ws_handler;
-use super::{MAX_BODY_BYTES, WebState, request_guard};
+use super::{MAX_BODY_BYTES, VOICE_TRANSCRIBE_BODY_BYTES, WebState, request_guard};
 /// Dựng toàn bộ axum router; route `/api` được bảo vệ, UI có fallback riêng.
 pub fn build_router(state: WebState) -> AxumRouter {
     let api = AxumRouter::new()
@@ -52,7 +54,12 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/mcp", get(list_mcp_servers))
         .route("/usage", get(usage_history))
         .route("/voice", get(voice_status).patch(voice_update))
-        .route("/voice/transcribe", post(voice_transcribe))
+        // WAV 16 kHz nặng ~32 KB/giây (base64 ~43 KB/s) — nới riêng trần body cho
+        // route này, các route khác vẫn giữ trần chung `MAX_BODY_BYTES`.
+        .route(
+            "/voice/transcribe",
+            post(voice_transcribe).layer(DefaultBodyLimit::max(VOICE_TRANSCRIBE_BODY_BYTES)),
+        )
         .route("/voice/synthesize", post(voice_synthesize))
         .route("/agents", get(list_agents))
         .route("/sessions", get(list_sessions).post(create_session))
@@ -81,9 +88,33 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .method_not_allowed_fallback(api_not_found)
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
 
-    AxumRouter::new()
-        .nest("/api", api)
-        .fallback(ui_handler)
+    // `[web].ui_dir` thắng bản nhúng: người dùng chủ ý trỏ UI sang thư mục riêng
+    // để nâng cấp giao diện không cần build lại binary (mục 11.3).
+    let router = AxumRouter::new().nest("/api", api);
+    let router = match StaticRoot::from_config(&state.config) {
+        StaticRoot::Dir(dir) => {
+            if !dir.is_dir() {
+                tracing::warn!(
+                    dir = %dir.display(),
+                    "web.ui_dir không tồn tại — giao diện từ đĩa sẽ trả 404 cho tới khi thư mục được tạo"
+                );
+            }
+            router
+                .nest_service(
+                    "/assets",
+                    cache_control_layer("public, max-age=31536000, immutable")
+                        .layer(ServeDir::new(dir.join("assets"))),
+                )
+                .fallback_service(
+                    cache_control_layer("no-cache").layer(
+                        ServeDir::new(&dir).fallback(ServeFile::new(dir.join("index.html"))),
+                    ),
+                )
+        }
+        StaticRoot::Embedded | StaticRoot::None => router.fallback(ui_handler),
+    };
+
+    router
         .layer(middleware::from_fn_with_state(state.clone(), request_guard))
         .layer(middleware::from_fn(security_headers))
         .with_state(state)

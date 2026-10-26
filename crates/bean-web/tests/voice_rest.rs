@@ -13,6 +13,8 @@ use std::sync::Arc;
 use axum::Router as AxumRouter;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use bean_core::{Router, RouterDeps};
 use bean_llm::FakeProvider;
 use bean_memory::{MemoryStore, Store};
@@ -48,6 +50,9 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
     // Mirror serve.rs: voice khai báo đủ + seed bật khi fixture dựng provider;
     // `None` = `[voice]` chưa cấu hình (không có model/key nào để dựng).
     config.voice.enabled = speech_enabled;
+    // Tên biến env riêng cho test: nếu dùng mặc định `ELEVENLABS_API_KEY` thì máy dev
+    // tình cờ có biến đó sẽ làm test "api thiếu key → 422" thất bại không xác định.
+    config.voice.api_key_env = "BEAN_TEST_ELEVENLABS_KEY".to_string();
 
     set_password(&config.data.dir, PASSWORD).unwrap();
     let workspace_fs = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
@@ -353,4 +358,126 @@ async fn voice_update_rejected_when_not_configured() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let payload = body_string(response).await;
     assert!(payload.contains("voice_not_configured"), "{payload}");
+}
+
+// Đổi sang provider `api` kèm key từ UI: dựng được ElevenLabs ngay lúc chạy (không cần
+// restart), persist provider/language/key vào state file 0600, và response/GET **không
+// bao giờ** trả key nguyên vẹn về client.
+#[tokio::test]
+async fn voice_update_to_api_persists_key_and_never_echoes_it() {
+    let (dir, app) = fixture(true).await;
+    let token = login(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"provider":"api","api_key":"sk-test-1234abcd"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_string(response).await;
+    assert!(payload.contains("\"provider\":\"api\""), "{payload}");
+    assert!(payload.contains("\"api_key_set\":true"), "{payload}");
+    assert!(!payload.contains("sk-test-1234abcd"), "rò key: {payload}");
+
+    let state_file = dir.path().join("data").join("voice-state.json");
+    let saved = std::fs::read_to_string(&state_file).unwrap();
+    assert!(saved.contains("\"provider\":\"api\""), "{saved}");
+    assert!(saved.contains("\"language\":\"vi\""), "{saved}");
+    assert!(saved.contains("sk-test-1234abcd"), "{saved}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&state_file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "file chứa key phải là 0600");
+    }
+
+    // GET sau khi đổi: provider/api + api_key_set, nhưng vẫn không lộ key.
+    let status = app
+        .clone()
+        .oneshot(get_request("/api/voice", Some(&token)))
+        .await
+        .unwrap();
+    let payload = body_string(status).await;
+    assert!(payload.contains("\"provider\":\"api\""), "{payload}");
+    assert!(payload.contains("\"api_key_set\":true"), "{payload}");
+    assert!(payload.contains("\"enabled\":true"), "{payload}");
+    assert!(!payload.contains("sk-test-1234abcd"), "rò key: {payload}");
+}
+
+// Chọn `api` mà không có key (không nhập, không env) ⇒ từ chối 422 và KHÔNG persist —
+// state trên đĩa không được rơi vào trạng thái nửa vời.
+#[tokio::test]
+async fn voice_update_api_without_key_is_rejected_and_not_persisted() {
+    let (dir, app) = fixture(true).await;
+    let token = login(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"provider":"api"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let payload = body_string(response).await;
+    assert!(payload.contains("voice_not_configured"), "{payload}");
+
+    let state_file = dir.path().join("data").join("voice-state.json");
+    assert!(!state_file.exists(), "không được persist khi dựng thất bại");
+}
+
+#[tokio::test]
+async fn voice_update_rejects_unknown_provider_and_empty_language() {
+    let (_dir, app) = fixture(true).await;
+    let token = login(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"provider":"cloud"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_string(response).await.contains("invalid_provider"));
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"language":"   "}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_string(response).await.contains("invalid_language"));
+}
+
+#[tokio::test]
+async fn transcribe_accepts_body_over_global_limit() {
+    // WAV 16 kHz mono 16-bit ≈ 32 KB/giây; 1,2 MB thô ≈ 1,6 MB sau base64 — vượt
+    // trần chung `MAX_BODY_BYTES` (1 MB) nhưng phải nằm trong trần riêng của route
+    // (`VOICE_TRANSCRIBE_BODY_BYTES`) thay vì bị chặn 413 (lỗi thật khi UI ghi WAV).
+    let (_dir, app) = fixture(true).await;
+    let token = login(&app).await;
+    let audio_b64 = BASE64.encode(vec![0u8; 1_200_000]);
+    let response = app
+        .oneshot(post_json(
+            "/api/voice/transcribe",
+            &token,
+            &format!(r#"{{"audio_base64":"{audio_b64}","mime":"audio/wav"}}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(body_string(response).await.contains("xin chào"));
 }

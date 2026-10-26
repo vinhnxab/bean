@@ -502,8 +502,9 @@ describe("SettingsPage — Providers CRUD", () => {
 });
 
 /**
- * Section Giọng nói: PATCH /api/voice bật/tắt lúc chạy (M27+). Fixture mặc định
- * đã `configured: true, enabled: false` — các test ghi đè bằng `testServer.use`.
+ * Section Giọng nói: PATCH /api/voice bật/tắt **và** cấu hình provider/ngôn ngữ/key
+ * lúc chạy (M27+). Fixture mặc định đã `configured: true, enabled: false` — các test
+ * ghi đè bằng `testServer.use`.
  */
 function renderVoice() {
   return renderManagement(
@@ -516,18 +517,21 @@ function renderVoice() {
 }
 
 describe("SettingsPage — Voice", () => {
-  it("hiển thị trạng thái: provider, ngôn ngữ, switch phản chiếu enabled", async () => {
+  it("hiển thị trạng thái: provider (nhãn Select), ngôn ngữ (input), switch phản chiếu enabled", async () => {
     renderVoice();
 
     expect(await screen.findByText("Giọng nói (push-to-talk)")).toBeInTheDocument();
-    expect(screen.getByText("local")).toBeInTheDocument();
-    expect(screen.getByText("vi")).toBeInTheDocument();
+    // Radix portal nhãn của item được chọn vào trigger kể cả khi đóng.
+    expect(screen.getByRole("combobox", { name: "Nhà cung cấp STT/TTS" })).toHaveTextContent(
+      "Local — whisper + Piper trên máy",
+    );
+    expect(screen.getByDisplayValue("vi")).toBeInTheDocument();
     // Fixture mặc định: configured, đang tắt.
     expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).not.toBeChecked();
     expect(screen.getByText("Đang tắt")).toBeInTheDocument();
   });
 
-  it("bật voice: PATCH đúng body, switch và trạng thái cập nhật theo snapshot server", async () => {
+  it("bật voice: PATCH gửi cả cấu hình đang hiển thị, switch cập nhật theo snapshot server", async () => {
     const user = userEvent.setup();
     let sent: unknown = null;
     testServer.use(
@@ -539,6 +543,7 @@ describe("SettingsPage — Voice", () => {
           provider: "local",
           language: "vi",
           max_speak_chars: 400,
+          api_key_set: false,
         });
       }),
     );
@@ -547,7 +552,9 @@ describe("SettingsPage — Voice", () => {
     const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
     await user.click(toggle);
 
-    await waitFor(() => expect(sent).toEqual({ enabled: true }));
+    // Một PATCH = toàn bộ trạng thái form + giá trị enabled mới (không có key vì
+    // provider local — dán key chỉ áp dụng cho chế độ api).
+    await waitFor(() => expect(sent).toEqual({ enabled: true, provider: "local", language: "vi" }));
     expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
     expect(screen.getByText("Đang bật")).toBeInTheDocument();
   });
@@ -571,7 +578,7 @@ describe("SettingsPage — Voice", () => {
     expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).not.toBeChecked();
   });
 
-  it("chưa cấu hình [voice]: switch bị khoá kèm hướng dẫn, không gửi PATCH", async () => {
+  it("chưa cấu hình [voice]: switch bị khoá, form vẫn hiện để cấu hình tại chỗ", async () => {
     const user = userEvent.setup();
     let patchCount = 0;
     testServer.use(
@@ -582,6 +589,7 @@ describe("SettingsPage — Voice", () => {
           provider: "local",
           language: "vi",
           max_speak_chars: 400,
+          api_key_set: false,
         }),
       ),
       http.patch("/api/voice", () => {
@@ -596,15 +604,18 @@ describe("SettingsPage — Voice", () => {
     expect(screen.getByText("Chưa cấu hình")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Chưa khai báo đủ phần [voice] trong bean.toml — hoàn thiện cấu hình rồi khởi động lại Bean để bật được từ đây.",
+        "Chưa cấu hình đủ — chọn nhà cung cấp và nhập key (hoặc khai báo model local trong bean.toml) ngay tại đây, không cần khởi động lại Bean.",
       ),
     ).toBeInTheDocument();
+    // Form cấu hình vẫn hiện được (đó là cách cấu hình chính); nút Lưu bị khoá vì
+    // form chưa dirty (provider/language vẫn bằng seed) — không có gì để lưu.
+    expect(screen.getByRole("button", { name: "Lưu và bật" })).toBeDisabled();
     // disabled ⇒ không thể click; guard phòng hờ: PATCH không bao giờ được gọi.
     await user.click(toggle);
     await waitFor(() => expect(patchCount).toBe(0));
   });
 
-  it("provider api: hiện cảnh báo privacy bản ghi âm gửi lên dịch vụ ngoài", async () => {
+  it("provider api: hiện cảnh báo privacy và ô nhập key", async () => {
     testServer.use(
       http.get("/api/voice", () =>
         HttpResponse.json({
@@ -613,6 +624,7 @@ describe("SettingsPage — Voice", () => {
           provider: "api",
           language: "vi",
           max_speak_chars: 400,
+          api_key_set: true,
         }),
       ),
     );
@@ -620,7 +632,98 @@ describe("SettingsPage — Voice", () => {
 
     expect(await screen.findByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
     expect(
-      screen.getByText("Bản ghi âm sẽ được gửi lên dịch vụ giọng nói bên ngoài để nhận dạng/phát âm thanh."),
+      screen.getByText("Bản ghi âm sẽ được gửi lên ElevenLabs để nhận dạng/phát âm thanh."),
     ).toBeInTheDocument();
+    // Key đã lưu: ô nhập hiện placeholder "đã lưu", KHÔNG bao giờ chứa giá trị key.
+    expect(screen.getByLabelText("API key ElevenLabs")).toHaveAttribute(
+      "placeholder",
+      "Đã lưu key — để trống giữ nguyên",
+    );
+  });
+
+  it("đổi sang ElevenLabs, dán key rồi Lưu và bật: PATCH đúng body, key không bị echo", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    testServer.use(
+      http.get("/api/voice", () =>
+        HttpResponse.json({
+          enabled: false,
+          configured: false,
+          provider: "local",
+          language: "vi",
+          max_speak_chars: 400,
+          api_key_set: false,
+        }),
+      ),
+      http.patch("/api/voice", async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({
+          enabled: true,
+          configured: true,
+          provider: "api",
+          language: "vi",
+          max_speak_chars: 400,
+          api_key_set: true,
+        });
+      }),
+    );
+    renderVoice();
+
+    const providerSelect = await screen.findByRole("combobox", { name: "Nhà cung cấp STT/TTS" });
+    providerSelect.focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("option", { name: "ElevenLabs API (đám mây)" }));
+
+    await user.type(screen.getByLabelText("API key ElevenLabs"), "sk-test-1234abcd");
+    await user.click(screen.getByRole("button", { name: "Lưu và bật" }));
+
+    await waitFor(() =>
+      expect(sent).toEqual({
+        enabled: true,
+        provider: "api",
+        language: "vi",
+        api_key: "sk-test-1234abcd",
+      }),
+    );
+    // Snapshot server (api_key_set: true) cập nhật switch và placeholder key.
+    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
+    expect(screen.getByLabelText("API key ElevenLabs")).toHaveAttribute(
+      "placeholder",
+      "Đã lưu key — để trống giữ nguyên",
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Đã lưu cấu hình giọng nói.");
+  });
+
+  it("chế độ api chưa có key: nút Lưu và công tắc bị khoá, không gửi PATCH", async () => {
+    const user = userEvent.setup();
+    let patchCount = 0;
+    testServer.use(
+      http.get("/api/voice", () =>
+        HttpResponse.json({
+          enabled: false,
+          configured: true,
+          provider: "local",
+          language: "vi",
+          max_speak_chars: 400,
+          api_key_set: false,
+        }),
+      ),
+      http.patch("/api/voice", () => {
+        patchCount += 1;
+        return HttpResponse.json({ code: "voice_not_configured", message: "thiếu key" }, { status: 422 });
+      }),
+    );
+    renderVoice();
+
+    const providerSelect = await screen.findByRole("combobox", { name: "Nhà cung cấp STT/TTS" });
+    providerSelect.focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("option", { name: "ElevenLabs API (đám mây)" }));
+
+    expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
+    const toggle = screen.getByRole("switch", { name: "Bật/tắt giọng nói" });
+    expect(toggle).toBeDisabled();
+    await user.click(toggle);
+    await waitFor(() => expect(patchCount).toBe(0));
   });
 });

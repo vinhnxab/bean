@@ -312,6 +312,7 @@ export const en: Record<MessageKey, string> = {
   "chat.voice.stop": "Stop recording",
   "chat.voice.transcribing": "Transcribing speech…",
   "chat.voice.error": "Could not transcribe the audio. Try again.",
+  "chat.voice.noAudio": "No audio was captured — check your microphone.",
   "chat.voice.denied": "Microphone permission was denied.",
   "chat.voice.unsupported": "This browser does not support audio recording.",
   // --- Voice settings (/settings/voice) ------------------------------------
@@ -323,12 +324,26 @@ export const en: Record<MessageKey, string> = {
   "voice.state.off": "Off",
   "voice.state.notConfigured": "Not configured",
   "voice.provider": "STT/TTS provider",
+  "voice.providerLocal": "Local — whisper + Piper on this machine",
+  "voice.providerApi": "ElevenLabs API (cloud)",
+  "voice.providerHint":
+    "Where recordings are transcribed and spoken. Changing rebuilds the provider immediately — no restart.",
   "voice.language": "Language",
+  "voice.languageHint": "ISO language code for STT/TTS, e.g. `vi` or `en`.",
+  "voice.languagePlaceholder": "vi",
+  "voice.apiKey": "ElevenLabs API key",
+  "voice.apiKeyStored": "Key stored — leave empty to keep it",
+  "voice.apiKeyPastePlaceholder": "Paste your ElevenLabs API key",
+  "voice.apiKeyRequiredHint":
+    "The ElevenLabs mode needs an API key — paste it above (the server stores it in a 0600 file and never returns it) or set the environment variable.",
   "voice.toggleAria": "Toggle voice",
   "voice.notConfiguredHint":
-    "The [voice] section in bean.toml is incomplete — finish the configuration and restart Bean to enable it here.",
-  "voice.privacyApi": "Recordings are sent to an external speech service for transcription and synthesis.",
-  "voice.toggleFailed": "Could not change the voice state. Try again.",
+    "Voice is not fully configured — pick a provider and enter a key (or declare local models in bean.toml) right here, no restart needed.",
+  "voice.privacyApi": "Recordings are sent to ElevenLabs for transcription and synthesis.",
+  "voice.save": "Save",
+  "voice.saveAndEnable": "Save & enable",
+  "voice.saved": "Voice settings saved.",
+  "voice.updateFailed": "Could not save the voice settings. Try again.",
   // --- Settings (/settings, nav lives in the right sidebar) ----------------
   "nav.settings": "Settings",
   "settings.title": "Settings",
@@ -339,7 +354,7 @@ export const en: Record<MessageKey, string> = {
   "settings.section.providers": "Providers",
   "settings.section.providersDescription": "The model and API Bean reasons with.",
   "settings.section.voice": "Voice",
-  "settings.section.voiceDescription": "Toggle the push-to-talk mic button.",
+  "settings.section.voiceDescription": "Configure voice: toggle the mic button, pick the provider.",
   "providers.sectionTitle": "Providers",
   "providers.profilesHint":
     "Choose which API setup Bean uses for reasoning. Changes take effect on the next chat turn.",

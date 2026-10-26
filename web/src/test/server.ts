@@ -195,6 +195,7 @@ export const testServer = setupServer(
       provider: "local",
       language: "vi",
       max_speak_chars: 400,
+      api_key_set: false,
     }),
   ),
 );

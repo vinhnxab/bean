@@ -8,8 +8,8 @@
  * `request_guard` bắt buộc mọi request thay đổi dữ liệu phải có
  * `Content-Type: application/json` (mục 15.7 — chống CSRF). Giữ nguyên bất biến đó
  * quan trọng hơn việc tiết kiệm ~33% băng thông: clip push-to-talk chỉ dài vài
- * giây. Trần 1 MB của `MAX_BODY_BYTES` giới hạn audio thô vào khoảng 750 KB — quá
- * đủ cho một câu nói.
+ * giây. Route `/voice/transcribe` được nới riêng lên `VOICE_TRANSCRIBE_BODY_BYTES`
+ * (~3 phút WAV 16 kHz) vì bản PCM mới của client nặng hơn webm/opus cũ đáng kể.
  */
 export type VoiceTranscribeRequest = { 
 /**

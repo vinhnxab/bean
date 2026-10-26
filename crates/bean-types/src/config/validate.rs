@@ -276,6 +276,16 @@ impl Config {
         if self.web.session_ttl_hours == 0 {
             return Err(invalid("web.session_ttl_hours phải > 0"));
         }
+        if self
+            .web
+            .ui_dir
+            .as_ref()
+            .is_some_and(|ui_dir| ui_dir.as_os_str().is_empty())
+        {
+            return Err(invalid(
+                "web.ui_dir rỗng — xoá hẳn mục này để dùng bản UI nhúng trong binary",
+            ));
+        }
         if self.web.trust_proxy {
             tracing::warn!(
                 "web.trust_proxy = true: chỉ dùng khi Bean nằm sau reverse proxy tin cậy (D4.3)"
@@ -348,6 +358,9 @@ impl Config {
         }
         self.agent.workspace = expand_tilde(&self.agent.workspace)?;
         self.data.dir = expand_tilde(&self.data.dir)?;
+        if let Some(ui_dir) = self.web.ui_dir.as_ref() {
+            self.web.ui_dir = Some(expand_tilde(ui_dir)?);
+        }
         Ok(())
     }
 }

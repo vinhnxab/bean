@@ -1,13 +1,19 @@
 import { MicIcon, SquareIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "@/api/client";
+import { ApiRequestError, api } from "@/api/client";
 import { useI18n } from "@/i18n";
-import { blobToBase64 } from "@/lib/audio";
+import { blobToBase64, WavRecorder } from "@/lib/audio";
 import { cn } from "@/lib/utils";
 
 /** Trạng thái nút mic: rảnh → ghi âm → đang nhận dạng → rảnh. */
 type Phase = "idle" | "recording" | "transcribing";
+
+/**
+ * Trần thời lượng một lần ghi (giây): WAV 16 kHz nặng ~32 KB/giây nên ghi quên
+ * tắt sẽ phình payload vượt trần body của server — tự dừng thay vì để STT hỏng 413.
+ */
+const MAX_RECORD_SECONDS = 60;
 
 export type VoiceButtonProps = {
   /** Vô hiệu hoá khi socket chưa kết nối (không gửi được lượt nào). */
@@ -35,49 +41,39 @@ export function VoiceButton({ disabled, onResult }: VoiceButtonProps) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const recorderRef = useRef<WavRecorder | null>(null);
 
-  const releaseStream = useCallback(() => {
-    for (const track of streamRef.current?.getTracks() ?? []) track.stop();
-    streamRef.current = null;
+  const releaseRecorder = useCallback(() => {
+    recorderRef.current?.cancel();
+    recorderRef.current = null;
   }, []);
 
-  // Rời màn hình giữa lúc ghi: dừng recorder và nhả micro. Gỡ `onstop` trước khi
-  // `stop()` để không gọi `setState`/`onResult` trên component đã unmount.
-  useEffect(
-    () => () => {
-      const recorder = recorderRef.current;
-      if (recorder) {
-        recorder.onstop = null;
-        if (recorder.state !== "inactive") recorder.stop();
-      }
-      releaseStream();
-    },
-    [releaseStream],
-  );
+  // Rời màn hình giữa lúc ghi: nhả micro, bỏ dữ liệu. `cancel()` idempotent nên
+  // an toàn cả khi đã `stop()` trước đó.
+  useEffect(() => releaseRecorder, [releaseRecorder]);
 
   const transcribe = useCallback(
-    async (mime: string) => {
-      const blob = new Blob(chunksRef.current, { type: mime || "audio/webm" });
-      chunksRef.current = [];
-      if (blob.size === 0) {
+    async (blob: Blob) => {
+      // WAV chỉ có header 44 byte = không capture được sample nào (context bị
+      // suspend, thiết bị im lặng tuyệt đối…) — báo lỗi riêng thay vì hỏi STT.
+      if (blob.size <= 44) {
         setPhase("idle");
+        setError(t("chat.voice.noAudio"));
         return;
       }
       try {
         const audio_base64 = await blobToBase64(blob);
-        const result = await api.transcribe({
-          audio_base64,
-          mime: blob.type || "audio/webm",
-        });
+        const result = await api.transcribe({ audio_base64, mime: "audio/wav" });
         setPhase("idle");
         const text = result.text.trim();
         if (text) onResult(text);
-      } catch {
+      } catch (error) {
+        // Chi tiết từ server (timeout, binary/model lỗi, mã thoát…) giúp tự chẩn
+        // đoán thay vì một câu chung chung; console giữ nguyên lỗi đầy đủ.
+        console.error("voice transcribe failed", error);
         setPhase("idle");
-        setError(t("chat.voice.error"));
+        const detail = error instanceof ApiRequestError && error.message ? error.message : null;
+        setError(detail ? `${t("chat.voice.error")} — ${detail}` : t("chat.voice.error"));
       }
     },
     [onResult, t],
@@ -85,39 +81,30 @@ export function VoiceButton({ disabled, onResult }: VoiceButtonProps) {
 
   const start = useCallback(async () => {
     setError(null);
-    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
       setError(t("chat.voice.unsupported"));
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      chunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        void transcribe(recorder.mimeType);
-      };
-      recorderRef.current = recorder;
-      recorder.start();
+      // Ghi WAV PCM 16 kHz: `whisper-cli` (không build kèm FFmpeg) chỉ giải mã
+      // được WAV — `MediaRecorder` mặc định ghi webm/opus làm STT luôn thất bại.
+      recorderRef.current = await WavRecorder.start();
       setPhase("recording");
     } catch {
       // Người dùng từ chối quyền, hoặc không có thiết bị ghi âm.
-      releaseStream();
+      releaseRecorder();
       setError(t("chat.voice.denied"));
     }
-  }, [releaseStream, t, transcribe]);
+  }, [releaseRecorder, t]);
 
   const stop = useCallback(() => {
     const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
+    if (recorder) {
+      recorderRef.current = null;
       setPhase("transcribing");
-      recorder.stop();
+      void transcribe(recorder.stop());
     }
-    releaseStream();
-  }, [releaseStream]);
+  }, [transcribe]);
 
   const toggle = useCallback(() => {
     if (phase === "recording") {
@@ -126,6 +113,13 @@ export function VoiceButton({ disabled, onResult }: VoiceButtonProps) {
       void start();
     }
   }, [phase, start, stop]);
+
+  // Ghi quá trần thời lượng: tự dừng (timer chỉ sống khi đang ghi, hủy khi stop).
+  useEffect(() => {
+    if (phase !== "recording") return;
+    const timer = setTimeout(stop, MAX_RECORD_SECONDS * 1000);
+    return () => clearTimeout(timer);
+  }, [phase, stop]);
 
   const recording = phase === "recording";
   const label = recording
@@ -154,7 +148,7 @@ export function VoiceButton({ disabled, onResult }: VoiceButtonProps) {
         {recording ? <SquareIcon className="size-3.5 fill-current" /> : <MicIcon className="size-4" />}
       </button>
       {error ? (
-        <p className="max-w-[9rem] text-center text-xs text-alert" role="alert">
+        <p className="max-w-[14rem] text-center text-xs text-alert" role="alert">
           {error}
         </p>
       ) : null}

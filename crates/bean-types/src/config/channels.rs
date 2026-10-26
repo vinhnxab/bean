@@ -1,6 +1,7 @@
 //! Section `[web]` và `[telegram]`.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,17 @@ pub struct WebConfig {
     pub user_id: String,
     /// Tin `X-Forwarded-For`/`X-Real-IP` (chỉ khi chạy sau reverse proxy tin cậy — D4.3).
     pub trust_proxy: bool,
+    /// Phục vụ UI từ thư mục trên đĩa thay vì bản nhúng trong binary (tuỳ chọn).
+    ///
+    /// Đặt đường dẫn (hỗ trợ `~`) thì Bean phục vụ thư mục `web/dist` từ đĩa bằng
+    /// `tower_http::services::ServeDir` — nâng cấp giao diện chỉ cần build lại web
+    /// (`pnpm build`) rồi chép thư mục mới, không phải build lại binary Rust.
+    /// Không đặt thì dùng bản UI nhúng trong binary (mặc định giữ deploy 1 artifact).
+    ///
+    /// UI trên đĩa phải khớp phiên bản binary (kiểu API sinh bởi ts-rs, mục 11);
+    /// nghi lệch thì đối chiếu `/api/status` với bản UI đang phục vụ.
+    #[serde(default)]
+    pub ui_dir: Option<PathBuf>,
 }
 
 /// Định danh web mặc định; giữ hành vi một-người-dùng của v1 khi không khai báo.
@@ -56,6 +68,7 @@ impl Default for WebConfig {
             session_ttl_hours: 168,
             trust_proxy: false,
             user_id: default_web_user(),
+            ui_dir: None,
         }
     }
 }

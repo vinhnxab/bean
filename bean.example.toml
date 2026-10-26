@@ -304,6 +304,9 @@ allow_remote = false
 session_ttl_hours = 168
 # trust_proxy = false                # bật CHỈ khi chạy sau reverse proxy tin cậy:
                                      # khi đó giới hạn tần suất đăng nhập dùng X-Forwarded-For
+# ui_dir = "~/bean/ui"               # phục vụ UI từ thư mục đĩa thay bản nhúng trong
+                                     # binary — nâng cấp UI chỉ cần `pnpm build` rồi chép
+                                     # `web/dist` sang đây, không phải build lại Rust
 
 [telegram]
 enabled = false

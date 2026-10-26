@@ -18,12 +18,45 @@ use super::*;
 /// Tên file trạng thái trong `data.dir`.
 pub const VOICE_STATE_FILE: &str = "voice-state.json";
 
-/// Bật/tắt voice đang có hiệu lực, persist qua restart.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Trạng thái runtime của voice, persist qua restart.
+///
+/// Ngoài `enabled` (M27), lưu thêm lựa chọn nhà cung cấp/ngôn ngữ/API key mà người
+/// dùng đặt từ UI (`PATCH /api/voice`) — mọi trường đều optional: `None` = giữ seed
+/// từ `bean.toml`. File chứa API key nên `save` luôn đặt quyền `0600`.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VoiceState {
     /// `true` = mic push-to-talk hiện trong UI, STT/TTS nhận request; `false` = ngược lại.
     pub enabled: bool,
+    /// Nhà cung cấp STT/TTS người dùng chọn; `None` = giữ seed `[voice].provider`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<SpeechProviderKind>,
+    /// Ngôn ngữ STT/TTS (ISO, vd `vi`); `None` = giữ seed `[voice].language`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// API key chế độ `api` (ưu tiên hơn `api_key_env`); `None` = resolve từ env.
+    /// **Không bao giờ in qua `Debug`** — impl thủ công bên dưới đã che.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+// Derive `Debug` sẽ in key nguyên vẹn khi ai đó log state — impl thủ công chỉ trả
+// độ dài dạng `Some(48 ký tự)` để debug vẫn biết key đã có hay chưa.
+impl std::fmt::Debug for VoiceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VoiceState")
+            .field("enabled", &self.enabled)
+            .field("provider", &self.provider)
+            .field("language", &self.language)
+            .field(
+                "api_key",
+                &self
+                    .api_key
+                    .as_ref()
+                    .map(|key| format!("{} ký tự", key.chars().count())),
+            )
+            .finish()
+    }
 }
 
 impl VoiceState {
@@ -72,11 +105,21 @@ impl VoiceState {
 
     /// Áp state vào config sau khi kiểm tra.
     ///
-    /// `enabled = true` chỉ nhận khi `[voice]` còn khai báo đủ (`voice_configured`) —
-    /// state của phiên cũ không "hồi sinh" một `[voice]` đã bị xoá/thiếu model; khi đó
-    /// trả `false` và giữ nguyên config (warn).
+    /// Lựa chọn provider/ngôn ngữ/key từ UI được áp **trước** khi xét `enabled`:
+    /// `enabled = true` chỉ nhận khi `[voice]` sau khi gộp còn khai báo đủ
+    /// (`voice_configured`) — state của phiên cũ không "hồi sinh" một `[voice]`
+    /// đã bị xoá/thiếu model; khi đó trả `false` và giữ nguyên cờ `enabled` seed.
     #[must_use]
     pub fn apply_to_config(&self, config: &mut Config) -> bool {
+        if let Some(provider) = self.provider {
+            config.voice.provider = provider;
+        }
+        if let Some(language) = &self.language {
+            config.voice.language = language.clone();
+        }
+        if let Some(api_key) = &self.api_key {
+            config.voice.api_key = Some(api_key.clone());
+        }
         if self.enabled && !config.voice_configured() {
             tracing::warn!(
                 "voice-state bật nhưng `[voice]` thiếu cấu hình — bỏ qua, dùng seed từ bean.toml"
@@ -127,15 +170,84 @@ mod tests {
         tempfile::tempdir().unwrap()
     }
 
+    /// State tối giản (chỉ `enabled`) — hình dạng file cũ trước khi mở rộng.
+    fn state(enabled: bool) -> VoiceState {
+        VoiceState {
+            enabled,
+            provider: None,
+            language: None,
+            api_key: None,
+        }
+    }
+
     #[test]
     fn roundtrip_save_load() {
         let dir = temp_dir();
         let path = state_path(dir.path());
-        VoiceState::save(&path, &VoiceState { enabled: false }).unwrap();
-        assert_eq!(VoiceState::load(&path), Some(VoiceState { enabled: false }));
+        VoiceState::save(&path, &state(false)).unwrap();
+        assert_eq!(VoiceState::load(&path), Some(state(false)));
 
-        VoiceState::save(&path, &VoiceState { enabled: true }).unwrap();
-        assert_eq!(VoiceState::load(&path), Some(VoiceState { enabled: true }));
+        VoiceState::save(&path, &state(true)).unwrap();
+        assert_eq!(VoiceState::load(&path), Some(state(true)));
+    }
+
+    #[test]
+    fn roundtrip_keeps_provider_language_and_key() {
+        let dir = temp_dir();
+        let path = state_path(dir.path());
+        let saved = VoiceState {
+            enabled: true,
+            provider: Some(SpeechProviderKind::Api),
+            language: Some("vi".into()),
+            api_key: Some("sk-secret-key-abcd".into()),
+        };
+        VoiceState::save(&path, &saved).unwrap();
+        assert_eq!(VoiceState::load(&path).as_ref(), Some(&saved));
+    }
+
+    #[test]
+    fn legacy_file_with_only_enabled_still_loads() {
+        let dir = temp_dir();
+        let path = state_path(dir.path());
+        std::fs::write(&path, r#"{"enabled":true}"#).unwrap();
+        assert_eq!(VoiceState::load(&path), Some(state(true)));
+    }
+
+    #[test]
+    fn save_sets_owner_only_permissions() {
+        let dir = temp_dir();
+        let path = state_path(dir.path());
+        VoiceState::save(
+            &path,
+            &VoiceState {
+                enabled: false,
+                provider: Some(SpeechProviderKind::Api),
+                language: None,
+                api_key: Some("sk-x".into()),
+            },
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "file chứa key phải là 0600");
+        }
+    }
+
+    #[test]
+    fn debug_never_shows_api_key() {
+        let with_key = VoiceState {
+            enabled: true,
+            provider: Some(SpeechProviderKind::Api),
+            language: None,
+            api_key: Some("sk-never-leak-please".into()),
+        };
+        let rendered = format!("{with_key:?}");
+        assert!(!rendered.contains("sk-never-leak-please"), "{rendered}");
+        // Độ dài kỳ vọng tính từ chính key để không lệch khi sửa chuỗi sample.
+        let expected = format!("{} ký tự", "sk-never-leak-please".chars().count());
+        assert!(rendered.contains(&expected), "{rendered}");
     }
 
     #[test]
@@ -157,12 +269,12 @@ mod tests {
         // Config mặc định: `[voice]` không có model → chưa cấu hình đủ.
         let mut config = Config::default();
         assert!(!config.voice_configured());
-        let applied = VoiceState { enabled: true }.apply_to_config(&mut config);
+        let applied = state(true).apply_to_config(&mut config);
         assert!(!applied);
         assert!(!config.voice.enabled);
 
         // Tắt thì luôn nhận được — không hồi sinh gì cả.
-        let applied = VoiceState { enabled: false }.apply_to_config(&mut config);
+        let applied = state(false).apply_to_config(&mut config);
         assert!(applied);
         assert!(!config.voice.enabled);
     }
@@ -175,8 +287,41 @@ mod tests {
         config.voice.piper_model = "/tmp/piper.onnx".into();
         assert!(config.voice_configured());
 
-        let applied = VoiceState { enabled: true }.apply_to_config(&mut config);
+        let applied = state(true).apply_to_config(&mut config);
         assert!(applied);
         assert!(config.voice.enabled);
+    }
+
+    #[test]
+    fn apply_overrides_provider_language_and_key() {
+        let mut config = Config::default();
+        let saved = VoiceState {
+            enabled: false,
+            provider: Some(SpeechProviderKind::Api),
+            language: Some("en".into()),
+            api_key: Some("sk-from-ui".into()),
+        };
+        assert!(saved.apply_to_config(&mut config));
+        assert_eq!(config.voice.provider, SpeechProviderKind::Api);
+        assert_eq!(config.voice.language, "en");
+        assert_eq!(config.voice.api_key.as_deref(), Some("sk-from-ui"));
+        // `enabled = false` áp bình thường.
+        assert!(!config.voice.enabled);
+    }
+
+    #[test]
+    fn apply_stored_key_makes_api_configured() {
+        // Key nằm trong state file (đặt từ UI) phải đủ để `voice_configured` — người
+        // dùng không cần đặt biến môi trường khi đã nhập key từ UI.
+        let mut config = Config::default();
+        assert!(!config.voice_configured());
+        let saved = VoiceState {
+            enabled: false,
+            provider: Some(SpeechProviderKind::Api),
+            language: None,
+            api_key: Some("sk-from-ui".into()),
+        };
+        assert!(saved.apply_to_config(&mut config));
+        assert!(config.voice_configured());
     }
 }

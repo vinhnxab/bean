@@ -1053,8 +1053,9 @@ pub struct VoiceStatusResponse {
     /// Voice đang có hiệu lực lúc chạy: provider đã dựng được **và** chưa bị tắt qua UI.
     /// UI dùng để ẩn/hiện nút mic.
     pub enabled: bool,
-    /// Provider STT/TTS đã dựng được lúc khởi động (`[voice]` khai báo đủ). `false` ⇒
-    /// `PATCH /api/voice` bị chặn — cần hoàn thiện `[voice]` trong `bean.toml` rồi restart.
+    /// Provider STT/TTS đã dựng được và sẵn sàng. `false` ⇒ UI hiện form cấu hình
+    /// thay vì toggle — hoàn thiện tại chỗ (provider/key/ngôn ngữ) rồi `PATCH` lại,
+    /// không cần sửa `bean.toml` hay khởi động lại.
     pub configured: bool,
     /// Nhà cung cấp STT/TTS (`local` | `api`).
     pub provider: String,
@@ -1062,6 +1063,9 @@ pub struct VoiceStatusResponse {
     pub language: String,
     /// Trần ký tự gửi đi TTS.
     pub max_speak_chars: u32,
+    /// `true` khi chế độ `api` đã có API key (lưu runtime qua UI hoặc biến môi trường).
+    /// Chỉ cờ trạng thái — không bao giờ trả giá trị key.
+    pub api_key_set: bool,
 }
 
 /// `PATCH /api/voice` — bật/tắt voice runtime (màn Cài đặt), persist qua restart ở
@@ -1072,6 +1076,18 @@ pub struct VoiceStatusResponse {
 pub struct VoiceUpdateRequest {
     /// `true` = bật nút mic push-to-talk; `false` = tắt (ẩn mic, chặn STT/TTS).
     pub enabled: bool,
+    /// Đổi nhà cung cấp STT/TTS (`local` | `api`); bỏ qua khi `None`. Đổi provider
+    /// dựng lại provider ngay lúc chạy — không cần restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Đổi ngôn ngữ STT/TTS (ISO, vd `vi`); bỏ qua khi `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// API key cho chế độ `api`. Server persist vào `voice-state.json` (`0600`) và
+    /// **không bao giờ trả lại** — GET chỉ báo `api_key_set`. Chuỗi rỗng = ý định xoá
+    /// key đã lưu (fallback về biến môi trường nếu còn).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 /// `POST /api/voice/transcribe` — audio gửi lên **dạng base64 trong JSON**.
@@ -1081,8 +1097,8 @@ pub struct VoiceUpdateRequest {
 /// `request_guard` bắt buộc mọi request thay đổi dữ liệu phải có
 /// `Content-Type: application/json` (mục 15.7 — chống CSRF). Giữ nguyên bất biến đó
 /// quan trọng hơn việc tiết kiệm ~33% băng thông: clip push-to-talk chỉ dài vài
-/// giây. Trần 1 MB của `MAX_BODY_BYTES` giới hạn audio thô vào khoảng 750 KB — quá
-/// đủ cho một câu nói.
+/// giây. Route `/voice/transcribe` được nới riêng lên `VOICE_TRANSCRIBE_BODY_BYTES`
+/// (~3 phút WAV 16 kHz) vì bản PCM mới của client nặng hơn webm/opus cũ đáng kể.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]

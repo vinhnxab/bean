@@ -319,6 +319,7 @@ export const vi = {
   "chat.voice.stop": "Dừng ghi âm",
   "chat.voice.transcribing": "Đang nhận dạng giọng nói…",
   "chat.voice.error": "Không nhận dạng được giọng nói. Thử lại.",
+  "chat.voice.noAudio": "Không ghi được âm thanh nào — kiểm tra micro.",
   "chat.voice.denied": "Trình duyệt chưa được cấp quyền micro.",
   "chat.voice.unsupported": "Trình duyệt không hỗ trợ ghi âm.",
   // --- Cài đặt giọng nói (màn /settings/voice) ------------------------------
@@ -329,12 +330,26 @@ export const vi = {
   "voice.state.off": "Đang tắt",
   "voice.state.notConfigured": "Chưa cấu hình",
   "voice.provider": "Nhà cung cấp STT/TTS",
+  "voice.providerLocal": "Local — whisper + Piper trên máy",
+  "voice.providerApi": "ElevenLabs API (đám mây)",
+  "voice.providerHint":
+    "Chọn nơi xử lý ghi âm và phát âm thanh. Đổi là dựng lại provider ngay, không cần khởi động lại.",
   "voice.language": "Ngôn ngữ",
+  "voice.languageHint": "Mã ngôn ngữ ISO cho STT/TTS, ví dụ `vi` hoặc `en`.",
+  "voice.languagePlaceholder": "vi",
+  "voice.apiKey": "API key ElevenLabs",
+  "voice.apiKeyStored": "Đã lưu key — để trống giữ nguyên",
+  "voice.apiKeyPastePlaceholder": "Dán API key ElevenLabs",
+  "voice.apiKeyRequiredHint":
+    "Chế độ ElevenLabs cần API key — dán key vào ô trên (server lưu file 0600, không bao giờ trả lại) hoặc đặt biến môi trường.",
   "voice.toggleAria": "Bật/tắt giọng nói",
   "voice.notConfiguredHint":
-    "Chưa khai báo đủ phần [voice] trong bean.toml — hoàn thiện cấu hình rồi khởi động lại Bean để bật được từ đây.",
-  "voice.privacyApi": "Bản ghi âm sẽ được gửi lên dịch vụ giọng nói bên ngoài để nhận dạng/phát âm thanh.",
-  "voice.toggleFailed": "Không đổi được trạng thái giọng nói. Thử lại.",
+    "Chưa cấu hình đủ — chọn nhà cung cấp và nhập key (hoặc khai báo model local trong bean.toml) ngay tại đây, không cần khởi động lại Bean.",
+  "voice.privacyApi": "Bản ghi âm sẽ được gửi lên ElevenLabs để nhận dạng/phát âm thanh.",
+  "voice.save": "Lưu",
+  "voice.saveAndEnable": "Lưu và bật",
+  "voice.saved": "Đã lưu cấu hình giọng nói.",
+  "voice.updateFailed": "Không lưu được cấu hình giọng nói. Thử lại.",
   // --- Cài đặt (màn /settings, nav nằm ở sidebar phải) ---------------------
   "nav.settings": "Cài đặt",
   "settings.title": "Cài đặt",
@@ -345,7 +360,7 @@ export const vi = {
   "settings.section.providers": "Nhà cung cấp",
   "settings.section.providersDescription": "Model và API mà Bean dùng để suy luận.",
   "settings.section.voice": "Giọng nói",
-  "settings.section.voiceDescription": "Bật/tắt nút mic push-to-talk.",
+  "settings.section.voiceDescription": "Cấu hình giọng nói: bật/tắt nút mic, chọn nhà cung cấp.",
   "providers.sectionTitle": "Nhà cung cấp",
   "providers.profilesHint":
     "Chọn cấu hình API mà Bean dùng để suy luận. Đổi có hiệu lực ngay cho lượt chat kế tiếp.",

@@ -13,8 +13,9 @@ export type VoiceStatusResponse = {
  */
 enabled: boolean, 
 /**
- * Provider STT/TTS đã dựng được lúc khởi động (`[voice]` khai báo đủ). `false` ⇒
- * `PATCH /api/voice` bị chặn — cần hoàn thiện `[voice]` trong `bean.toml` rồi restart.
+ * Provider STT/TTS đã dựng được và sẵn sàng. `false` ⇒ UI hiện form cấu hình
+ * thay vì toggle — hoàn thiện tại chỗ (provider/key/ngôn ngữ) rồi `PATCH` lại,
+ * không cần sửa `bean.toml` hay khởi động lại.
  */
 configured: boolean, 
 /**
@@ -28,4 +29,9 @@ language: string,
 /**
  * Trần ký tự gửi đi TTS.
  */
-max_speak_chars: number, };
+max_speak_chars: number, 
+/**
+ * `true` khi chế độ `api` đã có API key (lưu runtime qua UI hoặc biến môi trường).
+ * Chỉ cờ trạng thái — không bao giờ trả giá trị key.
+ */
+api_key_set: boolean, };

@@ -1990,3 +1990,164 @@ async fn llm_provider_crud_is_readonly_without_config_path() {
     let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(error["code"], "config_readonly");
 }
+
+// --- `[web].ui_dir` (mục 11.3): UI từ thư mục đĩa thay bản nhúng ------------
+
+/// Tạo thư mục UI giả lập `web/dist`: `index.html` + một file asset có hash.
+fn write_fake_dist(dir: &Path) {
+    std::fs::create_dir_all(dir.join("assets")).unwrap();
+    std::fs::write(
+        dir.join("index.html"),
+        "<!doctype html><html lang=vi><title>disk-ui</title></html>",
+    )
+    .unwrap();
+    std::fs::write(dir.join("assets/app-a1b2.js"), "console.log(1);\n").unwrap();
+}
+
+/// UI từ đĩa: `/` và SPA fallback trả `index.html` (no-cache), `assets/*` trả
+/// file thật (cache dài hạn, immutable) — cùng bất biến với bản nhúng (mục 11.3).
+#[tokio::test]
+async fn ui_dir_serves_disk_files_with_spa_fallback_and_cache_rules() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let ui = tempfile::tempdir().unwrap();
+    write_fake_dist(ui.path());
+
+    let (_dir, app, _store) = fixture_with(
+        origin,
+        |config| config.web.ui_dir = Some(ui.path().to_path_buf()),
+        vec![],
+    )
+    .await;
+
+    // `/` → index.html từ đĩa, no-cache.
+    let response = app
+        .clone()
+        .oneshot(get_request("/", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-cache"
+    );
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(std::str::from_utf8(&body).unwrap().contains("disk-ui"));
+
+    // Deep link SPA: đường không khớp file → vẫn index.html (no-cache).
+    let response = app
+        .clone()
+        .oneshot(get_request("/settings/voice", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-cache"
+    );
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert!(std::str::from_utf8(&body).unwrap().contains("disk-ui"));
+
+    // Asset có hash: nội dung thật, content-type đúng, cache dài hạn.
+    let response = app
+        .clone()
+        .oneshot(get_request("/assets/app-a1b2.js", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "text/javascript"
+    );
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&body[..], b"console.log(1);\n");
+}
+
+/// Bất biến sống sót khi UI từ đĩa: `/api/*` không tồn tại vẫn 404 JSON (mục
+/// 22.17) và path traversal không lộ file ngoài `ui_dir`.
+#[tokio::test]
+async fn ui_dir_keeps_api_404_json_and_blocks_traversal() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let root = tempfile::tempdir().unwrap();
+    let ui = root.path().join("ui");
+    write_fake_dist(&ui);
+    // File bí mật ngoài ui_dir — nếu traversal thoát thì nội dung này lộ.
+    std::fs::write(root.path().join("outside-secret.txt"), "TOP-SECRET-OUTSIDE").unwrap();
+
+    let (_dir, app, _store) = fixture_with(
+        origin,
+        |config| config.web.ui_dir = Some(ui.clone()),
+        vec![],
+    )
+    .await;
+
+    // `/api/*` không tồn tại → 404 JSON, KHÔNG rơi vào SPA fallback của ui_dir.
+    let response = app
+        .clone()
+        .oneshot(get_request("/api/does-not-exist", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+
+    // `..` trong path: ServeDir từ chối component ParentDir — không lộ file ngoài.
+    for path in ["/assets/../../outside-secret.txt", "/../outside-secret.txt"] {
+        let response = app
+            .clone()
+            .oneshot(get_request(path, origin, None))
+            .await
+            .unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(
+            !std::str::from_utf8(&body)
+                .unwrap()
+                .contains("TOP-SECRET-OUTSIDE"),
+            "path {path} không được lộ file ngoài ui_dir"
+        );
+    }
+}
+
+/// `ui_dir` trỏ tới thư mục không tồn tại: không panic, UI trả 404 (cảnh báo
+/// ở log khi dựng router) — API vẫn hoạt động bình thường.
+#[tokio::test]
+async fn ui_dir_missing_directory_returns_404_but_api_still_works() {
+    let origin = "http://127.0.0.1:7878";
+    let ui = tempfile::tempdir().unwrap();
+    let missing = ui.path().join("chua-ton-tai");
+
+    let (_dir, app, _store) = fixture_with(
+        origin,
+        |config| config.web.ui_dir = Some(missing.clone()),
+        vec![],
+    )
+    .await;
+
+    let response = app
+        .clone()
+        .oneshot(get_request("/", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // API không bị ảnh hưởng bởi ui_dir sai.
+    let response = app
+        .clone()
+        .oneshot(get_request("/api/does-not-exist", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+}

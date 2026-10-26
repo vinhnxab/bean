@@ -48,7 +48,7 @@ use bean_skills::SkillCatalog;
 use bean_speech::SpeechProvider;
 use bean_tools::WorkspaceFs;
 use bean_types::{Config, Outbound};
-use tokio::sync::{Semaphore, broadcast};
+use tokio::sync::{RwLock, Semaphore, broadcast};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -90,6 +90,14 @@ pub(crate) use dto::{memory_dto, message_dto, session_dto, task_dto};
 
 /// Kích thước request HTTP tối đa.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
+/// Trần body riêng cho `POST /api/voice/transcribe` (ghi đè [`MAX_BODY_BYTES`] cho
+/// đúng route này qua `DefaultBodyLimit` ở tầng route).
+///
+/// Client STT gửi WAV 16 kHz mono 16-bit ≈ 32 KB/giây; base64 tăng thêm ~33%
+/// (≈ 43 KB/giây) nên trần 1 MB chỉ đủ ~24 giây ghi âm — dễ vượt khi người dùng
+/// bật mic rồi ngập ngừng trước khi tắt. 8 MB tương đương ~3 phút: dư cho
+/// push-to-talk (một câu ngắn) mà vẫn chặn upload khổng lồ (mục 15.7).
+pub const VOICE_TRANSCRIBE_BODY_BYTES: usize = 8 * 1024 * 1024;
 /// Kích thước message WebSocket tối đa.
 pub const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
 /// Nhịp heartbeat WebSocket.
@@ -116,12 +124,13 @@ pub struct WebState {
     pub skills: SkillCatalog,
     /// Workspace capability cho memory files.
     pub workspace: Option<Arc<dyn WorkspaceFs>>,
-    /// Provider STT/TTS (M27); `None` khi `[voice].enabled = false`.
+    /// Provider STT/TTS (M27), bọc `RwLock` để `PATCH /api/voice` **swap provider lúc
+    /// chạy** (đổi nhà cung cấp/ngôn ngữ/API key từ UI không cần restart).
     ///
-    /// Dựng sẵn một lần lúc khởi động (binary/model đã kiểm tra) rồi chia sẻ qua
-    /// `Arc`, không dựng lại cho mỗi request — tiến trình `whisper-cli`/`piper` và
-    /// client HTTPS dùng chung được.
-    pub speech: Option<Arc<dyn SpeechProvider>>,
+    /// Dựng sẵn một lần lúc khởi động khi `[voice]` khai báo đủ (kể cả khi
+    /// `enabled = false`) — nhờ vậy bật lại từ UI không cần restart. Instance client
+    /// HTTPS/tiến trình dùng chung qua `Arc`, không dựng lại cho mỗi request.
+    pub speech: Arc<RwLock<Option<Arc<dyn SpeechProvider>>>>,
     /// Broadcast notification từ scheduler/channel.
     pub notifications: broadcast::Sender<ServerMsg>,
     /// Thời điểm process bắt đầu.
@@ -161,7 +170,7 @@ pub struct WebStateDeps {
     pub skills: SkillCatalog,
     /// Workspace capability cho memory files.
     pub workspace: Option<Arc<dyn WorkspaceFs>>,
-    /// Provider STT/TTS (M27); `None` khi voice tắt.
+    /// Provider STT/TTS (M27); `None` khi `[voice]` chưa cấu hình đủ.
     pub speech: Option<Arc<dyn SpeechProvider>>,
 }
 
@@ -199,12 +208,27 @@ impl WebState {
             audit,
             skills,
             workspace,
-            speech,
             notifications,
             started_at: Instant::now(),
             public_origin,
             ws_connections: Arc::new(Semaphore::new(MAX_WS_CONNECTIONS)),
+            speech: Arc::new(RwLock::new(speech)),
         })
+    }
+
+    /// Clone `Arc` provider hiện hành; `None` khi chưa dựng được (chưa cấu hình).
+    pub async fn speech_provider(&self) -> Option<Arc<dyn SpeechProvider>> {
+        self.speech.read().await.clone()
+    }
+
+    /// `true` khi provider STT/TTS đã dựng — voice "configured" cho UI.
+    pub async fn speech_configured(&self) -> bool {
+        self.speech.read().await.is_some()
+    }
+
+    /// Swap provider sau khi `PATCH /api/voice` dựng thành công cấu hình mới.
+    pub(super) async fn set_speech_provider(&self, provider: Arc<dyn SpeechProvider>) {
+        *self.speech.write().await = Some(provider);
     }
 }
 
