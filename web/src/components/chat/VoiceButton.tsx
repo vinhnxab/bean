@@ -138,7 +138,7 @@ export function VoiceButton({ disabled, onResult }: VoiceButtonProps) {
         aria-pressed={recording}
         title={label}
         className={cn(
-          "flex size-8 items-center justify-center rounded-lg border transition-colors",
+          "mb-1 flex size-8 items-center justify-center rounded-lg border transition-colors",
           recording
             ? "border-live text-live hover:bg-live hover:text-live-ink"
             : "border-rule text-muted-foreground hover:border-brand hover:text-brand",

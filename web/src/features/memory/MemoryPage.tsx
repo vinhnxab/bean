@@ -145,7 +145,8 @@ function MemoryList() {
     // số ghi nhớ — thân trang (main) không phải dài ra theo dữ liệu. Danh sách
     // nằm trong vùng `min-h-0 flex-1 overflow-y-auto` để tự cuộn bên trong,
     // header và ô tìm kiếm luôn đứng yên. `xl:sticky` giữ panel tại chỗ khi
-    // cuộn qua phần editor ở cột trái (layout hai cột).
+    // cuộn qua phần editor ở cột trái (layout hai cột). `px-2 pb-2` tạo khoảng
+    // hở giữa card và scrollbar (kiểu pill macOS) để nội dung không dính sát.
     <Panel className="flex max-h-[calc(100svh_-_16rem)] flex-col xl:sticky xl:top-8">
       <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
@@ -164,13 +165,18 @@ function MemoryList() {
         placeholder={t("memory.searchPlaceholder")}
         className="mb-4 w-full shrink-0 rounded-lg border border-border bg-card px-3 py-2 text-sm outline-none focus:border-live"
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* `@container`: số cột theo chiều rộng panel chứ không theo viewport —
+          cùng một layout hai cột trên desktop, panel phải hẹp hơn cột trái nên
+          giữ 1 cột; trên tablet panel chiếm trọn chiều rộng thì nới 2-3 cột. */}
+      <div className="@container min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {memories.isPending ? <LoadingState label={t("common.loading")} /> : null}
         {memories.isError ? <ErrorState onRetry={() => void memories.refetch()} /> : null}
         {memories.data?.memories.length === 0 ? (
           <EmptyState title={t("memory.empty")} description={t("memory.emptyDescription")} />
         ) : null}
-        <ul className="space-y-3">
+        {/* `content-start`: nếu thiếu, grid kéo giãn hàng auto cho khớp chiều
+            cao panel làm card cao lửng; với content-start các hàng co theo nội dung. */}
+        <ul className="grid grid-cols-1 content-start gap-3 @lg:grid-cols-2 @4xl:grid-cols-3">
           {memories.data?.memories.map((memory) => (
             <li key={memory.id} className="rounded-lg border border-border p-3">
               <div className="flex items-start justify-between gap-3">

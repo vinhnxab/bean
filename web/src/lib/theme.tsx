@@ -3,7 +3,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 /** Chủ đề giao diện. Bean **không** theo hệ thống — người dùng chọn, và tối là mặc định. */
 export type Theme = "dark" | "light";
 
-/** Mặc định là tối: nền đen + nâu đỏ là diện mạo chính của sản phẩm. */
+/** Mặc định là tối: hệ màu iOS (đen tuyệt đối + accent xanh) là diện mạo chính của sản phẩm. */
 export const DEFAULT_THEME: Theme = "dark";
 
 /**

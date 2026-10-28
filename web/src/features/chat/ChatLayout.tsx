@@ -122,14 +122,23 @@ export function ChatLayout() {
   }
 
   return (
-    // Khung chia hai hàng: TopNav trên cùng, bên dưới là hàng ba cột
+    // Khung ba lớp: quầng môi trường dưới cùng, TopNav kính nổi trên cột giữa
+    // (hai sidebar trải hết chiều cao hai bên), bên dưới là hàng ba cột
     // (điều hướng | nội dung | hội thoại). `h-svh overflow-hidden` giữ khung
-    // cao đúng một màn hình; từng cột tự cuộn bên trong.
-    <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+    // cao đúng một màn hình; nội dung cột giữa cuộn chui dưới TopNav.
+    // `isolate` gói `-z-10` của lớp quầng trong khung này — thiếu nó, quầng
+    // trôi sau `bg-background` và biến mất.
+    <div className="relative isolate flex h-svh flex-col overflow-hidden bg-background text-foreground">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="orb -left-32 -top-24 size-[26rem]" />
+        <div className="orb -bottom-40 left-1/3 size-[30rem]" />
+      </div>
       <TopNav
         onMenuOpen={() => setMobileOpen(true)}
         onHistoryOpen={showSessions || isSettings ? () => setHistoryOpen(true) : undefined}
         rightDrawerLabel={isSettings ? t("settings.openInSidebar") : undefined}
+        sidebarCollapsed={collapsed}
+        hasRightColumn={isSettings || showSessions}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {mobileOpen ? (
@@ -145,13 +154,15 @@ export function ChatLayout() {
           ngăn kéo trên điện thoại không bao giờ thành rail icon (xem `lib/sidebar.ts`).
         */}
         <aside
-          className={`fixed inset-y-0 left-0 z-20 flex w-72 -translate-x-full flex-col border-r border-border bg-card transition-[width,transform] duration-200 md:static md:translate-x-0 ${collapsed ? "md:w-20" : "md:w-72"} ${mobileOpen ? "translate-x-0" : ""}`}
+          className={`glass fixed inset-y-0 left-0 z-20 flex w-72 -translate-x-full flex-col border-r border-border transition-[width,transform] duration-200 md:static md:translate-x-0 ${collapsed ? "md:w-20" : "md:w-72"} ${mobileOpen ? "translate-x-0" : ""}`}
           aria-label={t("app.title")}
           data-testid="sidebar-shell"
         >
           {/* Nút đóng ngăn kéo ở đầu sidebar: chỉ có ở `< md`. Brand đã nằm ở
               TopNav nên đầu ngăn kéo chỉ còn nút đóng, căn phải. */}
-          <div className="flex items-center justify-end border-b border-border p-3 md:hidden">
+          {/* `h-14`: cùng chiều cao TopNav (56px, border-box gồm cả border-b)
+              nên kẻ ngang của ngăn kéo nằm đúng đường kẻ của nav kính. */}
+          <div className="flex h-14 shrink-0 items-center justify-end border-b border-border p-3 md:hidden">
             <button
               type="button"
               className="shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -166,7 +177,7 @@ export function ChatLayout() {
               tối một icon `text-muted-foreground` dễ bị bỏ qua. `justify-center`
               khi thu gọn để giữ cảm giác "cột icon". */}
           <div
-            className={`hidden items-center border-b border-border p-3 md:flex ${collapsed ? "justify-center" : "justify-end"}`}
+            className={`hidden h-14 shrink-0 items-center border-b border-border p-3 md:flex ${collapsed ? "justify-center" : "justify-end"}`}
           >
             <button
               type="button"
@@ -216,8 +227,12 @@ export function ChatLayout() {
             </nav>
             {/* Footer điều hướng: các mục "hệ thống" nằm tách khỏi điều hướng
                 chính, dưới cùng của sidebar. Cài đặt ít dùng hơn chat nên không
-                chiếm chỗ giữa danh sách; sát đáy thì luôn biết tìm ở đâu. */}
-            <div className={`mt-auto border-t border-border ${collapsed ? "p-2" : "p-3"}`}>
+                chiếm chỗ giữa danh sách; sát đáy thì luôn biết tìm ở đâu.
+                Khi thu gọn, `flex justify-center` là thứ canh giữa nút — footer
+                là `div` riêng, không thừa hưởng `items-center` của `<nav>`. */}
+            <div
+              className={`mt-auto border-t border-border ${collapsed ? "flex justify-center p-2" : "p-3"}`}
+            >
               <NavItem
                 to="/settings"
                 label={t("nav.settings")}
@@ -228,7 +243,9 @@ export function ChatLayout() {
             </div>
           </TooltipProvider>
         </aside>
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        {/* `pt-14` chừa chỗ cho TopNav nổi; đệm nằm TRONG vùng cuộn nên nội
+            dung trượt lên sẽ chui thẳng dưới nav kính. */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto pt-14">
           {/* `Suspense` đặt quanh `Outlet` chứ không quanh cả `ChatLayout` (ở `App.tsx`):
               khi đang tải chunk của màn, chỉ vùng nội dung được thay bằng skeleton —
               sidebar vẫn đứng yên. Bọc ở ngoài sẽ làm cả khung giao diện biến mất rồi

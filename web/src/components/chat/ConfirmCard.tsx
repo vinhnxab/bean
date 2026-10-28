@@ -73,7 +73,7 @@ export function ConfirmCard({
 
   return (
     <section
-      className={`rounded-lg p-4 ${riskClass}`}
+      className={`glass-sheen rounded-lg p-4 ${riskClass}`}
       role="alertdialog"
       aria-labelledby={`confirm-${confirm.confirm_id}`}
     >

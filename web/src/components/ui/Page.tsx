@@ -117,8 +117,9 @@ export function EmptyState({ title, description }: { title: string; description:
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 ${className}`}>
-      {children}
-    </section>
+    // Nền kính + bo góc lớn kiểu iOS: panel là khối nổi chính của mọi trang
+    // management — nền alpha + sheen thay cho nền đặc; bỏ `shadow-sm` vì
+    // `.glass` tự lo bóng (class shadow-* của utilities sẽ đè mất sheen).
+    <section className={`glass rounded-2xl border border-border p-4 sm:p-5 ${className}`}>{children}</section>
   );
 }

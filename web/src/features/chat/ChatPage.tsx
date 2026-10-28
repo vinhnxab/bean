@@ -232,22 +232,28 @@ function ChatSession({ sessionId }: { sessionId: number }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Thanh tiêu đề: `sticky` + gradient mờ dần thay cho `border-b` cứng, để
-          nội dung chạy dưới mà không bị cắt ngang bởi một đường kẻ. */}
-      <header className="sticky top-0 z-10 bg-gradient-to-b from-surface via-surface to-transparent px-4 pb-4 pt-3 md:px-6">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
-          <h1 className="truncate text-sm font-semibold text-ink-muted">{t("chat.sessions")}</h1>
-          <ConnectionBadge status={status} />
-        </div>
-      </header>
-      <div className="relative min-h-0 flex-1">
+      {/* Vùng cuộn được kéo lên trượt qua pt-14 của <main> cho mép trên chạm
+          mép trên cửa sổ: tin nhắn cuộn sẽ chui DƯỚI TopNav kính (kính iOS).
+          `pt-14` bên trong bù lại vị trí ban đầu — đệm cuộn theo nội dung,
+          khác đệm ở ngoài (nội dung sẽ không bao giờ trượt tới nav). */}
+      <div className="relative -mt-14 min-h-0 flex-1">
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="h-full overflow-y-auto px-2 pb-4 md:px-4"
+          className="h-full overflow-y-auto px-2 pb-4 pt-14 md:px-4"
           aria-live="polite"
           aria-relevant="additions text"
         >
+          {/* Thanh tiêu đề: `sticky top-14` dừng ngay dưới TopNav kính; gradient
+              mờ dần thay cho `border-b` cứng để nội dung chạy dưới không bị cắt
+              ngang bởi một đường kẻ. `-mx` khử đệm của vùng cuộn để gradient
+              trải hết bề ngang như khi header còn nằm ngoài. */}
+          <header className="sticky top-14 z-10 -mx-2 bg-gradient-to-b from-surface via-surface to-transparent px-4 pb-4 pt-3 md:-mx-4 md:px-6">
+            <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
+              <h1 className="truncate text-sm font-semibold text-ink-muted">{t("chat.sessions")}</h1>
+              <ConnectionBadge status={status} />
+            </div>
+          </header>
           <div className="mx-auto max-w-4xl">
             {history.isPending ? (
               <p className="py-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p>

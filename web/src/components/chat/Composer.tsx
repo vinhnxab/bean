@@ -98,9 +98,9 @@ export function Composer({
   const canSend = !disabled && value.trim().length > 0;
 
   return (
-    // Gradient mờ dần thay cho `border-t` cứng: vùng soạn nổi lên khỏi dòng
-    // thời gian mà không cắt ngang danh sách bằng một đường kẻ.
-    <div className="bg-gradient-to-t from-surface via-surface to-transparent px-3 pb-3 pt-2 md:px-6">
+    // Padding đồng đều `p-3` (12px cả 4 phía): khoảng cách khung soạn tới mép
+    // trên/dưới/trái/phải như nhau — pt-2/pb-3 cũ làm khoảng thở trên hẹp hơn dưới.
+    <div className="bg-gradient-to-t from-surface via-surface to-transparent p-3">
       <form
         className="mx-auto max-w-4xl"
         onSubmit={(event) => {
@@ -108,9 +108,12 @@ export function Composer({
           onSubmit();
         }}
       >
+        {/* Nút hành động 32px nhích `mb-1` khỏi đáy: tâm nút trùng tâm dòng chữ
+        cuối (p-2 8px + py-2 8px + dòng 24px → 28px); khi gõ một dòng, nút cân
+        giữa khung thay vì trôi sát đáy (trên nút 16px, dưới 8px). */}
         <div
           className={cn(
-            "flex items-end gap-2 rounded-xl border bg-surface-raised p-2 transition-colors",
+            "glass flex items-end gap-2 rounded-2xl border p-2 transition-colors",
             "focus-within:border-brand",
             sendError ? "border-alert" : "border-rule",
           )}
@@ -142,7 +145,7 @@ export function Composer({
               disabled={stopping}
               aria-label={stopping ? t("chat.stopping") : t("chat.stop")}
               title={stopping ? t("chat.stopping") : t("chat.stop")}
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-alert text-alert transition-colors hover:bg-alert hover:text-alert-ink disabled:opacity-50"
+              className="mb-1 flex size-8 shrink-0 items-center justify-center rounded-lg border border-alert text-alert transition-colors hover:bg-alert hover:text-alert-ink disabled:opacity-50"
             >
               <SquareIcon className="size-3.5 fill-current" />
             </button>
@@ -155,7 +158,7 @@ export function Composer({
               title={t("chat.send")}
               // Nút tròn 32px đúng như Open WebUI: thao tác gửi lặp lại liên tục
               // nên phải là mục tiêu chạm lớn và không cần đọc nhãn.
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-ink transition-colors hover:bg-brand-strong disabled:pointer-events-none disabled:opacity-40"
+              className="mb-1 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-ink transition-colors hover:bg-brand-strong disabled:pointer-events-none disabled:opacity-40"
             >
               <ArrowUpIcon className="size-4" />
             </button>

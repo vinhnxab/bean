@@ -61,9 +61,10 @@ export function SettingsSidebar({
         data-testid="settings-sidebar"
         data-open={open || undefined}
         aria-label={t("settings.title")}
-        className={`fixed inset-y-0 right-0 z-30 flex w-72 flex-col border-l border-border bg-card transition-transform duration-200 md:static md:translate-x-0 ${open ? "translate-x-0" : "translate-x-full"}`}
+        className={`glass fixed inset-y-0 right-0 z-30 flex w-72 flex-col border-l border-border transition-transform duration-200 md:static md:translate-x-0 ${open ? "translate-x-0" : "translate-x-full"}`}
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border p-3">
+        {/* `h-14`: cùng chiều cao TopNav nên kẻ ngang header thẳng hàng kẻ ngang nav. */}
+        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border p-3">
           <h2 className="text-base font-bold">{t("settings.title")}</h2>
           <button
             type="button"

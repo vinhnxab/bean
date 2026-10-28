@@ -509,13 +509,16 @@ Quy tắc:
 8. **Audit**: bảng chỉ đọc, phân trang.
 9. **Trạng thái**: phiên bản, model, ngân sách token đã dùng, kênh đang chạy.
 
-Yêu cầu chung: giao diện **mặc định là tối** (đen + nâu đỏ), người dùng đổi sang sáng được bằng nút chuyển chủ đề — **KHÔNG** phụ thuộc cài đặt hệ thống. **responsive** (dùng được trên điện thoại), truy cập bàn phím và `aria` cơ bản, hai ngôn ngữ `vi` (mặc định) và `en`, thời gian hiển thị theo múi giờ trình duyệt.
+Yêu cầu chung: giao diện **mặc định là tối**, chất liệu **kính mờ kiểu iOS (Liquid Glass)** với accent nâu đỏ Bean, người dùng đổi sang sáng được bằng nút chuyển chủ đề — **KHÔNG** phụ thuộc cài đặt hệ thống. **responsive** (dùng được trên điện thoại), truy cập bàn phím và `aria` cơ bản, hai ngôn ngữ `vi` (mặc định) và `en`, thời gian hiển thị theo múi giờ trình duyệt.
 
 **Ứng dụng một màn hình (bắt buộc):** mọi UI nằm gọn trong một viewport; cửa sổ trình duyệt không bao giờ cuộn (`html, body { overflow: hidden }` — đã khoá sẵn trong `web/src/index.css`). Khi nội dung dài hơn màn hình, khung chứa bó chiều cao (`max-h`/`flex` + `min-h-0`) và chỉ **component con** cuộn bên trong (`overflow-y-auto`) — panel danh sách không được phình theo dữ liệu làm cả trang dài ra. Ví dụ mẫu: `SessionList` (cuộn trong `nav`) và `MemoryList` (cuộn trong panel, `max-h-[calc(100svh_-_16rem)]`).
 
-**Hệ màu và chủ đề (Token):**
-- Nền tối nằm ở `:root`, chủ đề sáng bật bằng class `.light` trên `<html>` (xem `web/src/index.css`).
-- Màu chủ đạo: **đen** (nền) + **nâu đỏ** (`--brand`). Phân biệt rõ: **hành động** (nút bấm, dòng đang chọn) dùng `--brand`; **trạng thái** (`--live` đang chạy, `--need` chờ duyệt, `--alert` nguy hiểm) dùng màu riêng, tách sắc khỏi thương hiệu.
+**Hệ màu và chủ đề (Token) — iOS Liquid Glass (cập nhật 2026-10):**
+- Chất liệu UI là **kính mờ kiểu iOS** (class `.glass`): `backdrop-filter: blur + saturate`, nền bán trong suốt `--glass-bg`, sheen specular mép trên và bóng đổ riêng. Class `.glass` tự có `box-shadow` — **không kèm class `shadow-*`** của Tailwind vì utility sẽ đè mất sheen. Trình duyệt không hỗ trợ `backdrop-filter` tự rơi về nền đặc `--glass-solid`.
+- Bề mặt kính tĩnh (sidebar, khung soạn) cần "đồ để làm mờ": lớp quầng `--orb` (radial-gradient màu thương hiệu rất nhạt, KHÔNG filter blur) nằm sau mọi lớp trong `ChatLayout` — kính trên nền phẳng màu đặc thì blur không thể hiện gì.
+- Palette theo **iOS system colors**: `--live` systemGreen, `--need` systemOrange, `--alert` systemRed, đổi sắc độ giữa dark/light. Màu thương hiệu Bean **nâu đỏ** `--brand` giữ vai trò **hành động** (nút bấm, dòng đang chọn); **trạng thái** dùng màu riêng, tách sắc khỏi thương hiệu.
+- Nền tối nằm ở `:root` (dark theo họ `#1c1c1e` của iOS), chủ đề sáng bật bằng class `.light` trên `<html>` (xem `web/src/index.css`).
+- Scrollbar kiểu macOS: pill bo tròn hai đầu qua token `--scroll-thumb`/`--scroll-thumb-hover`, cuộn bên trong panel, không để trang phình (xem mục 12.1 "Ứng dụng một màn hình").
 - Token phải khai báo trong **`@theme inline`**; đặt `--color-*` trong `:root` sẽ khiến Tailwind v4 **không sinh utility nào**, class có trong JSX mà không tồn tại trong CSS — lỗi này im lặng, TypeScript vẫn xanh.
 - Không viết màu Tailwind thô (`bg-slate-950`, `text-rose-600`) trong component: mọi màu phải đi qua token, nếu không đổi bảng màu sẽ là sửa tay hàng trăm chỗ.
 

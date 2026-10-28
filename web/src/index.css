@@ -13,16 +13,17 @@
 }
 
 /* ==========================================================================
-   Token gốc — "Mực đen trên giấy nâu"
+   Token gốc — hệ màu iOS (system colors)
    --------------------------------------------------------------------------
-   Màu chủ đạo: ĐEN (nền) + NÂU ĐỎ (thương hiệu). Nền TỐI là mặc định (xem
-   `lib/theme.tsx`), sáng là lựa chọn của người dùng.
+   Bảng màu bám system palette của iOS, dark là mặc định (xem `lib/theme.tsx`):
+   nền đen tuyệt đối (OLED), surfaces xám #1c1c1e/#2c2c2e, accent xanh iOS.
+   Người dùng đổi sang sáng (#f2f2f7 + trắng) bằng nút chủ đề.
 
    Ba màu trạng thái là NGỮ NGHĨA, mỗi màu đúng một việc, và **tách sắc** khỏi
-   màu thương hiệu để không nhầm "nâu đỏ của thương hiệu" với "nguy hiểm":
-     --live  = đang chạy          (xanh lam ngọc)
-     --need  = đang chờ bạn duyệt (hổ phách)
-     --alert = nguy hiểm / bị chặn (đỏ bão hoà cao — khác hẳn nâu đỏ nhạt)
+   màu accent (xanh iOS) — bám đúng system colors của iOS:
+     --live  = đang chạy          (systemGreen)
+     --need  = đang chờ bạn duyệt (systemOrange)
+     --alert = nguy hiểm / bị chặn (systemRed)
    Không dùng màu để trang trí.
    ========================================================================== */
 
@@ -30,67 +31,105 @@
 :root {
   color-scheme: dark;
 
-  /* token cấu trúc (trung tính) */
-  --surface: #0b0a09; /* mặt bàn — đen ấm, KHÔNG phải #000 tuyệt đối */
-  --surface-raised: #151110; /* khối nổi 1 bậc: thẻ, hộp thoại */
-  --surface-hover: #201a18; /* trạng thái hover/active */
-  --ink: #f3efec; /* chữ chính */
-  --ink-muted: #9d938c; /* chữ phụ — 7.0:1 trên --surface */
-  --rule: #2a2220; /* đường kẻ 1px */
+  /* token cấu trúc (trung tính) — systemBackground/secondary/tertiary dark */
+  --surface: #000000;
+  --surface-raised: #1c1c1e;
+  --surface-hover: #2c2c2e;
+  --ink: #f2f2f7; /* label dark */
+  --ink-muted: #8e8e93; /* systemGray — 5.3:1 trên nền đen */
+  --rule: #38383a; /* separator dark */
 
-  /* màu thương hiệu: NÂU ĐỎ */
-  --brand: #b4654a; /* nút chính, liên kết nhấn */
+  /* accent thương hiệu: NÂU ĐỎ Bean — giữ riêng khỏi hệ trung tính iOS để
+     sản phẩm vẫn có nhận diện; nút chính, liên kết nhấn, dòng chọn. */
+  --brand: #b4654a;
   --brand-strong: #cd7d5f; /* hover của brand */
   --brand-ink: #170c08; /* chữ đặt trên nền brand */
   --brand-wash: rgb(180 101 74 / 14%); /* nền nhạt kiểu brand (badge, dòng chọn) */
 
-  /* token trạng thái (ngữ nghĩa, tách sắc khỏi brand) */
-  --live: #5aa88f;
-  --need: #c99440;
-  --alert: #e0503a;
+  /* token trạng thái (ngữ nghĩa, tách sắc khỏi accent) */
+  --live: #30d158; /* systemGreen dark */
+  --need: #ff9f0a; /* systemOrange dark */
+  --alert: #ff453a; /* systemRed dark */
   /* Bản đậm hơn cho `:hover`. Không có token này thì nút ghi `bg-live
      hover:bg-live` — nhìn giống hệt, người dùng không biết con trỏ có bấm
      được không. Ở nền tối, hover phải TỐI ĐI chứ không sáng thêm, nếu không
      nút sáng bị "cháy" mỗi lần rê chuột. */
-  --live-strong: #4d8f79;
-  --need-strong: #b07f34;
-  --alert-strong: #c7432f;
+  --live-strong: #26b34c;
+  --need-strong: #e08c00;
+  --alert-strong: #e03a30;
   /* Chữ đặt TRÊN nền các màu trên. Mỗi màu có tương phản ngược ở từng chủ đề:
      ở tối, live/need là mảng sáng nên chữ phải tối; ở sáng chúng tối đi nên
      chữ phải sáng. Dùng chung một giá trị sẽ hỏng ở một trong hai chủ đề. */
-  --live-ink: #06120e;
-  --need-ink: #17100a;
-  --alert-ink: #1a0a07;
+  --live-ink: #041509;
+  --need-ink: #201302;
+  --alert-ink: #1f0503;
+
+  /* --- token KÍNH (Liquid Glass) — chất liệu cho các lớp nổi ---
+     Nền kính = bề mặt raised dạng alpha + backdrop-blur, nên nội dung cuộn
+     phía sau lộ mờ đi như kính iOS. `--glass-solid` là fallback đặc cho trình
+     duyệt không hỗ trợ `backdrop-filter` (xem `.glass` dưới cuối file). */
+  --glass-solid: #1c1c1e;
+  --glass-bg: rgb(28 28 30 / 62%);
+  --glass-blur: 18px;
+  --glass-saturate: 1.5;
+  --glass-sheen: rgb(255 255 255 / 9%); /* highlight specular mép trên */
+  --glass-drop: 0 1px 3px rgb(0 0 0 / 20%); /* bóng đổ ngoài của khối kính */
+
+  /* Quầng môi trường: mảng màu thương hiệu rất nhạt phía sau mọi lớp, để các
+     bề mặt kính TĨNH (sidebar, khung soạn) cũng có gì đó để backdrop-blur làm
+     mờ — kính trên nền phẳng màu đặc thì blur không thể hiện gì. */
+  --orb: rgb(180 101 74 / 24%);
+
+  /* Scrollbar kiểu macOS: rãnh trong suốt, thumb pill mờ dùng alpha nên nổi
+     trên mọi nền; đậm hơn khi hover để dễ nhắm. */
+  --scroll-thumb: rgb(255 255 255 / 20%);
+  --scroll-thumb-hover: rgb(255 255 255 / 34%);
 }
 
 /* --- SÁNG: chỉ bật khi `<html class="light">` --- */
 .light {
   color-scheme: light;
 
-  --surface: #faf6f4;
+  /* systemGroupedBackground / secondarySystemGroupedBackground light */
+  --surface: #f2f2f7;
   --surface-raised: #ffffff;
-  --surface-hover: #f0e5e0;
-  --ink: #17110f;
-  --ink-muted: #6d5d56; /* 5.9:1 trên --surface */
-  --rule: #e3d8d2;
+  --surface-hover: #e5e5ea; /* systemGray5 light */
+  --ink: #1c1c1e; /* label light */
+  --ink-muted: #66666e; /* secondaryLabel light — 4.6:1 trên nền grouped */
+  --rule: #d1d1d6; /* separator light */
 
   /* Nâu đỏ đậm hơn ở nền sáng: màu tối trên nền sáng phải đậm hơn mới đạt
-     tương phản — giữ nguyên #b4654a thì chữ trên trắng chỉ ~3.4:1. */
+     tương phản — giữ nguyên giá trị dark thì chữ trên trắng chỉ ~3.4:1. */
   --brand: #8c3f24;
   --brand-strong: #a4502f;
   --brand-ink: #fff8f4;
   --brand-wash: rgb(140 63 36 / 10%);
 
-  --live: #2f7a63;
-  --need: #8a5f14;
-  --alert: #b32a1c;
+  --live: #34c759; /* systemGreen light */
+  --need: #ff9500; /* systemOrange light */
+  --alert: #ff3b30; /* systemRed light */
   /* Ở nền sáng thì ngược lại: hover SÁNG THÊM. */
-  --live-strong: #38997c;
-  --need-strong: #a6751b;
-  --alert-strong: #cc3624;
-  --live-ink: #fff;
-  --need-ink: #fff;
-  --alert-ink: #fff;
+  --live-strong: #3fd663;
+  --need-strong: #ffa31a;
+  --alert-strong: #ff4f45;
+  --live-ink: #ffffff;
+  --need-ink: #ffffff;
+  --alert-ink: #ffffff;
+
+  /* Kính ở nền sáng: trắng alpha đậm hơn để chữ tối vẫn đủ tương phản trên
+     nội dung cuộn phía sau; sheen trắng gần đặc vì highlight trên nền sáng
+     phải sáng hơn nền mới đọc được là "gương". */
+  --glass-solid: #ffffff;
+  --glass-bg: rgb(255 255 255 / 70%);
+  --glass-sheen: rgb(255 255 255 / 85%);
+  --glass-drop: 0 1px 3px rgb(0 0 0 / 10%);
+
+  /* Quầng nhạt hơn ở nền sáng: màu phai trên nền trắng khó đọc là "sâu". */
+  --orb: rgb(140 63 36 / 16%);
+
+  /* Trắng alpha ở tối tương ứng đen alpha ở sáng. */
+  --scroll-thumb: rgb(0 0 0 / 20%);
+  --scroll-thumb-hover: rgb(0 0 0 / 34%);
 }
 
 /* ==========================================================================
@@ -190,6 +229,39 @@
     outline-offset: 2px;
     border-radius: 3px;
   }
+
+  /* --- Scrollbar kiểu macOS --------------------------------------------
+     Chrome/Edge (Blink): tự vẽ toàn bộ — rãnh trong suốt, thumb pill bo tròn
+     hai đầu; `border` trong suốt + `background-clip: padding-box` tạo khoảng
+     hở 2px hai bên đúng như thumb overlay của macOS. Alpha màu nên thumb
+     không che nội dung bên dưới.
+     Firefox không hỗ trợ tuỳ biến radius scrollbar: `scrollbar-width` +
+     `scrollbar-color` (hai thuộc tính kế thừa xuống mọi vùng cuộn) là mức
+     gần nhất có thể. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+  }
+  *::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-color: var(--scroll-thumb);
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scroll-thumb-hover);
+  }
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) transparent;
+  }
 }
 
 @layer components {
@@ -215,6 +287,49 @@
      (run_id, tên tool), còn *số đo* chỉ cần các chữ số thẳng hàng. */
   .hub-num {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* ----------------------------------------------------------------------
+     Kính (Liquid Glass) — chất liệu cho các lớp nổi: TopNav, sidebar,
+     khung soạn, panel, popover. Chỉ áp dụng cho lớp “nổi trên nội dung cuộn”
+     hoặc khối chính; KHÔNG đắp lên toàn trang — mỗi lớp blur là một lần
+     composite đắt GPU, và máy yếu sẽ rõ.
+
+     Fallback: không hỗ trợ `backdrop-filter` → nền đặc (`--glass-solid`),
+     chữ vẫn đọc được, chỉ mất hiệu ứng xuyên mờ. Sheen + bóng nằm trong
+     box-shadow của `.glass` nên KHÔNG kèm class `shadow-*` của Tailwind ở
+     nơi dùng — utilities layer thắng components layer, sẽ đè mất sheen.
+     Viền màu nào thì component tự giữ (`border-rule`, `focus-within:border-brand`…).
+     ---------------------------------------------------------------------- */
+  .glass {
+    background-color: var(--glass-solid);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-sheen),
+      var(--glass-drop);
+  }
+  @supports ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
+    .glass {
+      background-color: var(--glass-bg);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+      backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    }
+  }
+
+  /* Chỉ highlight specular mép trên — cho thẻ giữ nền riêng theo ngữ nghĩa
+     (ConfirmCard: wash màu live/need) nhưng vẫn có chất liệu kính. */
+  .glass-sheen {
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-sheen),
+      var(--glass-drop);
+  }
+
+  /* Quầng môi trường (màu từ token --orb): gradient tự mờ dần nên KHÔNG dùng
+     filter: blur để làm mềm — một lớp filter là một lần composite đắt GPU.
+     Kích thước và vị trí do nơi dùng quyết định qua utility class. */
+  .orb {
+    position: absolute;
+    border-radius: 9999px;
+    background: radial-gradient(circle at center, var(--orb) 0%, transparent 65%);
   }
 }
 
