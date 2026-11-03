@@ -38,6 +38,14 @@ pub struct VoiceState {
     /// **Không bao giờ in qua `Debug`** — impl thủ công bên dưới đã che.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Voice ID TTS mặc định (tiếng Anh + fallback) đặt từ UI; `None` = giữ seed
+    /// `bean.toml`. Không phải secret nên được in qua `Debug` bình thường.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tts_voice_id: Option<String>,
+    /// Voice ID TTS cho văn bản tiếng Việt đặt từ UI; `None` = giữ seed `bean.toml`
+    /// (văn bản tiếng Việt sẽ dùng giọng mặc định).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tts_voice_vi: Option<String>,
 }
 
 // Derive `Debug` sẽ in key nguyên vẹn khi ai đó log state — impl thủ công chỉ trả
@@ -120,6 +128,12 @@ impl VoiceState {
         if let Some(api_key) = &self.api_key {
             config.voice.api_key = Some(api_key.clone());
         }
+        if let Some(voice_id) = &self.tts_voice_id {
+            config.voice.tts_voice_id = voice_id.clone();
+        }
+        if let Some(voice_vi) = &self.tts_voice_vi {
+            config.voice.tts_voice_vi = Some(voice_vi.clone());
+        }
         if self.enabled && !config.voice_configured() {
             tracing::warn!(
                 "voice-state bật nhưng `[voice]` thiếu cấu hình — bỏ qua, dùng seed từ bean.toml"
@@ -177,6 +191,8 @@ mod tests {
             provider: None,
             language: None,
             api_key: None,
+            tts_voice_id: None,
+            tts_voice_vi: None,
         }
     }
 
@@ -200,6 +216,8 @@ mod tests {
             provider: Some(SpeechProviderKind::Api),
             language: Some("vi".into()),
             api_key: Some("sk-secret-key-abcd".into()),
+            tts_voice_id: Some("cgSgspJ2msm6clMCkdW9".into()),
+            tts_voice_vi: Some("CQAD6iKxS73fEAGjSwt5".into()),
         };
         VoiceState::save(&path, &saved).unwrap();
         assert_eq!(VoiceState::load(&path).as_ref(), Some(&saved));
@@ -224,6 +242,8 @@ mod tests {
                 provider: Some(SpeechProviderKind::Api),
                 language: None,
                 api_key: Some("sk-x".into()),
+                tts_voice_id: None,
+                tts_voice_vi: None,
             },
         )
         .unwrap();
@@ -242,6 +262,8 @@ mod tests {
             provider: Some(SpeechProviderKind::Api),
             language: None,
             api_key: Some("sk-never-leak-please".into()),
+            tts_voice_id: None,
+            tts_voice_vi: None,
         };
         let rendered = format!("{with_key:?}");
         assert!(!rendered.contains("sk-never-leak-please"), "{rendered}");
@@ -300,11 +322,15 @@ mod tests {
             provider: Some(SpeechProviderKind::Api),
             language: Some("en".into()),
             api_key: Some("sk-from-ui".into()),
+            tts_voice_id: Some("jessica-voice".into()),
+            tts_voice_vi: Some("kim-voice".into()),
         };
         assert!(saved.apply_to_config(&mut config));
         assert_eq!(config.voice.provider, SpeechProviderKind::Api);
         assert_eq!(config.voice.language, "en");
         assert_eq!(config.voice.api_key.as_deref(), Some("sk-from-ui"));
+        assert_eq!(config.voice.tts_voice_id, "jessica-voice");
+        assert_eq!(config.voice.tts_voice_vi.as_deref(), Some("kim-voice"));
         // `enabled = false` áp bình thường.
         assert!(!config.voice.enabled);
     }
@@ -320,6 +346,8 @@ mod tests {
             provider: Some(SpeechProviderKind::Api),
             language: None,
             api_key: Some("sk-from-ui".into()),
+            tts_voice_id: None,
+            tts_voice_vi: None,
         };
         assert!(saved.apply_to_config(&mut config));
         assert!(config.voice_configured());

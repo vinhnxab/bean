@@ -1066,6 +1066,11 @@ pub struct VoiceStatusResponse {
     /// `true` khi chế độ `api` đã có API key (lưu runtime qua UI hoặc biến môi trường).
     /// Chỉ cờ trạng thái — không bao giờ trả giá trị key.
     pub api_key_set: bool,
+    /// Voice ID mặc định đang có hiệu lực (tiếng Anh + fallback). Không phải secret nên
+    /// trả nguyên giá trị để UI hiển thị trong form cấu hình.
+    pub tts_voice_id: String,
+    /// Voice ID cho văn bản tiếng Việt đang có hiệu lực; rỗng = dùng giọng mặc định.
+    pub tts_voice_vi: String,
 }
 
 /// `PATCH /api/voice` — bật/tắt voice runtime (màn Cài đặt), persist qua restart ở
@@ -1088,6 +1093,14 @@ pub struct VoiceUpdateRequest {
     /// key đã lưu (fallback về biến môi trường nếu còn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Đổi voice ID mặc định (tiếng Anh + fallback); bỏ qua khi `None`. Bắt buộc
+    /// không rỗng — TTS cần voice id hợp lệ trong URL gọi ElevenLabs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tts_voice_id: Option<String>,
+    /// Đổi voice ID cho văn bản tiếng Việt; bỏ qua khi `None`. Chuỗi rỗng = ý định
+    /// xoá override đã lưu (câu tiếng Việt rơi về giọng mặc định).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tts_voice_vi: Option<String>,
 }
 
 /// `POST /api/voice/transcribe` — audio gửi lên **dạng base64 trong JSON**.

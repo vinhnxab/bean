@@ -98,9 +98,9 @@ export function Composer({
   const canSend = !disabled && value.trim().length > 0;
 
   return (
-    // Padding đồng đều `p-3` (12px cả 4 phía): khoảng cách khung soạn tới mép
-    // trên/dưới/trái/phải như nhau — pt-2/pb-3 cũ làm khoảng thở trên hẹp hơn dưới.
-    <div className="bg-gradient-to-t from-surface via-surface to-transparent p-3">
+    // `py-2` (8px dọc): cả cụm soạn mỏng theo thanh tìm kiếm iOS — cao tổng
+    // cộng chỉ ~68px kể cả dòng gợi ý phím. Ngang giữ 12px để nút không dính mép.
+    <div className="bg-gradient-to-t from-surface via-surface to-transparent px-3 py-2">
       <form
         className="mx-auto max-w-4xl"
         onSubmit={(event) => {
@@ -108,12 +108,15 @@ export function Composer({
           onSubmit();
         }}
       >
-        {/* Nút hành động 32px nhích `mb-1` khỏi đáy: tâm nút trùng tâm dòng chữ
-        cuối (p-2 8px + py-2 8px + dòng 24px → 28px); khi gõ một dòng, nút cân
-        giữa khung thay vì trôi sát đáy (trên nút 16px, dưới 8px). */}
+        {/* Tỉ lệ mỏng theo thanh tìm kiếm iOS: `p-1.5` + textarea `min-h-8` cho
+            một dòng cao 32px ĐÚNG bằng nút — tâm nút trùng tâm dòng chữ, không
+            cần mẹo `mb-1` cũ. `rounded-3xl` (24px) trên khung 44px: quy tắc
+            chồng tràn của border-radius tự co thành capsule trọn như search
+            field Apple; khi textarea giãn nhiều dòng, bán kính giữ nguyên 24px
+            nên hai đầu không phồng thành viên súng. */}
         <div
           className={cn(
-            "glass flex items-end gap-2 rounded-2xl border p-2 transition-colors",
+            "glass flex items-end gap-1.5 rounded-3xl border p-1.5 transition-colors",
             "focus-within:border-brand",
             sendError ? "border-alert" : "border-rule",
           )}
@@ -135,7 +138,7 @@ export function Composer({
             placeholder={t("chat.placeholder")}
             disabled={disabled}
             aria-label={t("chat.placeholder")}
-            className="max-h-[200px] min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+            className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none placeholder:text-muted-foreground"
           />
           {canStop ? (
             <button
@@ -145,7 +148,7 @@ export function Composer({
               disabled={stopping}
               aria-label={stopping ? t("chat.stopping") : t("chat.stop")}
               title={stopping ? t("chat.stopping") : t("chat.stop")}
-              className="mb-1 flex size-8 shrink-0 items-center justify-center rounded-lg border border-alert text-alert transition-colors hover:bg-alert hover:text-alert-ink disabled:opacity-50"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full border border-alert text-alert transition-colors hover:bg-alert hover:text-alert-ink disabled:opacity-50"
             >
               <SquareIcon className="size-3.5 fill-current" />
             </button>
@@ -158,7 +161,7 @@ export function Composer({
               title={t("chat.send")}
               // Nút tròn 32px đúng như Open WebUI: thao tác gửi lặp lại liên tục
               // nên phải là mục tiêu chạm lớn và không cần đọc nhãn.
-              className="mb-1 flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-brand-ink transition-colors hover:bg-brand-strong disabled:pointer-events-none disabled:opacity-40"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-brand-ink transition-colors hover:bg-brand-strong disabled:pointer-events-none disabled:opacity-40"
             >
               <ArrowUpIcon className="size-4" />
             </button>

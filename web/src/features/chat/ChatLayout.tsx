@@ -17,6 +17,7 @@ import {
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router";
 
+import { ModelStatusPill } from "@/components/ModelStatusPill";
 import { TopNav } from "@/components/TopNav";
 import { RouteFallback } from "@/components/ui/Page";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -161,8 +162,10 @@ export function ChatLayout() {
           {/* Nút đóng ngăn kéo ở đầu sidebar: chỉ có ở `< md`. Brand đã nằm ở
               TopNav nên đầu ngăn kéo chỉ còn nút đóng, căn phải. */}
           {/* `h-14`: cùng chiều cao TopNav (56px, border-box gồm cả border-b)
-              nên kẻ ngang của ngăn kéo nằm đúng đường kẻ của nav kính. */}
-          <div className="flex h-14 shrink-0 items-center justify-end border-b border-border p-3 md:hidden">
+              nên kẻ ngang của ngăn kéo nằm đúng đường kẻ của nav kính.
+              Mobile không có trạng thái thu gọn nên luôn hiện chấm kết nối. */}
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-border p-3 md:hidden">
+            <ModelStatusPill />
             <button
               type="button"
               className="shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -177,8 +180,11 @@ export function ChatLayout() {
               tối một icon `text-muted-foreground` dễ bị bỏ qua. `justify-center`
               khi thu gọn để giữ cảm giác "cột icon". */}
           <div
-            className={`hidden h-14 shrink-0 items-center border-b border-border p-3 md:flex ${collapsed ? "justify-center" : "justify-end"}`}
+            className={`hidden h-14 shrink-0 items-center border-b border-border p-3 md:flex ${collapsed ? "justify-center" : "justify-between"}`}
           >
+            {/* Chỉ rail mở rộng mới hiện trạng thái kết nối — thu gọn thì ẩn để
+                cột icon giữ đúng một nút, không phá cảm giác "cột icon". */}
+            {!collapsed ? <ModelStatusPill /> : null}
             <button
               type="button"
               onClick={toggleCollapsed}

@@ -29,8 +29,13 @@ make build
 ```
 
 Mở `http://127.0.0.1:7878`. `auth set-password` cần TTY và chỉ lưu hash Argon2id trong
-`data.dir/auth.toml` với quyền `0600`; web không bật được nếu chưa có file này. Không ghi API key,
-bot token hoặc password vào `bean.toml`.
+`data.dir/auth.toml` với quyền `0600`; web không bật được nếu chưa có file này.
+
+Về secret: cách mặc định là key **chỉ nằm trong biến môi trường** (`api_key_env`), không ghi
+vào file cấu hình. Ngoại lệ có kiểm soát: key dán trong màn **Cài đặt** của UI được Bean tự ghi
+lại (`bean.toml` cho LLM, `data.dir/voice-state.json` cho voice) với quyền `0600` và **ưu tiên
+hơn** biến môi trường cùng tên. Đừng tự tay chèn key vào `bean.toml` và đừng commit chúng —
+file này nằm trong `.gitignore`. Bảng "nơi lưu gì" xem phần dưới.
 
 > **Nâng cấp từ bản cũ (đổi tên 2026-09-28).** Tên sản phẩm đổi `BeanAgent` → `bean`, nên
 > các đường dẫn mặc định cũng đổi theo và **không có migration tự động**: chạy
@@ -71,6 +76,26 @@ File mẫu đầy đủ là `bean.example.toml`. Các trường quan trọng:
 - `[[mcp_servers]]`: stdio command/args/env; `trust = false` làm mỗi MCP tool cần xác nhận.
 - `[mcp_server]` + `[[mcp_clients]]`: biến Bean thành **MCP server read-only** cho Cline/Cursor/
   OpenCode/Claude Code (xem phần kế tiếp). Mặc định tắt.
+- `[agent.user_roles]` + `[[roles]]`: **RBAC theo tag**. `user_roles` rỗng ⇒ RBAC tắt (mọi user
+  trong `allowed_users` thấy mọi tool); có ít nhất một dòng ⇒ bật và user ngoài map là
+  `no-access` (fail-closed).
+- `[[llm.providers]]`: profile LLM đổi nhanh từ UI; lựa chọn đang dùng lưu ở
+  `data.dir/llm-state.json` (file này **thắng** `bean.toml` lúc khởi động).
+- `[voice]`: push-to-talk STT/TTS — xem phần **Voice (push-to-talk)**.
+
+### Trạng thái runtime và secret nằm ở đâu
+
+| Nơi | Chứa | Ghi chú |
+|---|---|---|
+| `bean.toml` | Cấu hình tĩnh; có thể chứa `api_key` do UI ghi | `.gitignore`; key tại đây **ưu tiên hơn** `api_key_env` |
+| `data.dir/llm-state.json` | Provider + model đang chọn trong UI | **Thắng** `[llm].model` lúc khởi động; không chứa key |
+| `data.dir/voice-state.json` | Voice bật/tắt, ngôn ngữ, key ElevenLabs nhập qua UI | Key tại đây ghi đè biến môi trường `ELEVENLABS_API_KEY` |
+| `~/.config/bean/env` | Biến môi trường mà `scripts/beanctl` nạp trước khi chạy | Quyền `0600`, nằm ngoài repo |
+| `data.dir/auth.toml` | Hash mật khẩu web | Quyền `0600` |
+
+Hệ quả cần nhớ: đổi key trong biến môi trường mà Bean vẫn dùng key cũ ⇒ kiểm tra
+`bean.toml`/`voice-state.json` xem có key dán từ UI trước đó không (key file thắng env). Sửa
+`[llm].model` trong `bean.toml` mà UI không đổi ⇒ xoá hoặc sửa `llm-state.json`.
 
 ### Dùng Bean như MCP server (read-only)
 
@@ -134,7 +159,7 @@ model = "nvidia/nemotron-3-super-120b-a12b:free"
 allowed_models = ["nvidia/nemotron-3-super-120b-a12b:free", "anthropic/claude-sonnet-5"]
 api_key_env = "OPENROUTER_API_KEY"          # tên biến, không phải key
 base_url = "https://openrouter.ai/api/v1"
-max_tokens = 2048
+max_tokens = 16384   # 2048 sẽ cắt cụt model reasoning (finish_reason "length", content rỗng)
 ```
 
 ```sh
@@ -145,13 +170,18 @@ Xem model và giá hiện tại: `curl -s https://openrouter.ai/api/v1/models | 
 Xem credit/giới hạn của key: `curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" \
 https://openrouter.ai/api/v1/key`.
 
-Hai lỗi thường gặp:
+Bốn lỗi thường gặp:
 
+- **HTTP 401 `User not found`** — key sai, đã thu hồi, hoặc Bean không gửi được header
+  `Authorization` vì biến môi trường rỗng trong tiến trình của Bean (kiểm tra môi trường Bean
+  thực kế thừa — `beanctl` nạp từ `~/.config/bean/env`, không phải shell hiện tại).
 - **HTTP 402 "requires more credits, or fewer max_tokens"** — tài khoản free tier, credit ≈ 0.
   Dùng model hậu tố `:free` (giới hạn request/ngày) hoặc nạp credit.
 - **HTTP 404 "0 endpoints ... guardrail restrictions and data policy"** — endpoint bị loại do
   cài đặt **ZDR / data policy** trong tài khoản. Sửa ở
   <https://openrouter.ai/settings/privacy>, hoặc chọn model khác.
+- **HTTP 503 `Provider returned error`** — upstream của model đó quá tải (thường gặp với
+  `:free`). Không phải lỗi cấu hình hay key: đổi sang model khác trong `allowed_models`.
 
 ### Web an toàn khi truy cập từ xa
 
@@ -166,6 +196,44 @@ Mặc định chỉ nghe `127.0.0.1`. Không bind trực tiếp ra Internet. M�
 `allow_remote = true` chỉ là cờ ý thức rủi ro; Bean không tự làm TLS. Cookie có
 `HttpOnly`, `SameSite=Strict`, `Secure` khi origin HTTPS; mọi request thay đổi dữ liệu kiểm tra
 Origin/Host và `Content-Type: application/json`.
+
+## RBAC theo role
+
+`[agent.user_roles]` map identity (`web:admin`, `cli:local`, `telegram:<id>`,
+`mcp-client:<tên>`) sang role khai báo bằng `[[roles]]`:
+
+```toml
+[agent.user_roles]
+"web:admin" = "admin"
+"cli:local" = "admin"
+
+[[roles]]
+name = "admin"
+tool_tags = ["*"]
+
+[[roles]]
+name = "qa"
+tool_tags = ["dev-read", "test-run"]
+forbid_tags = ["dev-write"]
+```
+
+Quy tắc: `user_roles` rỗng ⇒ RBAC **tắt**; có ít nhất một dòng ⇒ bật, user ngoài map là
+`no-access` (không thấy tool nào — fail-closed). Bật/tắt tool và cấu hình voice trên UI chỉ dành
+cho `admin`. Bộ role mẫu đầy đủ (admin, developer, qa, it-security, monitor, finance…): xem
+`bean.example.toml` và `AGENTS.md` mục 18.
+
+## Voice (push-to-talk)
+
+Giữ nút micro trong khung chat để nói thay vì gõ. Hai chế độ trong `[voice]`:
+
+- `provider = "local"` — whisper.cpp (STT) + Piper (TTS); audio không rời khỏi máy.
+- `provider = "api"` — ElevenLabs: STT `scribe_v2`, TTS `eleven_multilingual_v2`. **Audio người
+  dùng được gửi tới nhà cung cấp bên thứ ba**; Bean cảnh báo điều này trong log lúc khởi động.
+
+Key ElevenLabs nhập trong màn Cài đặt (lưu `data.dir/voice-state.json`, quyền `0600`, thắng biến
+môi trường) hoặc đặt `ELEVENLABS_API_KEY`. Lượt chat bắt đầu bằng voice chỉ chạy được tool mức
+`Safe`. Lỗi hay gặp: transcribe trả `502` — kiểm tra Bean có kế thừa biến proxy
+(`ALL_PROXY`/`HTTPS_PROXY`) hỏng hay không, xem `docs/known-issues.md` K29.
 
 ## Telegram
 
@@ -384,6 +452,29 @@ reconnect; WebSocket client phải gửi `Sync` lại và nạp REST history.
 Backup cả `data.dir` (SQLite, auth, audit) và `workspace`; không backup riêng `auth.toml` mà
 bỏ qua database nếu cần khôi phục phiên đăng nhập. Cấu hình và secret có thể tách khỏi
 backup để giảm bề mặt lộ dữ liệu.
+
+### Khởi động, dừng và xử lý sự cố
+
+Luôn dùng `scripts/beanctl` thay vì tự `nohup`/`pkill`:
+
+```bash
+scripts/beanctl start|stop|restart|status
+```
+
+`beanctl` dừng hết tiến trình cũ trước khi khởi động, nạp biến môi trường từ
+`~/.config/bean/env`, và `status` cảnh báo khi có từ hai tiến trình. Bảng tra nhanh:
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| `Address already in use (os error 98)` | Instance cũ còn giữ port 7878 | `beanctl restart`, hoặc `lsof -i :7878` rồi kill đúng PID. Đừng `pkill -f "bean serve"` — cmdline thật là `bean --config bean.toml serve`, pkill không khớp |
+| Chat im lặng, UI vẫn bình thường | Bean khởi động thiếu key LLM | `beanctl status`; kiểm tra `~/.config/bean/env` |
+| Voice/LLM trả `502` | Tiến trình kế thừa `ALL_PROXY`/`HTTPS_PROXY` hỏng | Gỡ biến proxy khỏi môi trường của Bean (K29) |
+| LLM `401 User not found` | Key OpenRouter sai/thu hồi, hoặc env rỗng trong tiến trình Bean | Đổi key trong Cài đặt hoặc `~/.config/bean/env` |
+| LLM `503 Provider returned error` | Upstream model quá tải (thường `:free`) | Đổi model trong `allowed_models` |
+| MCP `chrome` không mở được cửa sổ | Mất `DISPLAY`/`XAUTHORITY` (khởi động bằng `env -i`) | Dùng `beanctl`; đừng dựng env sạch bằng `env -i` |
+| Đổi model không có tác dụng | `llm-state.json` thắng `bean.toml` | Xoá/sửa `data.dir/llm-state.json` |
+| Đổi key không có tác dụng | Key cũ nằm trong `bean.toml`/`voice-state.json` do UI ghi | Kiểm tra hai file đó (key file thắng env) |
+| UI sau build lại vẫn cũ | Cache trình duyệt | Hard-refresh (Ctrl+Shift+R) |
 
 ## Mô hình đe doạ và giới hạn
 

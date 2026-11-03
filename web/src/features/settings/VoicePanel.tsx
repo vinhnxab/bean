@@ -38,7 +38,7 @@ export function VoicePanel() {
           // Mount lại (reset bản nháp về snapshot) mỗi khi cấu hình hiệu lực trên
           // server đổi — sau PATCH thành công. KHÔNG gồm `enabled`: toggle không
           // đổi cấu hình, và remount giữa chừng sẽ xoá nội dung người dùng đang gõ.
-          key={`${data.provider}|${data.language}|${data.api_key_set}`}
+          key={`${data.provider}|${data.language}|${data.api_key_set}|${data.tts_voice_id}|${data.tts_voice_vi}`}
           data={data}
           // Mutation sống ở cha: form remount không được reset trạng thái
           // thành công/lỗi của lần PATCH vừa rồi (thông báo "Đã lưu" phải còn).
@@ -76,18 +76,31 @@ function VoiceForm({
   const [provider, setProvider] = useState(data.provider === "api" ? "api" : "local");
   const [language, setLanguage] = useState(data.language);
   const [apiKey, setApiKey] = useState("");
+  // Voice ID hiển thị giá trị hiện hành (seed bean.toml hoặc đã lưu qua UI) — không
+  // phải secret nên server trả nguyên giá trị; xoá sạch ô tiếng Việt = ý định bỏ
+  // override (server rơi về giọng mặc định cho câu tiếng Việt).
+  const [ttsVoiceId, setTtsVoiceId] = useState(data.tts_voice_id);
+  const [ttsVoiceVi, setTtsVoiceVi] = useState(data.tts_voice_vi);
 
   const pending = updateVoice.isPending;
   const languageTrimmed = language.trim();
-  const dirty = provider !== data.provider || languageTrimmed !== data.language || apiKey.trim() !== "";
+  const dirty =
+    provider !== data.provider ||
+    languageTrimmed !== data.language ||
+    apiKey.trim() !== "" ||
+    ttsVoiceId.trim() !== data.tts_voice_id ||
+    ttsVoiceVi.trim() !== data.tts_voice_vi;
   // Chế độ `api` phải có key từ đâu đó trước khi lưu: đã lưu trên server, env, hoặc
-  // vừa dán vào form. Chặn ở client để tránh bắt người dùng gặp 422 tránh được.
-  const canSubmit = provider === "local" || data.api_key_set || apiKey.trim() !== "";
+  // vừa dán vào form; TTS cũng cần voice id mặc định hợp lệ (URL gọi ElevenLabs).
+  // Chặn ở client để tránh bắt người dùng gặp 422 tránh được.
+  const canSubmit =
+    provider === "local" || ((data.api_key_set || apiKey.trim() !== "") && ttsVoiceId.trim() !== "");
 
   const request = (enabled: boolean): VoiceUpdateRequest => ({
     enabled,
     provider,
     language: languageTrimmed,
+    ...(provider === "api" ? { tts_voice_id: ttsVoiceId.trim(), tts_voice_vi: ttsVoiceVi.trim() } : {}),
     ...(provider === "api" && apiKey.trim() !== "" ? { api_key: apiKey.trim() } : {}),
   });
 
@@ -158,6 +171,41 @@ function VoiceForm({
           />
           <p className="text-xs text-muted-foreground">{t("voice.languageHint")}</p>
         </div>
+
+        {provider === "api" ? (
+          <>
+            <div className="grid gap-1.5">
+              <label htmlFor="voice-tts-id" className="text-sm font-medium">
+                {t("voice.ttsVoiceId")}
+              </label>
+              <Input
+                id="voice-tts-id"
+                value={ttsVoiceId}
+                onChange={(event) => setTtsVoiceId(event.target.value)}
+                placeholder="cgSgspJ2msm6clMCkdW9"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full sm:w-72"
+              />
+              <p className="text-xs text-muted-foreground">{t("voice.ttsVoiceIdHint")}</p>
+            </div>
+            <div className="grid gap-1.5">
+              <label htmlFor="voice-tts-vi" className="text-sm font-medium">
+                {t("voice.ttsVoiceVi")}
+              </label>
+              <Input
+                id="voice-tts-vi"
+                value={ttsVoiceVi}
+                onChange={(event) => setTtsVoiceVi(event.target.value)}
+                placeholder={t("voice.ttsVoiceViPlaceholder")}
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full sm:w-72"
+              />
+              <p className="text-xs text-muted-foreground">{t("voice.ttsVoiceViHint")}</p>
+            </div>
+          </>
+        ) : null}
 
         {provider === "api" ? (
           <div className="grid gap-1.5">

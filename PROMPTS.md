@@ -2,6 +2,10 @@
 
 Dùng được với Claude Code, Codex CLI, Cursor, Aider... Các prompt viết sẵn để **dán nguyên văn**, từng cái một. Đi kèm `agents.md` (v3).
 
+> **Lưu ý (cập nhật 2026-11-02):** bộ prompt dưới đây chỉ phủ M1–M17. Milestone M18 trở đi (RBAC,
+> monitor/finance/security-scan/marketing, MCP server, browser CDP, voice push-to-talk, đổi tên
+> `bean`) dùng `Plan.md` làm nguồn prompt/requirements chính.
+
 ---
 
 ## Chuẩn bị (làm một lần)

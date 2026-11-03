@@ -79,6 +79,12 @@ fn effective_voice_config(state: &WebState) -> VoiceConfig {
         if let Some(key) = &saved.api_key {
             voice.api_key = Some(key.clone());
         }
+        if let Some(voice_id) = &saved.tts_voice_id {
+            voice.tts_voice_id = voice_id.clone();
+        }
+        if let Some(voice_vi) = &saved.tts_voice_vi {
+            voice.tts_voice_vi = Some(voice_vi.clone());
+        }
     }
     voice
 }
@@ -111,6 +117,8 @@ pub(super) async fn voice_status(
         language: voice.language.clone(),
         max_speak_chars: voice.max_speak_chars,
         api_key_set: voice_api_key_set(&voice),
+        tts_voice_id: voice.tts_voice_id.clone(),
+        tts_voice_vi: voice.tts_voice_vi.clone().unwrap_or_default(),
     }))
 }
 
@@ -175,6 +183,26 @@ pub(super) async fn voice_update(
         };
         config_changed = true;
     }
+    // Voice id mặc định là bắt buộc (TTS cần voice id trong URL) nên rỗng là lỗi;
+    // voice id tiếng Việt thì rỗng là ý định xoá override (rơi về giọng mặc định).
+    if let Some(voice_id) = request.tts_voice_id.as_deref() {
+        let trimmed = voice_id.trim();
+        if trimmed.is_empty() {
+            return Err(ApiFailure::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_voice_id",
+                "voice id rỗng — nhập voice ID ElevenLabs (elevenlabs.io → Voices) hoặc giữ nguyên giá trị hiện tại",
+            ));
+        }
+        config_changed |= trimmed != next.tts_voice_id;
+        next.tts_voice_id = trimmed.to_string();
+    }
+    if let Some(voice_id) = request.tts_voice_vi.as_deref() {
+        let trimmed = voice_id.trim().to_string();
+        let new_value = (!trimmed.is_empty()).then_some(trimmed);
+        config_changed |= new_value != next.tts_voice_vi;
+        next.tts_voice_vi = new_value;
+    }
 
     // Dựng provider mới khi cấu hình đổi — hoặc khi chưa có provider nào (lần đầu cấu
     // hình từ UI trên seed chưa đủ). Toggle-only trên provider sống thì bỏ qua.
@@ -219,6 +247,8 @@ pub(super) async fn voice_update(
         provider: Some(next.provider),
         language: Some(next.language.clone()),
         api_key: next.api_key.clone(),
+        tts_voice_id: Some(next.tts_voice_id.clone()),
+        tts_voice_vi: next.tts_voice_vi.clone(),
     };
     let path = voice_state_path(&state.config).map_err(|_| ApiFailure::internal())?;
     VoiceState::save(&path, &saved).map_err(|_| {
@@ -239,6 +269,8 @@ pub(super) async fn voice_update(
         language: next.language.clone(),
         max_speak_chars: state.config.voice.max_speak_chars,
         api_key_set: voice_api_key_set(&next),
+        tts_voice_id: next.tts_voice_id.clone(),
+        tts_voice_vi: next.tts_voice_vi.clone().unwrap_or_default(),
     }))
 }
 

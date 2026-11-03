@@ -7,7 +7,7 @@ use std::time::Duration;
 use bean_speech::{
     AudioInput, ElevenLabsSpeech, FakeSpeech, LocalSpeech, SpeechError, SpeechProvider,
 };
-use bean_types::config::{Config, SpeechProviderKind};
+use bean_types::config::{Config, SpeechProviderKind, VoiceConfig};
 use secrecy::SecretString;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -16,6 +16,21 @@ fn audio_webm() -> AudioInput {
     AudioInput {
         data: b"fake-audio-bytes".to_vec(),
         mime: "audio/webm".to_string(),
+    }
+}
+
+/// Cấu hình ElevenLabs trỏ tới wiremock server, tùy chỉnh giọng TTS nếu cần.
+fn api_config(
+    base_url: impl Into<String>,
+    tts_voice_id: &str,
+    tts_voice_vi: Option<&str>,
+) -> VoiceConfig {
+    VoiceConfig {
+        api_base_url: base_url.into(),
+        tts_voice_id: tts_voice_id.to_string(),
+        tts_voice_vi: tts_voice_vi.map(str::to_string),
+        timeout_seconds: 10,
+        ..VoiceConfig::default()
     }
 }
 
@@ -115,14 +130,9 @@ async fn elevenlabs_transcribes_and_synthesizes() {
         .mount(&server)
         .await;
 
-    let speech = ElevenLabsSpeech::new(
-        server.uri(),
+    let speech = ElevenLabsSpeech::from_config(
+        &api_config(server.uri(), "vid123", None),
         SecretString::from("key".to_string()),
-        "scribe_v2".into(),
-        "eleven_multilingual_v2".into(),
-        "vid123".into(),
-        "vi".into(),
-        Duration::from_secs(10),
     )
     .unwrap();
 
@@ -131,6 +141,133 @@ async fn elevenlabs_transcribes_and_synthesizes() {
     let out = speech.synthesize("trời hôm nay đẹp").await.unwrap();
     assert_eq!(out.mime, "audio/mpeg");
     assert_eq!(out.data, vec![1, 2, 3, 4]);
+}
+
+/// Văn bản có dấu tiếng Việt dùng giọng `vi` riêng; văn bản không dấu dùng giọng mặc định.
+#[tokio::test]
+async fn elevenlabs_selects_voice_by_language() {
+    let server = MockServer::start().await;
+    // `.expect(1)`: wiremock xác minh đúng một lần gọi trên mỗi path khi server drop.
+    // Lưu ý thứ tự API wiremock 0.6: `expect` nằm trên `Mock`, sau `respond_with`.
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-vi"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "audio/mpeg")
+                .set_body_bytes(vec![1u8]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-en"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "audio/mpeg")
+                .set_body_bytes(vec![2u8]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let speech = ElevenLabsSpeech::from_config(
+        &api_config(server.uri(), "vid-en", Some("vid-vi")),
+        SecretString::from("key".to_string()),
+    )
+    .unwrap();
+
+    speech.synthesize("Trời hôm nay đẹp quá").await.unwrap();
+    speech
+        .synthesize("The weather is nice today")
+        .await
+        .unwrap();
+}
+
+/// Chưa cấu hình giọng `vi` thì văn bản tiếng Việt vẫn đọc bằng giọng mặc định.
+#[tokio::test]
+async fn elevenlabs_falls_back_to_default_voice_without_vi() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-en"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "audio/mpeg")
+                .set_body_bytes(vec![3u8]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let speech = ElevenLabsSpeech::from_config(
+        &api_config(server.uri(), "vid-en", None),
+        SecretString::from("key".to_string()),
+    )
+    .unwrap();
+
+    speech.synthesize("Xin chào").await.unwrap();
+}
+
+/// Giọng `vi` bị ElevenLabs từ chối (402 paid_plan_required — gói free không dùng được
+/// voice library) thì văn bản tiếng Việt vẫn phải được đọc bằng giọng mặc định.
+#[tokio::test]
+async fn elevenlabs_falls_back_to_default_voice_when_vi_voice_locked() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-vi"))
+        .respond_with(ResponseTemplate::new(402).set_body_json(serde_json::json!({
+            "detail": {"status": "paid_plan_required"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-en"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "audio/mpeg")
+                .set_body_bytes(vec![4u8]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let speech = ElevenLabsSpeech::from_config(
+        &api_config(server.uri(), "vid-en", Some("vid-vi")),
+        SecretString::from("key".to_string()),
+    )
+    .unwrap();
+
+    let out = speech.synthesize("Xin chào").await.unwrap();
+    assert_eq!(out.mime, "audio/mpeg");
+    assert_eq!(out.data, vec![4]);
+}
+
+/// Giọng mặc định cũng lỗi (vd 401) thì lỗi phải được truyền ra — không nuốt im lặng.
+#[tokio::test]
+async fn elevenlabs_propagates_error_when_fallback_also_fails() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-vi"))
+        .respond_with(ResponseTemplate::new(402))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/text-to-speech/vid-en"))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let speech = ElevenLabsSpeech::from_config(
+        &api_config(server.uri(), "vid-en", Some("vid-vi")),
+        SecretString::from("key".to_string()),
+    )
+    .unwrap();
+
+    let error = speech.synthesize("Xin chào").await.unwrap_err();
+    assert!(matches!(error, SpeechError::Failed(_)), "{error:?}");
+    assert!(error.to_string().contains("401"), "{error}");
 }
 
 #[test]

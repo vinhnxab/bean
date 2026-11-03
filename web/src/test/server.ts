@@ -195,6 +195,8 @@ export const testServer = setupServer(
       provider: "local",
       language: "vi",
       max_speak_chars: 400,
+      tts_voice_id: "voice-default",
+      tts_voice_vi: "voice-vi",
       api_key_set: false,
     }),
   ),

@@ -59,7 +59,15 @@ pub struct VoiceConfig {
     /// Model TTS của ElevenLabs (`eleven_multilingual_v2` hỗ trợ tiếng Việt).
     pub tts_model: String,
     /// Voice ID dùng cho TTS (thuộc voice vault của ElevenLabs, nằm trong URL của API).
+    /// Đây là giọng **mặc định/fallback** — dùng cho mọi văn bản không phải tiếng Việt.
     pub tts_voice_id: String,
+    /// Voice ID cho văn bản **tiếng Việt** (tuỳ chọn, chỉ có ý nghĩa với provider `api`).
+    ///
+    /// Văn bản cần đọc có ký tự riêng của tiếng Việt (dấu thanh, `ă â đ ê ô ơ ư`) sẽ dùng
+    /// giọng này; thiếu nó (hoặc văn bản không có dấu) thì rơi về [`VoiceConfig::tts_voice_id`].
+    /// Cho phép cấu hình hai giọng theo ngôn ngữ, ví dụ tiếng Việt dùng một giọng riêng
+    /// trong khi tiếng Anh dùng giọng mặc định.
+    pub tts_voice_vi: Option<String>,
 }
 
 impl Default for VoiceConfig {
@@ -85,6 +93,7 @@ impl Default for VoiceConfig {
             // Voice "Rachel" (mặc định phổ biến của ElevenLabs) — đổi trong bean.toml nếu
             // bạn dùng voice khác trong voice vault của mình.
             tts_voice_id: "21m00Tcm4TlvDq8ikWAM".to_string(),
+            tts_voice_vi: None,
         }
     }
 }

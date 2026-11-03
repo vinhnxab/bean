@@ -23,4 +23,14 @@ language?: string | null,
  * **không bao giờ trả lại** — GET chỉ báo `api_key_set`. Chuỗi rỗng = ý định xoá
  * key đã lưu (fallback về biến môi trường nếu còn).
  */
-api_key?: string | null, };
+api_key?: string | null, 
+/**
+ * Đổi voice ID mặc định (tiếng Anh + fallback); bỏ qua khi `None`. Bắt buộc
+ * không rỗng — TTS cần voice id hợp lệ trong URL gọi ElevenLabs.
+ */
+tts_voice_id?: string | null, 
+/**
+ * Đổi voice ID cho văn bản tiếng Việt; bỏ qua khi `None`. Chuỗi rỗng = ý định
+ * xoá override đã lưu (câu tiếng Việt rơi về giọng mặc định).
+ */
+tts_voice_vi?: string | null, };

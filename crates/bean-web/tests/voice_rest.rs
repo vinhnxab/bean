@@ -432,6 +432,78 @@ async fn voice_update_api_without_key_is_rejected_and_not_persisted() {
     assert!(!state_file.exists(), "không được persist khi dựng thất bại");
 }
 
+// Đổi voice ID (mặc định + tiếng Việt) từ UI: persist vào state file và GET trả lại
+// nguyên giá trị để form khôi phục — voice id không phải secret nên trả nguyên vẹn.
+#[tokio::test]
+async fn voice_update_persists_tts_voices_and_status_returns_them() {
+    let (dir, app) = fixture(true).await;
+    let token = login(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"provider":"api","api_key":"sk-test-1234abcd","tts_voice_id":"vid-en","tts_voice_vi":"vid-vi"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_string(response).await;
+    assert!(payload.contains("\"tts_voice_id\":\"vid-en\""), "{payload}");
+    assert!(payload.contains("\"tts_voice_vi\":\"vid-vi\""), "{payload}");
+
+    let saved = std::fs::read_to_string(dir.path().join("data").join("voice-state.json")).unwrap();
+    assert!(saved.contains("\"tts_voice_id\":\"vid-en\""), "{saved}");
+    assert!(saved.contains("\"tts_voice_vi\":\"vid-vi\""), "{saved}");
+
+    let status = app
+        .clone()
+        .oneshot(get_request("/api/voice", Some(&token)))
+        .await
+        .unwrap();
+    let payload = body_string(status).await;
+    assert!(payload.contains("\"tts_voice_id\":\"vid-en\""), "{payload}");
+    assert!(payload.contains("\"tts_voice_vi\":\"vid-vi\""), "{payload}");
+}
+
+// PATCH `tts_voice_id` rỗng ⇒ 422 (TTS cần voice id trong URL) và KHÔNG persist;
+// PATCH `tts_voice_vi` rỗng ⇒ xoá override, câu tiếng Việt rơi về giọng mặc định.
+#[tokio::test]
+async fn voice_update_rejects_empty_default_voice_and_clears_vi_voice() {
+    let (dir, app) = fixture(true).await;
+    let token = login(&app).await;
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"provider":"api","api_key":"sk-test-1234abcd","tts_voice_id":" "}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body_string(response).await.contains("invalid_voice_id"));
+    assert!(
+        !dir.path().join("data").join("voice-state.json").exists(),
+        "không được persist khi request hỏng"
+    );
+
+    let response = app
+        .clone()
+        .oneshot(patch_json(
+            "/api/voice",
+            Some(&token),
+            r#"{"enabled":true,"provider":"api","api_key":"sk-test-1234abcd","tts_voice_vi":""}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = body_string(response).await;
+    assert!(payload.contains("\"tts_voice_vi\":\"\""), "{payload}");
+}
+
 #[tokio::test]
 async fn voice_update_rejects_unknown_provider_and_empty_language() {
     let (_dir, app) = fixture(true).await;

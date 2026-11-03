@@ -12,6 +12,14 @@
 **HEAD khi lập báo cáo:** `62e8350` (`docs: track rust future-incompatibility warning`)
 **Phạm vi:** milestone M1–M17 và mức độ sẵn sàng vận hành của phiên bản hiện tại.
 
+> **Cập nhật bổ sung 2026-11-02** (chỉ tài liệu, **không re-run `make check`** — bảng mục 4 giữ
+> trạng thái của báo cáo gốc): repo đã đi tiếp **M21–M28** — RBAC theo tag (M21), monitor /
+> finance / security-scan / marketing (M22–M24), Bean làm MCP server (M25), tool browser CDP
+> (M26), QA test-runner **và** voice push-to-talk (M27 — hai tính năng cùng mang nhãn này trong
+> code/tài liệu), đổi tên `BeanAgent` → `bean` (M28). Vận hành thật đã xác minh: chat qua
+> OpenRouter (`openai_compat`) chạy ổn sau khi đổi model, ElevenLabs STT/TTS hoạt động. Bảng
+> mục 2 dưới đây dừng ở M25; M26–M28 xem các dòng bổ sung cuối bảng.
+
 > Báo cáo phân biệt rõ **đã có mã nguồn + test tự động** với **đã kiểm chứng trên hệ thống thật**. Nhiều chức năng đã triển khai và xanh test, nhưng chưa có credential để chạy với LLM thật, Telegram thật hoặc thời gian vận hành dài.
 
 ## 1. Tóm tắt điều hành
@@ -55,6 +63,10 @@
 | **M23 — Security-scan** | 🟡 Code + test xanh, chưa bật | (commit này) | `[[infra_scope]]` kiểm ở **tầng code** trước khi spawn scanner, rỗng = từ chối mọi thứ; chỉ nhận IP/CIDR (chống TOCTOU); code tự dựng argv + `Sandbox::run_argv` (không `sh -c`); sandbox riêng có mạng; `Dangerous` ⇒ không cho phép trong phiên; output bọc untrusted | `[[infra_scope]]` **đang rỗng** (bạn chọn fail-closed) nên chưa quét được gì thật; cảnh báo mức cao chưa nối `Router::notify` (K23) |
 | **M24 — Marketing** | ✅ Hoàn thành | (commit này) | Cơ chế `allowed_tool_tags` (danh sách trắng theo role) + `Tool::also_visible_to`; `marketing_draft` (Confirm, **không gọi mạng**), `marketing_publish` (Dangerous cứng trong code), role `marketing` tách domain; hướng dẫn content-integrity chèn vào system prompt (M24 mục 5) | Chưa điền endpoint/credential thật |
 | **M25 — Bean làm MCP server** | 🟡 Code + test xanh, đã smoke test thật | (commit này) | `mcp serve` (stdio) và `mcp serve --http` (streamable-HTTP/SSE); token dài hạn lưu **hash** trong bảng `mcp_clients` (migration v6), lệnh `auth mcp-token add/list/revoke`; identity `mcp-client:<id>`; cổng expose cứng 3 tag + `Risk::Safe` **chặn trước** RBAC nên role `admin` cũng không gọi được tool ghi; tool mới `memory_query`; `Router::call_tool_as` tái dùng `RolePermissions::allows`; tham số client được làm sạch ở ranh giới duy nhất | ~~`/mcp` chưa rate-limit, log truy cập chưa tách file riêng (K24)~~ — **K24 đã đóng 2026-09-27**: rate-limit theo token + IP **chỉ** cho transport HTTP (tái dùng thuật toán khoá của `POST /api/auth/login`), `audit/mcp.jsonl` ghi song song `audit.jsonl` (`D16.10`–`D16.13`); chưa thử với Cline/Cursor **thật** (mới chỉ smoke test bằng JSON-RPC thô) |
+| **M26 — Tool browser nội bộ (CDP)** | 🟡 Code + test xanh | — | Nói thẳng Chrome DevTools Protocol, không tải Chrome lúc runtime; origin ngoài allowlist luôn `Dangerous`; output bọc untrusted | Chưa vận hành dài hạn trên nhiều site thật |
+| **M27 — QA test-runner** | 🟡 Code + test xanh | — | `qa_test` chạy test suite có sẵn, workspace mount read-only; role `qa` không có đường ghi nào (four-eyes) | Chưa kiểm chứng với repo thật có suite lớn |
+| **M27 — Voice push-to-talk** | 🟡 Đã chạy thật | — | `bean-speech`: STT/TTS `local` (whisper.cpp + Piper) hoặc `api` (ElevenLabs `scribe_v2` / `eleven_multilingual_v2`); lượt voice chỉ chạy tool `Risk::Safe`; key nhập qua UI lưu `data.dir/voice-state.json` (0600) | STT thật OK 2026-11-02 (trước đó `502` do kế thừa proxy env — K29); TTS premade đã test 200 ngày 2026-10-28 |
+| **M28 — Đổi tên `BeanAgent` → `bean`** | ✅ Hoàn thành | — | Đổi tên crate/lệnh/đường dẫn toàn repo; không migration tự động: `mv ~/.BeanAgent ~/.bean`, `BEANAGENT_*` → `BEAN_*` (D18.x) | Tag `pre-rename-beanagent` giữ trạng thái gốc |
 
 **Chú thích:** “🟡” không có nghĩa code chưa tồn tại; đó là trường hợp logic đã triển khai và test xanh nhưng tiêu chí vận hành thực tế hoặc known issue liên quan chưa hoàn tất.
 
@@ -127,7 +139,9 @@ Dependency chain: `teloxide 0.17.0` → `aquamarine 0.6.0` → `proc-macro-error
 
 - Có binary release tại `target/release/bean`.
 - Đã tạo `~/.bean/auth.toml` với quyền `0600`.
-- **Chưa có `bean.toml`**, nên `serve` dùng provider mặc định Anthropic và yêu cầu `ANTHROPIC_API_KEY`.
+- ~~**Chưa có `bean.toml`**~~ — **cập nhật 2026-11-02:** đã có, kèm RBAC (`[agent.user_roles]` +
+  4 role). Provider đang dùng là OpenRouter qua `openai_compat`; key qua UI/env. Hai file trạng
+  thái runtime `llm-state.json`/`voice-state.json` **thắng** `bean.toml` lúc khởi động.
 - `auth.toml` đã có, nên bước xác thực Web đã sẵn sàng.
 - Để chạy fake/demo không cần key:
 
@@ -237,9 +251,13 @@ cp bean.example.toml bean.toml
 
 Các nhóm sau không phải milestone đang dang dở và không nên tính là “chưa hoàn thành” nếu triển khai v1:
 
-- Multi-user/SaaS, ứng dụng mobile native, voice, fine-tuning, multi-agent.
-- Điều khiển trình duyệt.
-- WhatsApp/Signal.
+> **Cập nhật 2026-11-02:** voice (M27) và điều khiển trình duyệt (M26) **đã vào scope và triển
+> khai** — không còn "ngoài phạm vi". Các "agent con" (M21–M24) là **role trong cùng một tiến
+> trình**, không phải multi-agent song song (vẫn backlog, `Plan.md` mục 6).
+
+- Multi-user/SaaS, ứng dụng mobile native, fine-tuning.
+- Sub-agent song song (kiểu Hermes), kiến trúc B nhiều tiến trình — backlog.
+- Kênh chat khác ngoài web + Telegram (WhatsApp/Signal/Discord — bộ kênh cuối đã chốt 2026-09-26).
 - Chỉnh sửa hoặc tạo lại tin nhắn trong UI.
 - TLS trực tiếp và các tính năng vận hành quy mô lớn.
 
@@ -261,7 +279,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [x] `make e2e` và scheduler smoke xanh.
 - [x] Release có UI nhúng và headless build thành công.
 - [x] M17(A) streaming token hoàn thành.
-- [ ] Provider thật đã smoke test.
+- [x] Provider thật đã smoke test (OpenRouter qua `openai_compat`, 2026-11-02; Telegram thật vẫn ⬜).
 - [ ] Telegram bot thật đã smoke test.
 - [ ] Scheduler thật đã kiểm chứng.
 - [ ] MCP server bên thứ ba đã kiểm thử.
@@ -274,4 +292,4 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 
 ## 11. Kết luận
 
-Bean hiện là một **bản v1 chức năng phong phú, tự kiểm thử tốt và có thể chạy demo bằng FakeProvider**. M17(A) đã hoàn thành. Rủi ro lớn nhất hiện nay không nằm ở thiếu chức năng chính, mà ở việc chưa kiểm chứng hệ thống thật: **K1**, credential/provider/Telegram, E2E bền vững, soak test và production deployment.
+Bean hiện là một **bản v1 chức năng phong phú, tự kiểm thử tốt và có thể chạy demo bằng FakeProvider**. M17(A) đã hoàn thành. Rủi ro lớn nhất hiện nay không nằm ở thiếu chức năng chính, mà ở việc chưa kiểm chứng hệ thống thật: provider dài hạn, Telegram thật (K15), E2E bền vững, soak test và production deployment (K1 đã đóng 2026-09-27).

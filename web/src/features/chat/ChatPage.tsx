@@ -244,16 +244,6 @@ function ChatSession({ sessionId }: { sessionId: number }) {
           aria-live="polite"
           aria-relevant="additions text"
         >
-          {/* Thanh tiêu đề: `sticky top-14` dừng ngay dưới TopNav kính; gradient
-              mờ dần thay cho `border-b` cứng để nội dung chạy dưới không bị cắt
-              ngang bởi một đường kẻ. `-mx` khử đệm của vùng cuộn để gradient
-              trải hết bề ngang như khi header còn nằm ngoài. */}
-          <header className="sticky top-14 z-10 -mx-2 bg-gradient-to-b from-surface via-surface to-transparent px-4 pb-4 pt-3 md:-mx-4 md:px-6">
-            <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
-              <h1 className="truncate text-sm font-semibold text-ink-muted">{t("chat.sessions")}</h1>
-              <ConnectionBadge status={status} />
-            </div>
-          </header>
           <div className="mx-auto max-w-4xl">
             {history.isPending ? (
               <p className="py-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
@@ -413,34 +403,6 @@ function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
         ))}
       </ul>
     </div>
-  );
-}
-
-function ConnectionBadge({ status }: { status: "idle" | "connecting" | "connected" | "reconnecting" }) {
-  const { t } = useI18n();
-  const dotRef = useRef<HTMLSpanElement>(null);
-
-  // Chấm "đã kết nối" đập nhẹ — sống khác với chấm đứng yên báo mất kết nối.
-  useGsapAnimate(() => {
-    const dot = dotRef.current;
-    if (!dot || status !== "connected") return;
-    gsap.to(dot, { scale: 1.4, opacity: 0.5, duration: 0.7, ease: "sine.inOut", yoyo: true, repeat: -1 });
-  }, [status]);
-
-  const label =
-    status === "connected"
-      ? t("chat.connected")
-      : status === "reconnecting" || status === "connecting"
-        ? t("chat.reconnecting")
-        : t("chat.offline");
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-xs ${status === "connected" ? "text-live" : "text-need"}`}
-      role="status"
-    >
-      <span ref={dotRef} className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
-      {label}
-    </span>
   );
 }
 

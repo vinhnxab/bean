@@ -34,4 +34,13 @@ max_speak_chars: number,
  * `true` khi chế độ `api` đã có API key (lưu runtime qua UI hoặc biến môi trường).
  * Chỉ cờ trạng thái — không bao giờ trả giá trị key.
  */
-api_key_set: boolean, };
+api_key_set: boolean, 
+/**
+ * Voice ID mặc định đang có hiệu lực (tiếng Anh + fallback). Không phải secret nên
+ * trả nguyên giá trị để UI hiển thị trong form cấu hình.
+ */
+tts_voice_id: string, 
+/**
+ * Voice ID cho văn bản tiếng Việt đang có hiệu lực; rỗng = dùng giọng mặc định.
+ */
+tts_voice_vi: string, };

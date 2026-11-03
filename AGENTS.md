@@ -1,5 +1,13 @@
 # Bean— Đặc tả kỹ thuật (v3: Rust toàn bộ + giao diện React)
 
+> **Trạng thái tài liệu (cập nhật 2026-11-02).** Bản v3 là đặc tả gốc cho M1–M17 và vẫn là nguồn chuẩn cho
+> kiến trúc, bảo mật và quy tắc làm việc. Sau đó repo đã đi tiếp M21–M28: RBAC theo tag, các role
+> monitor/finance/security-scan/marketing/QA, Bean làm MCP server, tool browser, voice push-to-talk, đổi tên
+> `BeanAgent` → `bean`. Các phần đó được ghi tại: trạng thái milestone `docs/status-report.md`, quyết định
+> thiết kế `docs/decisions.md`, điểm yếu đã biết `docs/known-issues.md`, kế hoạch `Plan.md`, cấu hình đầy đủ
+> `bean.example.toml`. Khi file này **mâu thuẫn** với `docs/decisions.md` hoặc với code đã có test, coi đó là
+> dấu hiệu tài liệu lỗi thời: dừng và hỏi theo quy tắc 4, đừng tự chọn một phía.
+
 ## 0. Quy tắc làm việc dành cho coding agent
 
 Đọc kỹ phần này trước khi viết bất kỳ dòng code nào.
@@ -9,9 +17,9 @@
 3. **Không bịa API.** Với crate/package ngoài, đọc source đã tải (`~/.cargo/registry/src/...`, `web/node_modules/<pkg>`) hoặc docs để xác nhận chữ ký hàm, tên feature, cú pháp cấu hình trước khi dùng. Tên thư viện trong tài liệu này là **đề xuất**; nếu thấy lựa chọn tốt hơn hoặc thư viện đã ngừng bảo trì, dừng lại nêu lý do và hỏi.
 4. **Không mở rộng phạm vi.** Nếu spec thiếu hoặc mâu thuẫn, dừng lại, nêu vấn đề, đề xuất phương án rồi hỏi người dùng.
 5. **Commit sau mỗi milestone**: `feat(m3): tool registry and agent loop`.
-6. **Không hardcode secret.** API key và token chỉ đọc từ biến môi trường.
+6. **Không hardcode secret.** API key và token mặc định chỉ đọc từ biến môi trường (`*_env`). Ngoại lệ duy nhất, có kiểm soát: key người dùng dán qua UI được lưu quyền `0600` (mục 15.6). Agent không tự ghi key vào file cấu hình, không in key ra log, chat hay dòng lệnh terminal.
 7. **Cuối mỗi milestone** báo cáo ngắn: đã làm gì, chạy lệnh nào để kiểm tra, còn tồn đọng gì.
-8. **Rust:** không `unwrap()`/`expect()`/`panic!` trong code không phải test (trừ khi có comment giải thích bất biến); `#![forbid(unsafe_code)]` trừ khi có lý do được duyệt.
+8. **Rust:** không `unwrap()`/`expect()`/`panic!` trong code không phải test (trừ khi có comment giải thích bất biến); `#![forbid(unsafe_code)]` trừ khi có lý do được duyệt. Workspace đã bật `deny` cho `clippy::unwrap_used`, `expect_used`, `panic`, `todo`, `too_many_arguments`, `type_complexity` (xem `[workspace.lints]` trong `Cargo.toml`): chạm lint thì sửa thiết kế (gom tham số thành struct, tách kiểu), không thêm `#[allow]` trần.
 9. **Web:** TypeScript `strict`, không `any`, không `dangerouslySetInnerHTML`, không tải tài nguyên từ CDN/domain ngoài, không sửa tay file sinh tự động.
 10. **Thiết kế hướng đối tượng + SOLID** — áp dụng theo idiom Rust/TypeScript (struct + trait + composition), không ép kiểu kế thừa class như Java:
     - **SRP:** mỗi struct/trait/hàm một trách nhiệm. Struct mà vừa đụng DB vừa HTTP vừa policy là dấu hiệu phải tách.
@@ -38,7 +46,14 @@ Xây dựng **personal AI agent self-hosted, chạy lâu dài**, phát hành dư
 - An toàn: sandbox, xin xác nhận với hành động nguy hiểm, chống prompt injection và XSS/rò rỉ dữ liệu qua giao diện.
 - (Giai đoạn sau) Learning loop: tự đề xuất skill mới từ các task đã hoàn thành.
 
-**Ngoài phạm vi v1:** đa người dùng/SaaS, ứng dụng mobile native, voice, fine-tuning, multi-agent, điều khiển trình duyệt, WhatsApp/Signal (chưa có thư viện Rust trưởng thành), chỉnh sửa/tạo lại tin nhắn trong UI.
+**Đã mở rộng sau v1** (chi tiết `docs/status-report.md` mục 2):
+
+- **RBAC theo tag** (M21): `agent.user_roles` + `[[roles]]`; bật RBAC là **fail-closed** — user không có trong map là `no-access`, không thấy tool nào. Các "agent con" (developer, qa, monitor, security-scan, marketing, finance-readonly) là **role trong cùng một tiến trình**, không phải tiến trình riêng.
+- **Bean làm MCP server read-only** (M25) cho Cline/Cursor/OpenCode/Claude Code.
+- **Tool browser nội bộ** nói thẳng Chrome DevTools Protocol (M26), chạy `Dangerous` theo origin.
+- **Voice push-to-talk** trên web (M27): STT/TTS `local` (whisper.cpp + Piper) hoặc `api` (ElevenLabs; audio **rời khỏi máy**). Lượt voice chỉ chạy tool `Risk::Safe`.
+
+**Ngoài phạm vi (hiện tại):** đa người dùng/SaaS, ứng dụng mobile native, fine-tuning, sub-agent chạy song song (`Plan.md` mục 6), kênh chat khác ngoài web + Telegram (Discord/Slack/WhatsApp/Signal), chỉnh sửa/tạo lại tin nhắn trong UI. Voice, điều khiển trình duyệt và multi-role từng nằm trong danh sách này ở v1 nhưng **đã được đưa vào scope**.
 
 ---
 
@@ -126,36 +141,48 @@ Toolchain `stable`, Cargo workspace, `tokio`.
 ```
 bean/
 ├─ AGENTS.md                        # file này
+├─ Plan.md  README.md               # kế hoạch milestone M18+ · hướng dẫn cài đặt/vận hành
+├─ docs/                            # decisions.md · known-issues.md · security-review.md · status-report.md
+├─ bean.example.toml                # cấu hình mẫu đầy đủ (bean.toml thật nằm trong .gitignore)
 ├─ Makefile
 ├─ Cargo.toml                       # workspace
 ├─ crates/
 │  ├─ bean-types/                   # Message, ToolCall, ToolSpec, LlmResponse...
 │  ├─ bean-llm/                     # trait LlmProvider, anthropic, openai_compat, fake
-│  ├─ bean-security/                # paths (cap-std), sandbox, ssrf, policy, audit
+│  ├─ bean-security/                # paths (cap-std), sandbox, ssrf, policy, audit, ratelimit
 │  ├─ bean-tools/                   # trait Tool, registry, builtin/*, mcp
 │  ├─ bean-memory/                  # SQLite store, FTS5, compaction
 │  ├─ bean-skills/                  # loader, skill tools
-│  ├─ bean-core/                    # agent loop, context, router, scheduler, learning, trait Channel
+│  ├─ bean-core/                    # agent loop, context, router, scheduler, learning, mcp_server, trait Channel
 │  ├─ bean-channels/                # telegram (bộ kênh cuối cùng: web + telegram)
-│  ├─ bean-web/                     # axum: auth, REST, WebSocket, phục vụ UI nhúng, kiểu API (ts-rs)
-│  └─ bean/                         # bin: `bean chat | serve | auth`
+│  ├─ bean-web/                     # axum: auth, REST, WebSocket, endpoint voice, phục vụ UI nhúng, kiểu API (ts-rs)
+│  ├─ bean-speech/                  # STT/TTS push-to-talk: local (whisper.cpp + piper) hoặc ElevenLabs (M27)
+│  ├─ bean-browser/                 # tool browser nội bộ, nói thẳng Chrome DevTools Protocol (M26)
+│  ├─ bean-billing/                 # domain finance-readonly: đọc chi phí cloud (M22a)
+│  ├─ bean-scan/                    # domain security-scan: kiểm [[infra_scope]] rồi mới chạy scanner (M23)
+│  ├─ bean-marketing/               # domain marketing: đọc web, lưu nháp, đăng thật (M24)
+│  ├─ bean-qa/                      # domain QA: chạy test suite có sẵn, workspace mount read-only (M27)
+│  ├─ bean-mcp-test-server/         # MCP stdio server tối thiểu, chỉ dùng cho test (M14)
+│  └─ bean/                         # bin: `bean chat | serve | auth | mcp`
 ├─ web/                             # React app (mục 12)
 │  ├─ package.json  pnpm-lock.yaml  vite.config.ts  biome.json  tsconfig.json
 │  └─ src/
 │     ├─ main.tsx  App.tsx  router.tsx
 │     ├─ api/  client.ts  ws.ts  generated/      # generated/ do ts-rs sinh, không sửa tay
 │     ├─ store/          # zustand
-│     ├─ features/       # chat, sessions, memory, skills, tasks, audit, auth, status
+│     ├─ features/       # chat, sessions, memory, skills, tasks, audit, auth, status, hub, tools, mcp, usage, system, settings
 │     ├─ components/     # ui/ (shadcn), markdown/, toolcall/, confirm/
 │     ├─ i18n/           # vi.ts, en.ts
 │     └─ test/
 ├─ skills/                          # skill có sẵn
 ├─ workspace/                       # thư mục làm việc của agent (gitignore)
 ├─ deploy/                          # systemd unit, Dockerfile nhiều tầng, image sandbox
+├─ scripts/                         # beanctl (start|stop|restart|status — luôn đúng MỘT instance), wipe-history.sh
+├─ vendor/                          # proc-macro-error2 đã vá E0365 (K21), qua [patch.crates-io]
 └─ tests/e2e/
 ```
 
-Cấu hình: một file `bean.toml` (mục 18). Dữ liệu chạy (SQLite, audit log, auth) ở `data.dir` (mặc định `~/.bean`).
+Cấu hình: một file `bean.toml` (mục 18). Dữ liệu chạy (SQLite, audit log, auth) ở `data.dir` (mặc định `~/.bean`). Hai file trạng thái runtime nằm cạnh đó và **thắng `bean.toml` lúc khởi động**: `llm-state.json` (profile + model đang chọn trong UI) và `voice-state.json` (bật/tắt voice, ngôn ngữ, key nhập qua UI). Muốn sửa model/voice mà `bean.toml` không có tác dụng: kiểm tra hai file này trước.
 
 ---
 
@@ -450,6 +477,13 @@ Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thự
 | `GET /api/skills/drafts` · `POST /api/skills/drafts/:id/approve` \| `reject` | Duyệt skill nháp (M15) |
 | `GET/POST /api/tasks` · `PATCH/DELETE /api/tasks/:id` | Tác vụ định kỳ |
 | `GET /api/audit?before=&limit=` | Audit log (chỉ đọc) |
+| `GET /api/system` | Thông tin hệ thống |
+| `GET /api/config/llm` · `PUT /api/config/llm/model` · `PUT /api/config/llm/provider` | Xem/đổi model và provider đang dùng (persist `data.dir/llm-state.json`) |
+| `POST /api/config/llm/providers` · `PUT`\|`DELETE /api/config/llm/providers/:name` | Quản lý profile `[[llm.providers]]`; key nhập qua UI lưu quyền `0600` |
+| `GET /api/tools` · `PUT /api/tools/:name/enabled` | Tool thấy được theo role · bật/tắt tool (RBAC bật ⇒ chỉ `admin`, trả `403 admin_required`) |
+| `GET /api/mcp` · `GET /api/usage` · `GET /api/agents` | Trạng thái MCP client · lịch sử dùng token · agent con (role) theo quyền người gọi |
+| `GET /api/voice` · `PATCH /api/voice` | Trạng thái/cấu hình voice (RBAC bật ⇒ chỉ `admin` được `PATCH`) |
+| `POST /api/voice/transcribe` · `POST /api/voice/synthesize` | STT · TTS; `transcribe` có trần body riêng cho audio. Cùng quy tắc cookie + `Origin` như mọi endpoint ghi |
 
 ### 11.2 WebSocket `/api/ws`
 
@@ -508,6 +542,7 @@ Quy tắc:
 7. **Tác vụ định kỳ**: danh sách, tạo/tắt/xoá, hiển thị lần chạy tiếp theo theo múi giờ người dùng.
 8. **Audit**: bảng chỉ đọc, phân trang.
 9. **Trạng thái**: phiên bản, model, ngân sách token đã dùng, kênh đang chạy.
+10. **Mở rộng sau v1** (xem `web/src/features/`): hub (bảng điều khiển), tools, mcp, usage, system, settings (cài đặt model/provider LLM, key, voice push-to-talk).
 
 Yêu cầu chung: giao diện **mặc định là tối**, chất liệu **kính mờ kiểu iOS (Liquid Glass)** với accent nâu đỏ Bean, người dùng đổi sang sáng được bằng nút chuyển chủ đề — **KHÔNG** phụ thuộc cài đặt hệ thống. **responsive** (dùng được trên điện thoại), truy cập bàn phím và `aria` cơ bản, hai ngôn ngữ `vi` (mặc định) và `en`, thời gian hiển thị theo múi giờ trình duyệt.
 
@@ -573,7 +608,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 3. **Policy:** quyết định theo mức rủi ro; deny-list mẫu nguy hiểm chỉ là lớp phụ, **không phải rào cản chính**.
 4. **Prompt injection:** nội dung từ web, file, email, MCP bọc trong `<untrusted_content>...</untrusted_content>` (escape cả thẻ đóng nếu nội dung có chứa); system prompt dặn model không làm theo chỉ dẫn trong đó. Sau khi đọc nội dung untrusted trong một lượt, mọi tool `Confirm` trở lên luôn hỏi lại (vô hiệu hoá "cho phép trong phiên").
 5. **SSRF:** `web_fetch` chỉ `http(s)`; resolver DNS tuỳ biến cho `reqwest` lọc IP ngay lúc kết nối (chống DNS rebinding); chặn private, loopback, link-local, metadata (`169.254.169.254`), IPv6 tương ứng; policy redirect kiểm tra lại từng bước; giới hạn kích thước body và thời gian.
-6. **Secrets:** chỉ từ biến môi trường, bọc `secrecy`, redact khỏi log/audit, không đưa vào prompt.
+6. **Secrets:** mặc định chỉ từ biến môi trường (`*_env`), bọc `secrecy`, redact khỏi log/audit, không đưa vào prompt. **Ngoại lệ có kiểm soát (nhập key qua UI):** key dán trong màn Cài đặt được **ưu tiên hơn** env (`api_key` > `api_key_env`) và lưu plaintext trên đĩa với quyền `0600` — key LLM trong `bean.toml` (đã `.gitignore`), key voice trong `data.dir/voice-state.json`; `llm-state.json` không chứa key. Mỗi credential dùng biến **riêng**: billing/marketing/voice bị `validate()` từ chối nếu trùng biến của LLM/web search/Telegram. Hệ quả cần biết: (a) key lưu qua UI sẽ **che** biến môi trường cùng tên — đổi env mà không có tác dụng thì kiểm tra file; (b) các trường `api_key` trong `Config` hiện là `Option<String>` chứ không phải `SecretString`, nên **không** `{:?}`-log nguyên `Config` (K30).
 7. **Web server** (agent có quyền chạy lệnh nên web server là bề mặt tấn công nghiêm trọng):
    - Mặc định bind `127.0.0.1`. Bind địa chỉ khác chỉ khi `web.allow_remote = true`, in cảnh báo rõ ràng, và tài liệu hoá việc đặt sau reverse proxy có TLS (Caddy/nginx) hoặc mạng riêng (Tailscale/WireGuard); không tự làm TLS ở v1.
    - **Không có mật khẩu thì không bật web.** Lệnh `bean auth set-password` lưu hash `argon2id` vào `data.dir/auth.toml` (quyền `0600`); `serve` từ chối bật web nếu chưa đặt.
@@ -666,7 +701,36 @@ args = []
 trust = false
 ```
 
-Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password`.
+**Section bổ sung sau v1** (ví dụ và giải thích đầy đủ trong `bean.example.toml`; ở đây chỉ liệt kê để không ai tưởng danh sách trên là hết):
+
+| Section | Việc |
+|---|---|
+| `[agent.user_roles]` + `[[roles]]` | RBAC (M21). `user_roles` rỗng ⇒ RBAC **tắt**, mọi user trong `allowed_users` thấy mọi tool; có ≥ 1 dòng ⇒ RBAC **bật**, user ngoài map là `no-access` |
+| `[[projects]]` | Mỗi project có workspace, `MEMORY.md`, `USER.md` riêng |
+| `[[llm.providers]]` | Profile LLM hot-swap từ UI; lựa chọn đang dùng ở `data.dir/llm-state.json` |
+| `[voice]` | Push-to-talk: `provider = "local"` \| `"api"` (ElevenLabs), `language`, `stt_model`, `tts_model`, `tts_voice_id`, `tts_voice_vi` |
+| `[mcp_server]` + `[[mcp_clients]]` | Bean làm MCP server read-only; client phải có identity `mcp-client:<tên>` trong `user_roles` và **không** được là `admin` |
+| `[browser]` · `[qa]` | Tool browser CDP (M26) · QA test-runner (M27) |
+| `[billing]` · `[marketing]` · `[[infra_scope]]` | Domain finance, marketing, security-scan. `infra_scope` rỗng ⇒ từ chối mọi lần quét (fail-closed) |
+
+Ví dụ bật RBAC cho một người dùng (web + CLI cùng là admin):
+
+```toml
+[agent]
+allowed_users = ["web:admin", "cli:local"]
+
+[agent.user_roles]
+"web:admin" = "admin"
+"cli:local" = "admin"
+
+[[roles]]
+name = "admin"
+tool_tags = ["*"]
+```
+
+Lưu ý khi bật RBAC: mọi identity khác (`telegram:<id>`, `mcp-client:<tên>`) **phải** được liệt kê trong `user_roles`, nếu không sẽ là `no-access`. Tắt/bật tool và đổi cấu hình voice trên UI chỉ dành cho `admin`.
+
+Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean mcp serve [--http]`. Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
 
 ---
 
@@ -747,6 +811,17 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 | M15 | Learning loop + duyệt skill nháp trong UI/Telegram | Sinh skill nháp, duyệt được |
 | M16 | Hardening và triển khai: nhúng UI vào release, systemd, Dockerfile nhiều tầng, README, `make audit`, (tuỳ chọn) Playwright | Chạy ổn định 24h; `make check`/`audit`/`e2e` xanh |
 | M17 | (Tuỳ chọn) Streaming token (SSE từ provider → `Text` delta qua WS) | Chữ hiện dần trong UI |
+| M18 | ~~Discord adapter~~ | **Đã loại bỏ 2026-09-26** — web + Telegram là bộ kênh cuối cùng (`Plan.md` mục 5.0) |
+| M21 | RBAC theo tag + project profile; role admin/developer/qa | `no-access` là deny-all; RBAC check nằm ở một điểm trong Router; role `qa` không bao giờ có `dev-write` |
+| M22 · M22a | Monitor (`infra-read` qua MCP) · Finance-readonly (`billing-read`) | Chỉ đọc; credential billing riêng |
+| M23 | Security-scan (`infra-scan`) | `[[infra_scope]]` kiểm ở tầng code trước khi spawn scanner; rỗng ⇒ từ chối. Code xong, **chưa bật** |
+| M24 | Marketing | `marketing_publish` luôn `Dangerous`, không "cho phép trong phiên" |
+| M25 | Bean làm MCP server read-only | Cổng expose cứng 3 tag + `Risk::Safe` chặn **trước** RBAC |
+| M26 | Tool browser nội bộ (CDP) | Không tải Chrome lúc chạy; origin ngoài allowlist luôn `Dangerous` |
+| M27 | QA test-runner (`qa_test`) **và** voice push-to-talk (`bean-speech`) | Hai tính năng cùng mang nhãn M27 trong code/tài liệu; `qa` không có đường ghi nào |
+| M28 | Đổi tên `BeanAgent` → `bean` | Không migration tự động: `mv ~/.BeanAgent ~/.bean` (`docs/decisions.md` D18.x) |
+
+Trạng thái chi tiết, commit và phần còn thiếu của từng milestone: `docs/status-report.md` mục 2.
 
 ---
 
@@ -779,6 +854,13 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 18. **Kiểu TS viết tay lệch với Rust:** chỉ dùng kiểu sinh bởi `ts-rs`.
 19. **Nhân đôi tin nhắn** khi nối lại WS nếu vừa nạp REST vừa nhận sự kiện: khử trùng theo `message_id`/`run_id`.
 20. **Trang phình theo dữ liệu:** panel danh sách (ghi nhớ, phiên, audit, tasks…) không bó chiều cao khiến cả trang dài ra — mọi danh sách phải bó `max-h` + `flex` + `min-h-0` + `overflow-y-auto` để chỉ cuộn bên trong (quy tắc 11, mục 12.1). Class Tailwind tùy ý kiểu `max-h-[calc(...)]` phải kiểm chứng được sinh ra trong CSS build — lỗi này im lặng, TypeScript vẫn xanh.
+
+**Vận hành** (đều đã xảy ra thật)
+21. **Tiến trình kế thừa `ALL_PROXY`/`HTTPS_PROXY` của shell:** `reqwest` tự đi vòng qua proxy đó; nếu proxy (ví dụ SOCKS `127.0.0.1:1080`) không chạy, mọi lời gọi ra ngoài (ElevenLabs, OpenRouter…) hỏng và UI chỉ hiện lỗi chung (voice trả `502`). Gỡ biến proxy khỏi môi trường của Bean — đã xác nhận hiệu quả; `NO_PROXY` chỉ cho loopback **chưa** kiểm chứng cho domain ngoài.
+22. **Dừng Bean bằng `pkill -f "bean serve"` không khớp:** dòng lệnh thật là `bean --config bean.toml serve`, nên instance cũ vẫn giữ port và instance mới chết với `Address already in use (os error 98)`. Dùng `scripts/beanctl restart`; hoặc `lsof -i :7878` rồi `kill` đúng PID.
+23. **`env -i` xoá luôn `DISPLAY`/`XAUTHORITY`:** Chrome MCP chạy có cửa sổ (không `--headless`) sẽ không mở được. Đừng dựng môi trường sạch bằng `env -i`; để `beanctl` nạp `~/.config/bean/env`.
+24. **Model được quyết định ở ba nơi:** `[llm].model`, profile trong `[[llm.providers]]` và `llm-state.json` — file cuối **thắng** lúc khởi động (log: `áp lựa chọn provider đã lưu từ phiên trước`). Sửa `bean.toml` mà model không đổi thì xoá hoặc sửa `llm-state.json`.
+25. **OpenRouter `:free` hay trả `503 Provider returned error`** khi model upstream quá tải: không phải lỗi cấu hình hay key. Đổi sang model khác trong `allowed_models`.
 
 ---
 

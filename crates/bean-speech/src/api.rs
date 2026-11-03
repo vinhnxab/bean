@@ -12,6 +12,7 @@
 
 use std::time::Duration;
 
+use bean_types::config::VoiceConfig;
 use reqwest::multipart;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -31,25 +32,21 @@ pub struct ElevenLabsSpeech {
     base_url: String,
     stt_model: String,
     tts_model: String,
+    /// Giọng TTS mặc định/fallback (văn bản không phải tiếng Việt).
     voice_id: String,
+    /// Giọng TTS cho văn bản tiếng Việt (tuỳ chọn) — cấu hình qua `tts_voice_vi` trong
+    /// `[voice]` (bean.toml).
+    vi_voice: Option<String>,
     language: String,
     timeout: Duration,
 }
 
 impl ElevenLabsSpeech {
-    /// Dựng provider ElevenLabs.
+    /// Dựng provider ElevenLabs từ cấu hình `[voice]`.
     ///
     /// # Errors
     /// [`SpeechError::Failed`] khi không dựng được HTTP client (lỗi khởi tạo TLS — hiếm).
-    pub fn new(
-        base_url: String,
-        api_key: SecretString,
-        stt_model: String,
-        tts_model: String,
-        voice_id: String,
-        language: String,
-        timeout: Duration,
-    ) -> Result<Self, SpeechError> {
+    pub fn from_config(voice: &VoiceConfig, api_key: SecretString) -> Result<Self, SpeechError> {
         let client = reqwest::Client::builder()
             .user_agent(concat!("bean/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(15))
@@ -58,12 +55,13 @@ impl ElevenLabsSpeech {
         Ok(Self {
             client,
             api_key,
-            base_url,
-            stt_model,
-            tts_model,
-            voice_id,
-            language,
-            timeout,
+            base_url: voice.api_base_url.trim_end_matches('/').to_string(),
+            stt_model: voice.stt_model.clone(),
+            tts_model: voice.tts_model.clone(),
+            voice_id: voice.tts_voice_id.clone(),
+            vi_voice: voice.tts_voice_vi.clone(),
+            language: voice.language.clone(),
+            timeout: Duration::from_secs(voice.timeout_seconds.max(1)),
         })
     }
 
@@ -113,18 +111,40 @@ impl SpeechProvider for ElevenLabsSpeech {
     }
 
     async fn synthesize(&self, text: &str) -> Result<AudioOutput, SpeechError> {
-        let url = format!("{}/v1/text-to-speech/{}", self.base_url, self.voice_id);
-        let body = serde_json::json!({
-            "text": text,
-            "model_id": self.tts_model,
-        });
-        let request = self
-            .client
-            .post(&url)
-            .header("xi-api-key", self.api_key.expose_secret())
-            .json(&body)
-            .send();
-        let response = self.send(request).await?;
+        // Chọn giọng theo ngôn ngữ của văn bản cần đọc: có dấu tiếng Việt → giọng `vi`
+        // (nếu đã cấu hình), còn lại giọng mặc định. Cả hai đều là voice id trong URL.
+        let wants_vi_voice = crate::has_vietnamese_diacritics(text) && self.vi_voice.is_some();
+        let voice_id = if crate::has_vietnamese_diacritics(text) {
+            self.vi_voice.as_deref().unwrap_or(&self.voice_id)
+        } else {
+            self.voice_id.as_str()
+        };
+        let response = match self.post_tts(voice_id, text).await {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                let status = response.status();
+                // Gói free không dùng được giọng lấy từ Voice Library qua API (HTTP 402
+                // `paid_plan_required`): câu tiếng Việt vẫn phải được đọc nên rơi về
+                // giọng mặc định — premade phát được mọi ngôn ngữ qua
+                // `eleven_multilingual_v2`. Sau khi nâng gói, nhánh này không còn chạy.
+                if wants_vi_voice && matches!(status.as_u16(), 402 | 403) {
+                    tracing::warn!(
+                        voice_id = %voice_id,
+                        status = status.as_u16(),
+                        "giọng tiếng Việt bị ElevenLabs từ chối — rơi về giọng mặc định"
+                    );
+                    let fallback = self.post_tts(&self.voice_id, text).await?;
+                    let status = fallback.status();
+                    if !status.is_success() {
+                        return Err(SpeechError::Failed(format!("ElevenLabs trả HTTP {status}")));
+                    }
+                    fallback
+                } else {
+                    return Err(SpeechError::Failed(format!("ElevenLabs trả HTTP {status}")));
+                }
+            }
+            Err(error) => return Err(error),
+        };
         let mime = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -137,6 +157,29 @@ impl SpeechProvider for ElevenLabsSpeech {
             .map_err(|e| SpeechError::Failed(format!("không đọc được audio TTS: {e}")))?
             .to_vec();
         Ok(AudioOutput { data, mime })
+    }
+}
+
+impl ElevenLabsSpeech {
+    /// POST /v1/text-to-speech/{voice_id} với timeout đã khai báo. Trả response kể cả
+    /// khi status lỗi — caller quyết định fallback (voice library bị chặn 402) hay
+    /// biến thành [`SpeechError`]. Chỉ dùng cho TTS; `send()` vẫn xử STT.
+    async fn post_tts(&self, voice_id: &str, text: &str) -> Result<reqwest::Response, SpeechError> {
+        let url = format!("{}/v1/text-to-speech/{}", self.base_url, voice_id);
+        let body = serde_json::json!({
+            "text": text,
+            "model_id": self.tts_model,
+        });
+        let request = self
+            .client
+            .post(&url)
+            .header("xi-api-key", self.api_key.expose_secret())
+            .json(&body)
+            .send();
+        tokio::time::timeout(self.timeout, request)
+            .await
+            .map_err(|_| SpeechError::Timeout(self.timeout))?
+            .map_err(|e| SpeechError::Failed(format!("lỗi mạng ElevenLabs: {e}")))
     }
 }
 

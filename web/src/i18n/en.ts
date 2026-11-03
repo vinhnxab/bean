@@ -207,6 +207,10 @@ export const en: Record<MessageKey, string> = {
   "status.tokenUsage": "Tokens today",
   "status.channels": "Running channels",
   "status.noChannels": "No channels are running",
+  // Model connection dot in the left sidebar header (components/ModelStatusPill).
+  "status.modelConnected": "Connected",
+  "status.modelConnecting": "Connecting…",
+  "status.modelDisconnected": "Disconnected",
   // --- Capability: Tools / MCP / Usage / System -----------------------------
   "nav.tools": "Tools",
   "nav.mcp": "MCP",
@@ -331,6 +335,12 @@ export const en: Record<MessageKey, string> = {
   "voice.language": "Language",
   "voice.languageHint": "ISO language code for STT/TTS, e.g. `vi` or `en`.",
   "voice.languagePlaceholder": "vi",
+  "voice.ttsVoiceId": "ElevenLabs voice ID (default)",
+  "voice.ttsVoiceIdHint":
+    "Voice for English and other languages. Get the Voice ID from elevenlabs.io → Voices.",
+  "voice.ttsVoiceVi": "Vietnamese voice ID (optional)",
+  "voice.ttsVoiceViPlaceholder": "Leave empty to use the default voice",
+  "voice.ttsVoiceViHint": "Text with Vietnamese diacritics is read with this voice.",
   "voice.apiKey": "ElevenLabs API key",
   "voice.apiKeyStored": "Key stored — leave empty to keep it",
   "voice.apiKeyPastePlaceholder": "Paste your ElevenLabs API key",

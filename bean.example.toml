@@ -85,6 +85,47 @@ max_image_bytes = 4194304
 # nhóm HÀNH ĐỘNG cần tag `test-run` — CHỈ role QA. `browser_evaluate_script` luôn
 # `Dangerous` kể cả origin trong whitelist (chạy JS tuỳ ý ≈ thực thi mã).
 
+[voice]
+# Push-to-talk trên web (M27): giữ nút micro trong khung chat để nói thay vì gõ.
+# Lượt chat bắt đầu bằng voice chỉ chạy được tool mức `Safe`.
+enabled = false
+
+# `local` — whisper.cpp (STT) + Piper (TTS) chạy tiến trình con trên máy chủ: không cần
+#   mạng, audio KHÔNG rời khỏi máy; bạn phải tự cài binary + model (thiếu thì khởi động
+#   báo lỗi tường minh, không âm thầm fallback).
+# `api`   — ElevenLabs: STT `scribe_v2`, TTS `eleven_multilingual_v2`. Audio CÓ rời khỏi
+#   máy; Bean cảnh báo điều này trong log lúc khởi động.
+provider = "local"
+language = "vi"
+
+# Trần ký tự gửi đi TTS; câu dài hơn bị cắt tại ranh giới UTF-8 trước khi đọc.
+max_speak_chars = 400
+# Thời gian tối đa cho mỗi lần STT/TTS (giây).
+timeout_seconds = 30
+
+# ---- Chế độ `local` ----
+# Đường dẫn hoặc tên binary; model để rỗng thì lượt voice đầu báo lỗi tường minh.
+whisper_command = "whisper-cli"
+whisper_model = ""              # ví dụ "/opt/whisper/ggml-base-q5.bin"
+piper_command = "piper"
+piper_model = ""                # ví dụ "/opt/piper/vi_VN-vivos-x_low.onnx"
+
+# ---- Chế độ `api` (ElevenLabs) ----
+# Key: mặc định chỉ đọc biến môi trường. Key dán trong màn Cài đặt của UI được Bean
+# persist vào `data.dir/voice-state.json` (quyền 0600) và ƯU TIÊN HƠN biến môi trường —
+# cùng quy ước `[llm] api_key` (Q6 trong docs/known-issues.md). Đừng tự tay ghi key vào file.
+api_key_env = "ELEVENLABS_API_KEY"
+# api_base_url = "https://api.elevenlabs.io"   # chỉ đổi khi bạn tự host proxy
+stt_model = "scribe_v2"
+tts_model = "eleven_multilingual_v2"
+# Voice mặc định (fallback cho văn bản không phải tiếng Việt) — ID từ voice vault của
+# bạn; giá trị mẫu là giọng "Rachel" của ElevenLabs.
+# tts_voice_id = "21m00Tcm4TlvDq8ikWAM"
+# Voice riêng cho văn bản TIẾNG VIỆT (có dấu thanh); thiếu thì rơi về tts_voice_id.
+# tts_voice_vi = "<voice-id-trong-vault>"
+# Credential là key RIÊNG: validate() từ chối nếu trùng biến env của LLM/web search/
+# Telegram/billing/marketing.
+
 [learning]
 enabled = true
 min_tool_calls = 5

@@ -41,9 +41,23 @@ impl StreamResponseBuilder {
     }
 
     fn finish(self) -> Result<LlmResponse, AgentError> {
-        let stop = self.stop.ok_or_else(|| {
-            AgentError::Llm("provider streaming kết thúc mà không có stop reason".to_string())
-        })?;
+        // Một số endpoint OpenAI-compatible (OpenRouter, vLLM cũ…) kết thúc stream bằng
+        // `[DONE]` mà không bao giờ gửi `finish_reason`. Đã nhận được text/tool call thì
+        // nội dung đó đáng tin hơn việc huỷ cả lượt — chỉ coi là lỗi khi stream trống rỗng.
+        let stop = match self.stop {
+            Some(stop) => stop,
+            None if !self.text.is_empty() || !self.tool_calls.is_empty() => {
+                tracing::warn!(
+                    "provider streaming kết thúc không có finish_reason — coi như kết thúc bình thường"
+                );
+                StopReason::Other
+            }
+            None => {
+                return Err(AgentError::Llm(
+                    "provider streaming kết thúc mà không có stop reason".to_string(),
+                ));
+            }
+        };
         let mut tool_calls = Vec::with_capacity(self.tool_calls.len());
         for (index, (id, name, arguments)) in self.tool_calls {
             let id = id.ok_or_else(|| {
@@ -372,5 +386,92 @@ fn empty_response_notice(stop: StopReason) -> String {
              hay hết ngân sách). Yêu cầu của bạn chưa được xử lý — hãy thử lại, hoặc đổi \
              model trong `bean.toml` nếu tình trạng này lặp lại."
             .to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    struct NoopIo(tokio_util::sync::CancellationToken);
+
+    #[async_trait::async_trait]
+    impl RunIo for NoopIo {
+        fn on_text(&self, _text: &str) {}
+        fn on_tool_start(&self, _id: &str, _tool: &str, _risk: Risk, _summary: &str, _args: &str) {}
+        fn on_tool_end(&self, _id: &str, _tool: &str, _ok: bool, _output: &str) {}
+        async fn confirm(
+            &self,
+            _id: &str,
+            _tool: &str,
+            _risk: Risk,
+            _prompt: &str,
+            _allow_in_session: bool,
+            _timeout: Duration,
+        ) -> Option<Decision> {
+            None
+        }
+        fn cancel_token(&self) -> &tokio_util::sync::CancellationToken {
+            &self.0
+        }
+    }
+
+    fn push_text(builder: &mut StreamResponseBuilder, text: &str) {
+        let io = NoopIo(tokio_util::sync::CancellationToken::new());
+        builder.push(
+            LlmDelta::Text {
+                text: text.to_string(),
+            },
+            &io,
+        );
+    }
+
+    /// Stream kết thúc không `finish_reason` nhưng đã có text: coi như kết thúc bình
+    /// thường (OpenRouter/vLLM cũ quên `finish_reason`) thay vì huỷ cả lượt.
+    #[test]
+    fn finish_without_stop_reason_falls_back_to_other_when_text_present() {
+        let mut builder = StreamResponseBuilder::default();
+        push_text(&mut builder, "xin chào");
+        let response = builder.finish().expect("phải kết thúc được lượt");
+        assert_eq!(response.text.as_deref(), Some("xin chào"));
+        assert_eq!(response.stop, StopReason::Other);
+        assert!(response.tool_calls.is_empty());
+    }
+
+    /// Tool call hoàn chỉnh mà thiếu `finish_reason` cũng được giữ; arguments dở dang
+    /// sẽ lỗi JSON với thông điệp rõ ràng ở bước parse.
+    #[test]
+    fn finish_without_stop_reason_keeps_complete_tool_call() {
+        let io = NoopIo(tokio_util::sync::CancellationToken::new());
+        let mut builder = StreamResponseBuilder::default();
+        builder.push(
+            LlmDelta::ToolCall(bean_types::LlmToolCallDelta {
+                index: 0,
+                id: Some("call_1".to_string()),
+                name: Some("read_file".to_string()),
+                arguments_delta: Some(r#"{"path":"a.txt"}"#.to_string()),
+            }),
+            &io,
+        );
+        let response = builder.finish().expect("phải kết thúc được lượt");
+        assert_eq!(response.stop, StopReason::Other);
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "read_file");
+    }
+
+    /// Stream trống rỗng (không text, không tool call, không stop) vẫn là lỗi thật —
+    /// thường là provider hỏng (rate limit, bị cắt ngay từ đầu).
+    #[test]
+    fn finish_without_any_content_is_an_error() {
+        let builder = StreamResponseBuilder::default();
+        let error = builder.finish().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("provider streaming kết thúc mà không có stop reason"),
+            "{error}"
+        );
     }
 }

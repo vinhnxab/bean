@@ -10,10 +10,11 @@ milestone M18 trở đi; 4 file cũ chỉ còn giá trị tham khảo lý do/ph�
 
 ## 0. Tóm tắt quyết định đã chốt hôm nay
 
-- **Kênh**: chỉ Telegram + Web (đã có). Discord cân nhắc nếu rẻ. **Bỏ hẳn Slack và WhatsApp.**
-- **S1**: bạn tự vá, theo prompt đã soạn ở `va-S1-va-cap-nhat-tai-lieu.md`. Mọi milestone hạ
-  tầng chạm Nhóm 2 trở lên (quét chủ động) hoặc developer-mode cho dự án ngoài đều **chờ S1 vá
-  xong** mới bật.
+- **Kênh**: chỉ Telegram + Web (đã có). **Discord cũng đã bị loại 2026-09-26** (lý do ở mục
+  5.0). **Bỏ hẳn Slack và WhatsApp.**
+- **S1**: ✅ **Đã vá 2026-09-26** (bọc `<untrusted_content>` cho 5 tool đọc ngoài lõi + bật
+  `untrusted_seen`; xem `docs/known-issues.md` S1, `docs/decisions.md` D9.1). File prompt gốc
+  `va-S1-va-cap-nhat-tai-lieu.md` **không có trong repo** — chỉ còn giá trị lịch sử.
 - **Mô hình tổng thể**: Bean là **Manager điều phối** một nhóm agent con chuyên trách, không
   phải một agent "toàn năng" ôm hết quyền. Định tuyến theo RBAC, không có quyền ngầm định.
 - **Kiến trúc triển khai**: chọn phương án **A — một tiến trình, phân vai bằng role/project
@@ -90,11 +91,23 @@ Nếu một thiết kế buộc phải phá 1 trong 3 điều trên, coding agen
 
 ## 5. Roadmap milestone cuối cùng, theo thứ tự
 
-**M18 → M21 → M22 → M22a → M23 (chờ S1) → M24 → M25**. WhatsApp/Slack: loại khỏi roadmap. Bảo vệ
-vật lý và kiến trúc B: để backlog, không có số milestone. M25 có thể làm song song M22-M24 vì
-chỉ phụ thuộc M21 (RBAC).
+~~**M18 → M21 → M22 → M22a → M23 (chờ S1) → M24 → M25**~~ — **Cập nhật 2026-11-02:** M18 đã loại
+(nhìn mục 5.0); M21, M22, M22a, M24, M25 **đã hoàn thành**; M23 code xong, **chưa bật**
+(`[[infra_scope]]` rỗng, fail-closed). Sau đó repo đã đi tiếp M26 (browser CDP), M27 (QA
+test-runner + voice push-to-talk), M28 (đổi tên `BeanAgent` → `bean`) — trạng thái chi tiết:
+`docs/status-report.md` mục 2. Bảo vệ vật lý và kiến trúc B: để backlog, không có số milestone.
 
-### M18 — Discord adapter (tuỳ chọn, chỉ làm nếu rẻ)
+### 5.0 — Kênh chat: web + Telegram là bộ cuối cùng
+
+Chốt 2026-09-26: **không thêm kênh chat nào nữa** (Discord/Slack/WhatsApp/Signal đều loại).
+Discord bị loại vì hai lý do kỹ thuật: (1) Discord không có tín hiệu API chặn hai instance dùng
+chung token (Telegram trả `409` — Bean dựa vào đó để phát hiện cấu hình sai); (2) vòng đời
+interaction riêng (3 giây/15 phút) lệch khỏi mô hình Confirm timeout 300 giây của Router. Thêm
+kênh mới chỉ khi có nhu cầu vận hành thực tế và được duyệt riêng.
+
+### M18 — Discord adapter — 🚫 **ĐÃ LOẠI BỎ 2026-09-26** (xem mục 5.0)
+
+Prompt nguyên văn dưới đây giữ lại chỉ để tra cứu lý do ban đầu, **đừng thực hiện**:
 
 ```
 Thêm Discord làm channel adapter mới, đi qua Router hiện có — KHÔNG tạo luồng xử lý riêng.
@@ -295,6 +308,7 @@ make check xanh.
 
 ## 7. Câu hỏi mở còn lại
 
-Không còn câu hỏi chặn tiến độ M18/M21/M22/M22a/M24/M25. **M23 vẫn chờ bạn xác nhận S1 đã vá
-xong** trước khi giao cho coding agent. ~~M25 chờ M21 xong.~~ → M21 đã xong (`6a5d063`) và
+Không còn câu hỏi chặn tiến độ. ~~M23 vẫn chờ bạn xác nhận S1 đã vá xong~~ → S1 đã vá
+2026-09-26 nên M23 **không còn điều kiện chặn**; code đã xong, việc bật hay không là quyết định
+vận hành (`[[infra_scope]]` còn rỗng). ~~M25 chờ M21 xong.~~ → M21 đã xong (`6a5d063`) và
 M25 đã hoàn thành 2026-09-27.

@@ -121,15 +121,7 @@ pub fn build_speech(
                     "chế độ `api` yêu cầu API key — đặt biến `voice.api_key_env`".into(),
                 )
             })?;
-            Arc::new(ElevenLabsSpeech::new(
-                voice.api_base_url.trim_end_matches('/').to_string(),
-                key,
-                voice.stt_model.clone(),
-                voice.tts_model.clone(),
-                voice.tts_voice_id.clone(),
-                voice.language.clone(),
-                timeout,
-            )?)
+            Arc::new(ElevenLabsSpeech::from_config(voice, key)?)
         }
     };
     Ok(Some(provider))
@@ -145,6 +137,66 @@ pub fn truncate_utf8(text: &str, max: usize) -> &str {
         Some((idx, _)) => &text[..idx],
         None => text,
     }
+}
+
+/// `true` khi văn bản chứa ký tự riêng của bảng chữ tiếng Việt.
+///
+/// Heuristic chọn giọng TTS giữa tiếng Việt và ngôn ngữ Latin không dấu (tiếng Anh):
+/// * Khối Unicode `U+1EA0..=U+1EFF` (Latin Extended Additional) chứa gần hết các
+///   nguyên âm có dấu tổ hợp của tiếng Việt (`ạ ế ở ữ ỷ…`);
+/// * Phần còn lại là các ký tự Latin-1/Latin Extended-A tiếng Việt dùng riêng
+///   (`ă â đ ê ô ơ ư`) và các dấu huyền/sắc/ngã trên nguyên âm trần (`à á ã è é…`),
+///   mà tiếng Anh **không bao giờ** chứa.
+///
+/// Chấp nhận nhận nhầm văn bản Pháp/Tây Ban Nha trích trong câu trả lời — hiếm và
+/// vô hại (chỉ khác giọng đọc); không có dấu thì rơi về giọng mặc định.
+#[must_use]
+pub fn has_vietnamese_diacritics(text: &str) -> bool {
+    text.chars().any(|c| {
+        ('\u{1EA0}'..='\u{1EFF}').contains(&c)
+            || matches!(
+                c,
+                'ă' | 'Ă'
+                    | 'â'
+                    | 'Â'
+                    | 'đ'
+                    | 'Đ'
+                    | 'ê'
+                    | 'Ê'
+                    | 'ô'
+                    | 'Ô'
+                    | 'ơ'
+                    | 'Ơ'
+                    | 'ư'
+                    | 'Ư'
+                    | 'à'
+                    | 'À'
+                    | 'á'
+                    | 'Á'
+                    | 'ã'
+                    | 'Ã'
+                    | 'è'
+                    | 'È'
+                    | 'é'
+                    | 'É'
+                    | 'ì'
+                    | 'Ì'
+                    | 'í'
+                    | 'Í'
+                    | 'ò'
+                    | 'Ò'
+                    | 'ó'
+                    | 'Ó'
+                    | 'ù'
+                    | 'Ù'
+                    | 'ú'
+                    | 'Ú'
+                    | 'ý'
+                    | 'Ý'
+                    | 'ũ'
+                    | 'Ũ'
+            )
+    })
 }
 
 /// Provider STT/TTS giả cho test và `--fake-speech` — không mạng, không subprocess.
@@ -179,7 +231,7 @@ impl SpeechProvider for FakeSpeech {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_utf8;
+    use super::{has_vietnamese_diacritics, truncate_utf8};
 
     #[test]
     fn truncate_utf8_is_char_boundary_safe() {
@@ -189,5 +241,25 @@ mod tests {
         let cut = truncate_utf8(emoji, 3);
         assert_eq!(cut, "🧸🧸🧸");
         assert!(cut.is_char_boundary(cut.len()));
+    }
+
+    #[test]
+    fn vietnamese_diacritics_detected() {
+        assert!(has_vietnamese_diacritics("Xin chào"));
+        assert!(has_vietnamese_diacritics("là sao vậy"));
+        assert!(has_vietnamese_diacritics("Tôi đang ở nhà"));
+        assert!(has_vietnamese_diacritics("đường phố"));
+        assert!(has_vietnamese_diacritics("hỏi thời tiết Hà Nội"));
+        // Nguyên âm có dấu tổ hợp nằm trong khối U+1EA0..=U+1EFF.
+        assert!(has_vietnamese_diacritics("trường học"));
+        assert!(has_vietnamese_diacritics("thỉnh thoảng"));
+    }
+
+    #[test]
+    fn non_vietnamese_text_has_no_diacritics() {
+        assert!(!has_vietnamese_diacritics(""));
+        assert!(!has_vietnamese_diacritics("Hello world!"));
+        assert!(!has_vietnamese_diacritics("What's the weather like today?"));
+        assert!(!has_vietnamese_diacritics("123 + 456 = 579"));
     }
 }

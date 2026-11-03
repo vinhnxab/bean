@@ -91,6 +91,14 @@ cargo test --package bean-core  # No breaking changes
 
 **Status**: Comment đã được cập nhật. Module `solid/` và `factory/` đã được thêm vào nhưng vẫn đang trong quá trình phát triển.
 
+> **Cảnh báo (cập nhật 2026-11-02): hai module này hiện là dead code.** `crates/bean-core/src/solid/` và
+> `crates/bean-core/src/factory/` **không** được khai báo trong `bean-core/src/lib.rs` (các module thực tế:
+> agent, context, learning, mcp_server, prompt, router, run_io, scheduler, store); `solid/mod.rs` còn khai
+> báo submodule `store` không có file. Chúng không ảnh hưởng build, nhưng cũng không có tác dụng nào —
+> **đừng** mô tả trong tài liệu như thể đã áp dụng. Muốn nối lại: khai báo module trong `lib.rs`, sửa lỗi
+> biên dịch (submodule `store` thiếu) rồi chạy `make check`; muốn bỏ hẳn: xoá cả hai thư mục trong một
+> commit riêng.
+
 **Test**:
 ```bash
 cargo check  # Build pass

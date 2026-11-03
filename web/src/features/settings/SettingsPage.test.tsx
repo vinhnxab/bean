@@ -543,6 +543,8 @@ describe("SettingsPage — Voice", () => {
           provider: "local",
           language: "vi",
           max_speak_chars: 400,
+          tts_voice_id: "voice-default",
+          tts_voice_vi: "voice-vi",
           api_key_set: false,
         });
       }),
@@ -589,6 +591,8 @@ describe("SettingsPage — Voice", () => {
           provider: "local",
           language: "vi",
           max_speak_chars: 400,
+          tts_voice_id: "voice-default",
+          tts_voice_vi: "voice-vi",
           api_key_set: false,
         }),
       ),
@@ -624,6 +628,8 @@ describe("SettingsPage — Voice", () => {
           provider: "api",
           language: "vi",
           max_speak_chars: 400,
+          tts_voice_id: "voice-default",
+          tts_voice_vi: "voice-vi",
           api_key_set: true,
         }),
       ),
@@ -639,6 +645,9 @@ describe("SettingsPage — Voice", () => {
       "placeholder",
       "Đã lưu key — để trống giữ nguyên",
     );
+    // Hai ô Voice ID (mặc định + tiếng Việt) phản chiếu giá trị server.
+    expect(screen.getByLabelText("Voice ID ElevenLabs (mặc định)")).toHaveValue("voice-default");
+    expect(screen.getByLabelText("Voice ID tiếng Việt (tuỳ chọn)")).toHaveValue("voice-vi");
   });
 
   it("đổi sang ElevenLabs, dán key rồi Lưu và bật: PATCH đúng body, key không bị echo", async () => {
@@ -652,6 +661,8 @@ describe("SettingsPage — Voice", () => {
           provider: "local",
           language: "vi",
           max_speak_chars: 400,
+          tts_voice_id: "voice-default",
+          tts_voice_vi: "voice-vi",
           api_key_set: false,
         }),
       ),
@@ -663,6 +674,8 @@ describe("SettingsPage — Voice", () => {
           provider: "api",
           language: "vi",
           max_speak_chars: 400,
+          tts_voice_id: "voice-default",
+          tts_voice_vi: "voice-vi",
           api_key_set: true,
         });
       }),
@@ -682,6 +695,8 @@ describe("SettingsPage — Voice", () => {
         enabled: true,
         provider: "api",
         language: "vi",
+        tts_voice_id: "voice-default",
+        tts_voice_vi: "voice-vi",
         api_key: "sk-test-1234abcd",
       }),
     );
@@ -705,6 +720,8 @@ describe("SettingsPage — Voice", () => {
           provider: "local",
           language: "vi",
           max_speak_chars: 400,
+          tts_voice_id: "voice-default",
+          tts_voice_vi: "voice-vi",
           api_key_set: false,
         }),
       ),

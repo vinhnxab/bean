@@ -214,6 +214,10 @@ export const vi = {
   "status.tokenUsage": "Token hôm nay",
   "status.channels": "Kênh đang chạy",
   "status.noChannels": "Không có kênh nào đang chạy",
+  // Chấm trạng thái kết nối model ở header sidebar trái (components/ModelStatusPill).
+  "status.modelConnected": "Đã kết nối",
+  "status.modelConnecting": "Đang kết nối…",
+  "status.modelDisconnected": "Mất kết nối",
   // --- Capability: Tools / MCP / Usage / System -----------------------------
   "nav.tools": "Tools",
   "nav.mcp": "MCP",
@@ -337,6 +341,11 @@ export const vi = {
   "voice.language": "Ngôn ngữ",
   "voice.languageHint": "Mã ngôn ngữ ISO cho STT/TTS, ví dụ `vi` hoặc `en`.",
   "voice.languagePlaceholder": "vi",
+  "voice.ttsVoiceId": "Voice ID ElevenLabs (mặc định)",
+  "voice.ttsVoiceIdHint": "Giọng đọc câu tiếng Anh và ngôn ngữ khác. Lấy Voice ID từ elevenlabs.io → Voices.",
+  "voice.ttsVoiceVi": "Voice ID tiếng Việt (tuỳ chọn)",
+  "voice.ttsVoiceViPlaceholder": "Để trống = dùng giọng mặc định",
+  "voice.ttsVoiceViHint": "Câu có dấu tiếng Việt sẽ đọc bằng giọng này.",
   "voice.apiKey": "API key ElevenLabs",
   "voice.apiKeyStored": "Đã lưu key — để trống giữ nguyên",
   "voice.apiKeyPastePlaceholder": "Dán API key ElevenLabs",
