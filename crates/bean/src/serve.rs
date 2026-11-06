@@ -67,6 +67,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             .context("không mở được SQLite store")?,
     );
     let store_dyn: Arc<dyn Store> = store.clone();
+    // M29: kho secret thống nhất — mọi key resolve theo env > secrets.env (D19.3).
+    let secret_store = chat::secret_store(&config);
+    let secrets_snapshot = chat::secret_snapshot(&secret_store);
+    let get_secret = bean_settings::env_first_lookup(secrets_snapshot.as_ref());
     let auth = if web_enabled {
         Some(AuthService::load(&config, store_dyn.clone()).context(
             "web chưa được bật: chạy `bean auth set-password` trước (auth.toml phải là argon2id, 0600)",
@@ -83,7 +87,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let default_profile = config.llm.as_profile();
     let (provider, web_search_api_key) = chat::build_provider(&chat_args, &mut config)?;
     let telegram_token = config
-        .resolve_telegram_token()
+        .resolve_telegram_token_with(&get_secret)
         .context("đọc TELEGRAM_BOT_TOKEN thất bại")?;
     let user_skills_root = chat::expand_tilde(&config.data.dir).join("skills");
     let project_skills_root = std::path::PathBuf::from("skills");
@@ -97,6 +101,29 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     } else {
         String::new()
     };
+
+    // Build speech provider trước Router
+    let voice_key = if config.voice.enabled {
+        config
+            .resolve_voice_api_key_with(&get_secret)
+            .context("đọc voice API key thất bại")?
+    } else {
+        config.resolve_voice_api_key_lenient_with(&get_secret)
+    };
+    let speech = match bean_speech::build_speech(&config, voice_key) {
+        Ok(speech) => speech,
+        Err(error) if !config.voice.enabled => {
+            tracing::warn!(
+                error = %error,
+                "voice khai báo trong bean.toml nhưng chưa đủ cấu hình — UI sẽ hiện 'chưa cấu hình'"
+            );
+            None
+        }
+        Err(error) => {
+            return Err(anyhow::anyhow!(error.to_string())).context("khởi tạo voice thất bại");
+        }
+    };
+
     let built =
         chat::build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
     let mcp = built.mcp;
@@ -108,19 +135,26 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let llm_state_path = Some(bean_types::config::state_path(&chat::expand_tilde(
         &config.data.dir,
     )));
-    let router = Arc::new(Router::new(RouterDeps {
-        config: config.clone(),
-        store: store_dyn.clone(),
-        registry,
-        llm: provider,
-        audit: audit.clone(),
-        skills_index,
-        skills: Some(skills.clone()),
-        llm_state_path,
-        default_profile,
-        // `bean serve` biết đường config gốc → bật CRUD provider profile từ UI.
-        config_path: config_path.map(std::path::Path::to_path_buf),
-    }));
+    let router = Arc::new(Router::with_options(
+        RouterDeps {
+            config: config.clone(),
+            store: store_dyn.clone(),
+            registry,
+            llm: provider,
+            audit: audit.clone(),
+            skills_index,
+            skills: Some(skills.clone()),
+            llm_state_path,
+            default_profile,
+            // `bean serve` biết đường config gốc → bật CRUD provider profile từ UI.
+            config_path: config_path.map(std::path::Path::to_path_buf),
+            speech: speech.clone(),
+        },
+        bean_core::RouterOptions {
+            secrets: Some(secret_store),
+            ..bean_core::RouterOptions::default()
+        },
+    ));
     let scheduler = Arc::new(
         Scheduler::new(
             store_dyn.clone(),
@@ -132,30 +166,6 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
 
     let mut web_listener = None;
     if web_enabled {
-        // M27: dựng provider STT/TTS ngay lúc khởi động khi `[voice]` khai báo đủ —
-        // kể cả khi `enabled = false`, để toggle trong UI (`PATCH /api/voice`) bật lại
-        // không cần restart. Seed bật mà thiếu key/model vẫn là lỗi khởi động tường
-        // minh (D6.4); seed tắt mà thiếu chỉ coi như "chưa cấu hình xong".
-        let voice_key = if config.voice.enabled {
-            config
-                .resolve_voice_api_key()
-                .context("đọc voice API key thất bại")?
-        } else {
-            config.resolve_voice_api_key_lenient()
-        };
-        let speech = match bean_speech::build_speech(&config, voice_key) {
-            Ok(speech) => speech,
-            Err(error) if !config.voice.enabled => {
-                tracing::warn!(
-                    error = %error,
-                    "voice khai báo trong bean.toml nhưng chưa đủ cấu hình — UI sẽ hiện 'chưa cấu hình'"
-                );
-                None
-            }
-            Err(error) => {
-                return Err(anyhow::anyhow!(error.to_string())).context("khởi tạo voice thất bại");
-            }
-        };
         let state = WebState::new(WebStateDeps {
             config: config.clone(),
             store: store_dyn.clone(),

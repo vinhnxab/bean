@@ -100,6 +100,7 @@ pub(super) fn event_run_id(event: &RunEvent) -> &RunId {
         | RunEvent::ConfirmRequest { run_id, .. }
         | RunEvent::ConfirmResolved { run_id, .. }
         | RunEvent::Final { run_id, .. }
+        | RunEvent::VoiceResponse { run_id, .. }
         | RunEvent::Error { run_id, .. } => run_id,
     }
 }

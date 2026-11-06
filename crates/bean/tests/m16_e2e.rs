@@ -131,7 +131,7 @@ async fn m16_login_chat_confirm_stop_reconnect_and_final() {
     config.telegram.enabled = false;
     config.web.public_origin = origin.clone();
     config.web.bind = addr;
-    set_password(&data, PASSWORD).unwrap();
+    set_password(&data, PASSWORD, None).unwrap();
     let config_path = temp.path().join("bean.toml");
     std::fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
     let script_path = temp.path().join("fake.json");

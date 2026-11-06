@@ -32,6 +32,15 @@ api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "http://localhost:11434/v1"   # cho openai_compat / Ollama
 max_tokens = 4096
 
+[[llm.providers]]
+name = "open-router"
+provider = "openai_compat"
+model = "nvidia/nemotron-3.5-super-vl:free"
+allowed_models = ["nvidia/nemotron-3.5-super-vl:free"]
+api_key_env = "OPENROUTER_API_"
+# api_key không được hardcode trong file mẫu — đọc từ biến môi trường / secrets.env (xem mục 15.6)
+base_url = "https://openrouter.ai/api/v1"
+
 # Hot-swap provider: khai báo sẵn profile để đổi từ màn Cài đặt (hoặc API)
 # mà không cần restart. Lựa chọn đang dùng được lưu ở data.dir/llm-state.json.
 # [[llm.providers]]
@@ -53,7 +62,7 @@ enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing", "
 # ---------------------------------------------------------------------------
 
 [browser]
-enabled = false
+enabled = true
 
 # Chrome/Chromium PHẢI CÀI SẴN. Bean không bao giờ tải Chrome lúc chạy.
 # Rỗng => tự phát hiện theo thứ tự: biến môi trường `CHROME` -> tên binary trong PATH
@@ -88,14 +97,14 @@ max_image_bytes = 4194304
 [voice]
 # Push-to-talk trên web (M27): giữ nút micro trong khung chat để nói thay vì gõ.
 # Lượt chat bắt đầu bằng voice chỉ chạy được tool mức `Safe`.
-enabled = false
+enabled = true
 
 # `local` — whisper.cpp (STT) + Piper (TTS) chạy tiến trình con trên máy chủ: không cần
 #   mạng, audio KHÔNG rời khỏi máy; bạn phải tự cài binary + model (thiếu thì khởi động
 #   báo lỗi tường minh, không âm thầm fallback).
 # `api`   — ElevenLabs: STT `scribe_v2`, TTS `eleven_multilingual_v2`. Audio CÓ rời khỏi
 #   máy; Bean cảnh báo điều này trong log lúc khởi động.
-provider = "local"
+provider = "api"
 language = "vi"
 
 # Trần ký tự gửi đi TTS; câu dài hơn bị cắt tại ranh giới UTF-8 trước khi đọc.
@@ -123,6 +132,9 @@ tts_model = "eleven_multilingual_v2"
 # tts_voice_id = "21m00Tcm4TlvDq8ikWAM"
 # Voice riêng cho văn bản TIẾNG VIỆT (có dấu thanh); thiếu thì rơi về tts_voice_id.
 # tts_voice_vi = "<voice-id-trong-vault>"
+# Voice fallback (giọng nữ miễn phí) khi giọng chính bị ElevenLabs từ chối (402/403).
+# Mặc định là Bella (EXAVITQu4vr4xnSDxMaL) — giọng premade miễn phí, không cần gói trả phí.
+# fallback_voice_id = "EXAVITQu4vr4xnSDxMaL"
 # Credential là key RIÊNG: validate() từ chối nếu trùng biến env của LLM/web search/
 # Telegram/billing/marketing.
 
@@ -350,7 +362,7 @@ session_ttl_hours = 168
                                      # `web/dist` sang đây, không phải build lại Rust
 
 [telegram]
-enabled = false
+enabled = true
 token_env = "TELEGRAM_BOT_TOKEN"
 allowed_user_ids = [123456789]
 rate_limit_per_minute = 20
@@ -416,7 +428,7 @@ inherit_env = []
 # nó. Bean chỉ lưu SHA-256 trong `data.dir/bean.db`; thu hồi bằng
 # `bean auth mcp-token revoke <tên>`.
 [mcp_server]
-enabled = false                          # bật tường minh: đây là bề mặt tấn công mới
+enabled = false                         # bật tường minh: đây là bề mặt tấn công mới
 http_enabled = false                     # true ⇒ thêm streamable-HTTP/SSE cạnh stdio
 bind = "127.0.0.1:7879"
 public_origin = "http://127.0.0.1:7879"

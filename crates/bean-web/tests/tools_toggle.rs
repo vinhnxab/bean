@@ -8,6 +8,7 @@
 //! * persist vào store **trước** khi mutate registry — store là nguồn sự thật lúc
 //!   khởi động lại, registry chỉ là cache runtime;
 //! * mỗi lần toggle phải ghi audit với `decided_by` là người đã ra quyết định.
+//!
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::Path;
@@ -64,7 +65,7 @@ fn config_for(data: &Path, workspace: &Path, viewer: Option<(&str, &str)>) -> Co
 
 /// Dựng app web; registry có **đúng một** tool `read_file` để toggle được test.
 fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
-    set_password(&config.data.dir, PASSWORD).unwrap();
+    set_password(&config.data.dir, PASSWORD, None).unwrap();
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
     let mut registry = ToolRegistry::with_workspace(workspace.clone());
@@ -82,6 +83,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         skills_index: skills.index(),
         skills: Some(skills.clone()),
         llm_state_path: None,
+        speech: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {
@@ -100,7 +102,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
 
 /// Giống `build` nhưng trả store ra ngoài — test persistence dùng chung store.
 fn build_with_store(config: Config) -> (tempfile::TempDir, Arc<dyn Store>, AxumRouter) {
-    set_password(&config.data.dir, PASSWORD).unwrap();
+    set_password(&config.data.dir, PASSWORD, None).unwrap();
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
     let mut registry = ToolRegistry::with_workspace(workspace.clone());
@@ -118,6 +120,7 @@ fn build_with_store(config: Config) -> (tempfile::TempDir, Arc<dyn Store>, AxumR
         skills_index: skills.index(),
         skills: Some(skills.clone()),
         llm_state_path: None,
+        speech: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {
@@ -341,6 +344,7 @@ async fn toggle_survives_restart_semantics_via_shared_store() {
         skills_index: skills.index(),
         skills: Some(skills.clone()),
         llm_state_path: None,
+        speech: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {

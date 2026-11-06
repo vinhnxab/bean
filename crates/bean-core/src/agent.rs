@@ -189,6 +189,10 @@ pub struct RunOutcome {
     pub loaded_skills: Vec<String>,
     /// Chỉ chứa message của lượt này, dùng làm bằng chứng cho reflection.
     pub transcript: Vec<Message>,
+    /// Audio cuối cùng dưới dạng base64, nếu có (push-to-talk).
+    pub audio_base64: Option<String>,
+    /// MIME type của audio, nếu có.
+    pub mime: Option<String>,
 }
 
 /// Chạy lượt và chỉ trả text (API tương thích M3–M7).

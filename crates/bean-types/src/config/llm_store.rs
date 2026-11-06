@@ -18,8 +18,9 @@ use super::llm::{LlmProfile, default_max_tokens};
 /// File chưa tồn tại ⇒ tạo mới với đúng phần `[[llm.providers]]`. Danh sách
 /// rỗng ⇒ xoá khoá `providers` khỏi `[llm]` (nếu có) thay vì ghi mảng rỗng.
 ///
-/// Khi có ít nhất một profile chứa API key dán trực tiếp (`api_key`), file được
-/// đặt quyền `0600` — chỉ owner đọc/ghi được vì key nằm plaintext trong file.
+/// M29: `api_key` **không bao giờ** được ghi vào file này — key LLM chỉ sống ở
+/// biến môi trường hoặc `data.dir/secrets.env` (0600). Profile cũ còn key trong
+/// toml thì giá trị bị bỏ qua khi ghi (migrate bằng `bean config migrate-secrets`).
 ///
 /// # Errors
 /// [`std::io::Error`] khi file tồn tại nhưng không parse được TOML, hoặc không
@@ -68,14 +69,54 @@ pub fn write_llm_providers(path: &Path, providers: &[LlmProfile]) -> std::io::Re
     if let Ok(meta) = std::fs::metadata(path) {
         let _ = std::fs::set_permissions(&tmp, meta.permissions());
     }
-    // Có key plaintext trong file ⇒ siết quyền còn 0600 (chỉ owner đọc/ghi).
-    #[cfg(unix)]
-    if providers.iter().any(|profile| profile.api_key.is_some()) {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-    }
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// Xoá mọi `api_key` plaintext khỏi `[llm]` và từng `[[llm.providers]]` (M29).
+///
+/// Dùng cho `bean config migrate-secrets --apply`: sau khi key đã được chép sang
+/// `secrets.env`, toml không được còn bản sao plaintext. Giữ nguyên mọi phần khác
+/// (comment, thứ tự) vì đi qua `toml_edit`. Ghi atomic giữ quyền file gốc.
+///
+/// # Errors
+/// [`std::io::Error`] khi file không parse được TOML hoặc không ghi được.
+pub fn remove_stored_api_keys(path: &Path) -> std::io::Result<usize> {
+    let raw = std::fs::read_to_string(path)?;
+    let mut doc: toml_edit::DocumentMut = raw.parse().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file cấu hình không parse được: {error}"),
+        )
+    })?;
+    let mut removed = 0;
+    if let Some(llm) = doc.get_mut("llm").and_then(|item| item.as_table_like_mut()) {
+        if llm.remove("api_key").is_some() {
+            removed += 1;
+        }
+        if let Some(providers) = llm
+            .get_mut("providers")
+            .and_then(|item| item.as_array_of_tables_mut())
+        {
+            for table in providers.iter_mut() {
+                if table.remove("api_key").is_some() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    if removed == 0 {
+        return Ok(0);
+    }
+    let out = doc.to_string();
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, out.as_bytes())?;
+    #[cfg(unix)]
+    if let Ok(meta) = std::fs::metadata(path) {
+        let _ = std::fs::set_permissions(&tmp, meta.permissions());
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(removed)
 }
 
 /// Dựng một bảng TOML từ profile, bỏ qua các trường bằng mặc định serde —
@@ -95,9 +136,7 @@ fn profile_to_table(profile: &LlmProfile) -> toml_edit::Table {
     if !profile.api_key_env.is_empty() {
         table["api_key_env"] = toml_edit::value(profile.api_key_env.as_str());
     }
-    if let Some(key) = &profile.api_key {
-        table["api_key"] = toml_edit::value(key.as_str());
-    }
+    // M29: key không nằm trong toml — chỉ `api_key_env` (tên biến) được ghi.
     if let Some(base_url) = &profile.base_url {
         table["base_url"] = toml_edit::value(base_url.as_str());
     }

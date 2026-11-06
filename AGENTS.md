@@ -157,7 +157,8 @@ bean/
 │  ├─ bean-channels/                # telegram (bộ kênh cuối cùng: web + telegram)
 │  ├─ bean-web/                     # axum: auth, REST, WebSocket, endpoint voice, phục vụ UI nhúng, kiểu API (ts-rs)
 │  ├─ bean-speech/                  # STT/TTS push-to-talk: local (whisper.cpp + piper) hoặc ElevenLabs (M27)
-│  ├─ bean-browser/                 # tool browser nội bộ, nói thẳng Chrome DevTools Protocol (M26)
+│  ├─ bean-browser/                 # tool browser nội bộ
+│  ├─ bean-settings/                # kho secret `secrets.env` + dịch vụ thiết lập thống nhất (M29)
 │  ├─ bean-billing/                 # domain finance-readonly: đọc chi phí cloud (M22a)
 │  ├─ bean-scan/                    # domain security-scan: kiểm [[infra_scope]] rồi mới chạy scanner (M23)
 │  ├─ bean-marketing/               # domain marketing: đọc web, lưu nháp, đăng thật (M24)
@@ -182,7 +183,7 @@ bean/
 └─ tests/e2e/
 ```
 
-Cấu hình: một file `bean.toml` (mục 18). Dữ liệu chạy (SQLite, audit log, auth) ở `data.dir` (mặc định `~/.bean`). Hai file trạng thái runtime nằm cạnh đó và **thắng `bean.toml` lúc khởi động**: `llm-state.json` (profile + model đang chọn trong UI) và `voice-state.json` (bật/tắt voice, ngôn ngữ, key nhập qua UI). Muốn sửa model/voice mà `bean.toml` không có tác dụng: kiểm tra hai file này trước.
+Cấu hình: một file `bean.toml` (mục 18). Dữ liệu chạy (SQLite, audit log, auth) ở `data.dir` (mặc định `~/.bean`). Hai file trạng thái runtime nằm cạnh đó và **thắng `bean.toml` lúc khởi động**: `llm-state.json` (profile + model đang chọn trong UI) và `voice-state.json` (bật/tắt voice, ngôn ngữ, key nhập qua UI). Toàn bộ secret nằm ở `data.dir/secrets.env` (`0600`, thư mục `0700`) — **không** trong `bean.toml` hay `voice-state.json`. Muốn sửa model/voice mà `bean.toml` không có tác dụng: kiểm tra `llm-state.json` / `voice-state.json` trước. Muốn đổi key: dùng `bean secret set` (ghi `secrets.env`) hoặc UI màn Cài đặt.
 
 ---
 
@@ -484,6 +485,13 @@ Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thự
 | `GET /api/mcp` · `GET /api/usage` · `GET /api/agents` | Trạng thái MCP client · lịch sử dùng token · agent con (role) theo quyền người gọi |
 | `GET /api/voice` · `PATCH /api/voice` | Trạng thái/cấu hình voice (RBAC bật ⇒ chỉ `admin` được `PATCH`) |
 | `POST /api/voice/transcribe` · `POST /api/voice/synthesize` | STT · TTS; `transcribe` có trần body riêng cho audio. Cùng quy tắc cookie + `Origin` như mọi endpoint ghi |
+| `GET /api/settings` | Schema + giá trị hiệu lực (không-secret) với `{key, value, source, tier, apply, editable_in_ui}` (M29) |
+| `PATCH /api/settings` | Sửa khoá tầng A. Khoá tầng B → `403 cli_only` kèm gợi ý lệnh (M29) |
+| `GET /api/secrets` | `[{name, label, group, set, source, shadowed_by_env}]`. **Không có trường giá trị** (M29) |
+| `PUT /api/secrets/:name` | `{value, password}` — step-up D19.5 (M29) |
+| `DELETE /api/secrets/:name` | `{password}` (M29) |
+| `POST /api/settings/test/:target` | `llm` \| `voice` \| `telegram` \| `search`: kiểm tra kết nối, lỗi đã redact (M29) |
+| `POST /api/auth/change-password` | `{current, new}`; huỷ các phiên web khác (M29 Q1) |
 
 ### 11.2 WebSocket `/api/ws`
 
@@ -570,7 +578,7 @@ Yêu cầu chung: giao diện **mặc định là tối**, chất liệu **kính
 Output của model có thể chứa nội dung độc hại lấy từ web/email/file (prompt injection), nên UI phải coi mọi thứ là không tin cậy:
 
 - Markdown chỉ render bằng `react-markdown` **không** cho HTML thô; không `dangerouslySetInnerHTML` ở bất kỳ đâu.
-- **Không tải ảnh từ xa.** Ảnh markdown trỏ tới `http(s)://` được hiển thị dạng liên kết văn bản (kèm cảnh báo), không tạo thẻ `<img>` nạp URL ngoài, vì kẻ tấn công có thể nhét dữ liệu vào query string của URL ảnh để đánh cắp thông tin. CSP `img-src 'self' data:` là lớp chặn thứ hai.
+- **Không tải ảnh từ xa.** Ảnh markdown trỏ tới `http(s)://` được hiển thị dạng liên kết văn bản (kèm cảnh báo), không tạo thẻ `` nạp URL ngoài, vì kẻ tấn công có thể nhét dữ liệu vào query string của URL ảnh để đánh cắp thông tin. CSP `img-src 'self' data:` là lớp chặn thứ hai.
 - Liên kết: chỉ cho phép `http`, `https`, `mailto`; luôn `rel="noopener noreferrer"` và `target="_blank"`; hiển thị domain đích rõ ràng.
 - Output tool, tham số tool, tên file: luôn hiển thị bằng text (React tự escape), không nội suy vào HTML/`href`/`style`.
 - Khối code có nút sao chép; không thực thi gì.
@@ -608,7 +616,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 3. **Policy:** quyết định theo mức rủi ro; deny-list mẫu nguy hiểm chỉ là lớp phụ, **không phải rào cản chính**.
 4. **Prompt injection:** nội dung từ web, file, email, MCP bọc trong `<untrusted_content>...</untrusted_content>` (escape cả thẻ đóng nếu nội dung có chứa); system prompt dặn model không làm theo chỉ dẫn trong đó. Sau khi đọc nội dung untrusted trong một lượt, mọi tool `Confirm` trở lên luôn hỏi lại (vô hiệu hoá "cho phép trong phiên").
 5. **SSRF:** `web_fetch` chỉ `http(s)`; resolver DNS tuỳ biến cho `reqwest` lọc IP ngay lúc kết nối (chống DNS rebinding); chặn private, loopback, link-local, metadata (`169.254.169.254`), IPv6 tương ứng; policy redirect kiểm tra lại từng bước; giới hạn kích thước body và thời gian.
-6. **Secrets:** mặc định chỉ từ biến môi trường (`*_env`), bọc `secrecy`, redact khỏi log/audit, không đưa vào prompt. **Ngoại lệ có kiểm soát (nhập key qua UI):** key dán trong màn Cài đặt được **ưu tiên hơn** env (`api_key` > `api_key_env`) và lưu plaintext trên đĩa với quyền `0600` — key LLM trong `bean.toml` (đã `.gitignore`), key voice trong `data.dir/voice-state.json`; `llm-state.json` không chứa key. Mỗi credential dùng biến **riêng**: billing/marketing/voice bị `validate()` từ chối nếu trùng biến của LLM/web search/Telegram. Hệ quả cần biết: (a) key lưu qua UI sẽ **che** biến môi trường cùng tên — đổi env mà không có tác dụng thì kiểm tra file; (b) các trường `api_key` trong `Config` hiện là `Option<String>` chứ không phải `SecretString`, nên **không** `{:?}`-log nguyên `Config` (K30).
+6. **Secrets:** toàn bộ secret nằm ở `data.dir/secrets.env` (`0600`, thư mục `0700`) — **không** trong `bean.toml` hay `voice-state.json` (xem M29). Thứ tự ưu tiên một chiều: biến môi trường tiến trình > `secrets.env` > chưa đặt. Biến env đặt nhưng rỗng được coi như chưa đặt. CLI/UI nhập qua `bean secret set` / `bean config set`; giá trị không bao giờ in ra log/audit/response. Key LLM trong `bean.toml` (đã `.gitignore`) và key voice trong `voice-state.json` chỉ đọc được kèm cảnh báo, **không** ghi (M29 mục 6). Mỗi credential dùng biến **riêng**: billing/marketing/voice bị `validate()` từ chối nếu trùng biến của LLM/web search/Telegram. Các trường `api_key` trong `Config` hiện là `Option<String>` chứ không phải `SecretString`, nên **không** `{:?}`-log nguyên `Config` (K30).
 7. **Web server** (agent có quyền chạy lệnh nên web server là bề mặt tấn công nghiêm trọng):
    - Mặc định bind `127.0.0.1`. Bind địa chỉ khác chỉ khi `web.allow_remote = true`, in cảnh báo rõ ràng, và tài liệu hoá việc đặt sau reverse proxy có TLS (Caddy/nginx) hoặc mạng riêng (Tailscale/WireGuard); không tự làm TLS ở v1.
    - **Không có mật khẩu thì không bật web.** Lệnh `bean auth set-password` lưu hash `argon2id` vào `data.dir/auth.toml` (quyền `0600`); `serve` từ chối bật web nếu chưa đặt.
@@ -653,7 +661,7 @@ timezone = "Asia/Ho_Chi_Minh"
 allowed_users = ["web:admin", "telegram:123456789"]   # lớp kiểm tra thứ hai ở lõi
 
 [data]
-dir = "~/.bean"                 # sqlite, audit log, auth.toml
+dir = "~/.bean"                 # sqlite, audit log, auth.toml, secrets.env
 
 [llm]
 provider = "anthropic"             # anthropic | openai_compat
@@ -730,7 +738,7 @@ tool_tags = ["*"]
 
 Lưu ý khi bật RBAC: mọi identity khác (`telegram:<id>`, `mcp-client:<tên>`) **phải** được liệt kê trong `user_roles`, nếu không sẽ là `no-access`. Tắt/bật tool và đổi cấu hình voice trên UI chỉ dành cho `admin`.
 
-Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean mcp serve [--http]`. Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
+Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean secret set <NAME>` · `bean config set <key> <value>` · `bean setup` · `bean doctor [--online]` · `bean mcp serve [--http]`. Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
 
 ---
 
@@ -781,7 +789,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 - Test gọi API thật đánh dấu `#[ignore]`.
 
 **Web (Vitest + Testing Library + MSW)**
-- Markdown: `<script>`, `<img onerror>`, liên kết `javascript:`, ảnh từ xa (không được tạo `<img>` nạp URL ngoài) đều bị vô hiệu.
+- Markdown: `<script>`, `<img onerror>`, liên kết `javascript:`, ảnh từ xa (không được tạo `` nạp URL ngoài) đều bị vô hiệu.
 - Thẻ xác nhận: hiển thị nguyên văn hành động, ẩn nút "trong phiên" với Dangerous, khoá sau khi giải quyết, đếm ngược đến "Hết hạn".
 - WS client: nối lại với backoff, xử lý `Sync`, không nhân đôi tin nhắn khi nối lại; store chat cập nhật đúng theo chuỗi `Queued → ToolStart → ToolEnd → Final`.
 - 401 chuyển về trang đăng nhập; i18n đủ khoá cho `vi` và `en`.
@@ -820,6 +828,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 | M26 | Tool browser nội bộ (CDP) | Không tải Chrome lúc chạy; origin ngoài allowlist luôn `Dangerous` |
 | M27 | QA test-runner (`qa_test`) **và** voice push-to-talk (`bean-speech`) | Hai tính năng cùng mang nhãn M27 trong code/tài liệu; `qa` không có đường ghi nào |
 | M28 | Đổi tên `BeanAgent` → `bean` | Không migration tự động: `mv ~/.BeanAgent ~/.bean` (`docs/decisions.md` D18.x) |
+| M29 | Thiết lập & secrets thống nhất (UI + terminal) | `secrets.env` duy nhất chứa key; `bean secret set`/`bean config set`; `bean doctor` sạch; `make check` xanh |
 
 Trạng thái chi tiết, commit và phần còn thiếu của từng milestone: `docs/status-report.md` mục 2.
 
@@ -861,6 +870,7 @@ Trạng thái chi tiết, commit và phần còn thiếu của từng milestone:
 23. **`env -i` xoá luôn `DISPLAY`/`XAUTHORITY`:** Chrome MCP chạy có cửa sổ (không `--headless`) sẽ không mở được. Đừng dựng môi trường sạch bằng `env -i`; để `beanctl` nạp `~/.config/bean/env`.
 24. **Model được quyết định ở ba nơi:** `[llm].model`, profile trong `[[llm.providers]]` và `llm-state.json` — file cuối **thắng** lúc khởi động (log: `áp lựa chọn provider đã lưu từ phiên trước`). Sửa `bean.toml` mà model không đổi thì xoá hoặc sửa `llm-state.json`.
 25. **OpenRouter `:free` hay trả `503 Provider returned error`** khi model upstream quá tải: không phải lỗi cấu hình hay key. Đổi sang model khác trong `allowed_models`.
+26. **Secret nằm ở `secrets.env` (`0600`), không trong `bean.toml`/`voice-state.json`.** Đổi env mà không có tác dụng có thể do key đang bị `secrets.env` che (thứ tự: env > `secrets.env` > chưa đặt). Kiểm tra bằng `bean secret list`.
 
 ---
 

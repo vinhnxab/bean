@@ -31,14 +31,26 @@ impl Config {
     /// Returns [`ConfigError::MissingEnv`] when Telegram is enabled and its
     /// configured environment variable is absent or blank.
     pub fn resolve_telegram_token(&self) -> Result<Option<SecretString>, ConfigError> {
+        self.resolve_telegram_token_with(&|name: &str| std::env::var(name).ok())
+    }
+
+    /// Như [`Config::resolve_telegram_token`] nhưng nhận hàm đọc env tuỳ ý
+    /// (M29: compose với [`bean_settings::env_first_lookup`] để đọc thêm
+    /// `secrets.env` — env thắng file).
+    ///
+    /// # Errors
+    /// Như [`Config::resolve_telegram_token`].
+    pub fn resolve_telegram_token_with<P>(
+        &self,
+        get_env: &P,
+    ) -> Result<Option<SecretString>, ConfigError>
+    where
+        P: Fn(&str) -> Option<String>,
+    {
         if !self.telegram.enabled {
             return Ok(None);
         }
-        let token = read_required(
-            &|name: &str| std::env::var(name).ok(),
-            "telegram.token_env",
-            &self.telegram.token_env,
-        )?;
+        let token = read_required(get_env, "telegram.token_env", &self.telegram.token_env)?;
         Ok(Some(token))
     }
 }
@@ -52,14 +64,24 @@ impl Config {
     /// # Errors
     /// [`ConfigError::MissingEnv`] kể billing bật mà biến `api_key_env` thiếu/rỗng.
     pub fn resolve_billing_key(&self) -> Result<Option<SecretString>, ConfigError> {
+        self.resolve_billing_key_with(&|name: &str| std::env::var(name).ok())
+    }
+
+    /// Như [`Config::resolve_billing_key`] nhưng nhận hàm đọc env tuỳ ý (M29).
+    ///
+    /// # Errors
+    /// Như [`Config::resolve_billing_key`].
+    pub fn resolve_billing_key_with<P>(
+        &self,
+        get_env: &P,
+    ) -> Result<Option<SecretString>, ConfigError>
+    where
+        P: Fn(&str) -> Option<String>,
+    {
         if !self.billing.enabled {
             return Ok(None);
         }
-        let key = read_required(
-            &|name: &str| std::env::var(name).ok(),
-            "billing.api_key_env",
-            &self.billing.api_key_env,
-        )?;
+        let key = read_required(get_env, "billing.api_key_env", &self.billing.api_key_env)?;
         Ok(Some(key))
     }
 }
@@ -73,11 +95,25 @@ impl Config {
     /// # Errors
     /// [`ConfigError::MissingEnv`] kể marketing bật mà biến `api_key_env` thiếu/rỗng.
     pub fn resolve_marketing_key(&self) -> Result<Option<SecretString>, ConfigError> {
+        self.resolve_marketing_key_with(&|name: &str| std::env::var(name).ok())
+    }
+
+    /// Như [`Config::resolve_marketing_key`] nhưng nhận hàm đọc env tuỳ ý (M29).
+    ///
+    /// # Errors
+    /// Như [`Config::resolve_marketing_key`].
+    pub fn resolve_marketing_key_with<P>(
+        &self,
+        get_env: &P,
+    ) -> Result<Option<SecretString>, ConfigError>
+    where
+        P: Fn(&str) -> Option<String>,
+    {
         if !self.marketing.enabled {
             return Ok(None);
         }
         let key = read_required(
-            &|name: &str| std::env::var(name).ok(),
+            get_env,
             "marketing.api_key_env",
             &self.marketing.api_key_env,
         )?;
@@ -85,28 +121,39 @@ impl Config {
     }
 }
 impl Config {
-    /// Đọc credential ElevenLabs của `[voice]` (M27).
+    /// Đọc key ElevenLabs của `[voice]` (M27).
     ///
-    /// Trả `None` khi voice tắt hoặc chế độ `local` (không cần key). Ưu tiên key lưu
-    /// trực tiếp (`[voice].api_key` — từ UI qua `voice-state.json`), sau đó mới đến
-    /// biến môi trường `api_key_env`. Khi voice **bật** ở chế độ `api` mà cả hai
-    /// nguồn đều trống thì báo lỗi lúc khởi động — người vận hành cần biết ngay là
-    /// chưa có key thay vì tưởng TTS/STT sẽ chạy được.
+    /// Trả `None` khi voice tắt hoặc chế độ `local` (không cần key). Key resolve
+    /// qua hàm đọc env được truyền vào (M29: env > `secrets.env`). Khi voice **bật**
+    /// ở chế độ `api` mà không có key thì báo lỗi lúc khởi động — người vận hành
+    /// cần biết ngay là chưa có key thay vì tưởng TTS/STT sẽ chạy được.
     ///
     /// # Errors
     /// [`ConfigError::MissingEnv`] kể voice bật chế độ `api` mà `api_key_env` thiếu/rỗng.
     pub fn resolve_voice_api_key(&self) -> Result<Option<SecretString>, ConfigError> {
+        self.resolve_voice_api_key_with(&|name: &str| std::env::var(name).ok())
+    }
+
+    /// Như [`Config::resolve_voice_api_key`] nhưng nhận hàm đọc env tuỳ ý.
+    ///
+    /// M29: trường `voice.api_key` (key dán từ `voice-state.json` cũ) **không còn
+    /// được dùng để resolve** — chỉ env và `secrets.env` (qua `get_env`) được đọc,
+    /// đúng thứ tự ưu tiên D19.3. File cũ vẫn parse được nhưng key sai chỗ chỉ
+    /// được `bean doctor` cảnh báo.
+    ///
+    /// # Errors
+    /// [`ConfigError::MissingEnv`] kể voice bật chế độ `api` mà `api_key_env` thiếu/rỗng.
+    pub fn resolve_voice_api_key_with<P>(
+        &self,
+        get_env: &P,
+    ) -> Result<Option<SecretString>, ConfigError>
+    where
+        P: Fn(&str) -> Option<String>,
+    {
         if !self.voice.enabled || self.voice.provider != SpeechProviderKind::Api {
             return Ok(None);
         }
-        if let Some(stored) = voice_stored_key(&self.voice) {
-            return Ok(Some(stored));
-        }
-        let key = read_required(
-            &|name: &str| std::env::var(name).ok(),
-            "voice.api_key_env",
-            &self.voice.api_key_env,
-        )?;
+        let key = read_required(get_env, "voice.api_key_env", &self.voice.api_key_env)?;
         Ok(Some(key))
     }
 
@@ -117,27 +164,23 @@ impl Config {
     /// này chỉ có nghĩa "chưa cấu hình xong" (UI hiện tương ứng), không phải lỗi vận hành.
     #[must_use]
     pub fn resolve_voice_api_key_lenient(&self) -> Option<SecretString> {
+        self.resolve_voice_api_key_lenient_with(&|name: &str| std::env::var(name).ok())
+    }
+
+    /// Như [`Config::resolve_voice_api_key_lenient`] nhưng nhận hàm đọc env tuỳ ý
+    /// (M29: env > `secrets.env`; bỏ ưu tiên key trong `voice-state.json`).
+    #[must_use]
+    pub fn resolve_voice_api_key_lenient_with<P>(&self, get_env: &P) -> Option<SecretString>
+    where
+        P: Fn(&str) -> Option<String>,
+    {
         if self.voice.provider != SpeechProviderKind::Api {
             return None;
         }
-        if let Some(stored) = voice_stored_key(&self.voice) {
-            return Some(stored);
-        }
-        read_optional(
-            &|name: &str| std::env::var(name).ok(),
-            &self.voice.api_key_env,
-        )
+        read_optional(get_env, &self.voice.api_key_env)
     }
 }
 
-/// Key lưu trực tiếp trong `[voice]` (runtime từ UI/state file); `None` khi rỗng.
-fn voice_stored_key(voice: &VoiceConfig) -> Option<SecretString> {
-    voice
-        .api_key
-        .clone()
-        .filter(|key| !key.trim().is_empty())
-        .map(SecretString::from)
-}
 impl Config {
     /// Read optional API key for `web_search` from biến môi trường được cấu hình.
     ///
@@ -149,7 +192,9 @@ impl Config {
     }
 }
 impl Config {
-    fn resolve_web_search_api_key_with<P>(&self, get_env: &P) -> Option<SecretString>
+    /// Như [`Config::resolve_web_search_api_key`] nhưng nhận hàm đọc env tuỳ ý (M29).
+    #[must_use]
+    pub fn resolve_web_search_api_key_with<P>(&self, get_env: &P) -> Option<SecretString>
     where
         P: Fn(&str) -> Option<String>,
     {

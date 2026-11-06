@@ -114,6 +114,7 @@ async fn fixture(
     let notifications = Arc::new(SentNotifications::default());
     let router = Arc::new(Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config.llm.as_profile(),
         config,
         store,
@@ -263,6 +264,7 @@ async fn disabled_learning_never_calls_reflection() {
     config.learning.enabled = false;
     let router = Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config.llm.as_profile(),
         config,
         store: Arc::new(MemoryStore::new()),

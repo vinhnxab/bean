@@ -167,6 +167,12 @@ pub enum RouterError {
     /// Không ghi được `bean.toml` — CRUD profile bị từ chối nguyên vẹn.
     #[error("không ghi được file cấu hình: {0}")]
     ConfigPersist(String),
+    /// (M29) Router không được cấp khoá secret — thao tác key từ UI bị từ chối.
+    #[error("tiến trình không có khoá secret (secrets.env); key chỉ resolve từ biến môi trường")]
+    SecretUnavailable,
+    /// (M29) Ghi/xoá slot trong `secrets.env` thất bại.
+    #[error("không ghi được secret: {0}")]
+    SecretWrite(String),
 }
 
 impl RouterError {
@@ -198,12 +204,14 @@ impl RouterError {
             Self::ProfileActive(_) => "profile_active",
             Self::DefaultProfileReadonly => "default_readonly",
             Self::ConfigPersist(_) => "config_unwritable",
+            Self::SecretUnavailable => "secret_unavailable",
+            Self::SecretWrite(_) => "secret_write_failed",
         }
     }
 }
 
 /// Tùy chọn runtime, test có thể rút ngắn timeout/backoff.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RouterOptions {
     /// Sức chứa broadcast.
     pub event_capacity: usize,
@@ -215,6 +223,31 @@ pub struct RouterOptions {
     pub outbox_base_delay: Duration,
     /// Trần backoff.
     pub outbox_max_delay: Duration,
+    /// Kho secret của tiến trình (M29: `data.dir/secrets.env`).
+    ///
+    /// `None` (mặc định — test, `chat`, `mcp`) = resolve key chỉ từ biến môi trường.
+    /// Khi có, mọi resolve key của Router theo thứ tự D19.3: env > `secrets.env` >
+    /// chưa đặt; và CRUD profile từ UI ghi key dán vào file này thay vì `bean.toml`.
+    pub secrets: Option<Arc<bean_settings::SecretStore>>,
+}
+
+impl std::fmt::Debug for RouterOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouterOptions")
+            .field("event_capacity", &self.event_capacity)
+            .field("confirm_timeout", &self.confirm_timeout)
+            .field("outbox_poll_interval", &self.outbox_poll_interval)
+            .field("outbox_base_delay", &self.outbox_base_delay)
+            .field("outbox_max_delay", &self.outbox_max_delay)
+            .field(
+                "secrets",
+                &self
+                    .secrets
+                    .as_ref()
+                    .map(|store| store.path().display().to_string()),
+            )
+            .finish()
+    }
 }
 
 impl Default for RouterOptions {
@@ -225,6 +258,7 @@ impl Default for RouterOptions {
             outbox_poll_interval: Duration::from_secs(1),
             outbox_base_delay: Duration::from_secs(1),
             outbox_max_delay: Duration::from_secs(300),
+            secrets: None,
         }
     }
 }
@@ -260,6 +294,8 @@ pub struct RouterDeps {
     /// từ `config` sau đó thì `"default"` sẽ là lựa chọn đã lưu, và switch về
     /// `"default"` thành no-op. Test truyền `config.llm.as_profile()`.
     pub default_profile: bean_types::config::LlmProfile,
+    /// Provider STT/TTS cho push-to-talk (M27); `None` khi voice chưa cấu hình.
+    pub speech: Option<Arc<dyn bean_speech::SpeechProvider>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -312,8 +348,8 @@ pub struct LlmProfileInfo {
     pub api_key_env: String,
     /// `true` khi biến môi trường (nếu cần) có giá trị trong process.
     pub key_configured: bool,
-    /// 4 ký tự cuối của key đã lưu trực tiếp (vd `"ed6"` bọc thành `"••••ed6"`);
-    /// `None` = profile không có key trong `bean.toml` (resolve từ env).
+    /// 4 ký tự cuối của key đã resolve (env hoặc `secrets.env`, vd `"••••ed6"`);
+    /// `None` = chưa có key nào cấu hình cho profile.
     pub api_key_hint: Option<String>,
     /// `true` khi profile đang có hiệu lực.
     pub active: bool,
@@ -321,13 +357,16 @@ pub struct LlmProfileInfo {
 
 /// Ý định thay đổi API key của profile khi sửa từ UI — tách bạch ba semantics
 /// "giữ nguyên / xoá / thay mới" để form để trống không vô tình xoá key đã lưu.
+///
+/// M29: `Set`/`Clear` thao tác trên `secrets.env` (dưới tên biến `api_key_env`
+/// của profile) chứ không ghi vào `bean.toml` nữa.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiKeyUpdate {
     /// Body không gửi trường `api_key` ⇒ giữ key hiện tại của profile.
     Keep,
     /// Body gửi chuỗi rỗng ⇒ xoá key đã lưu (quay lại resolve từ env).
     Clear,
-    /// Body gửi key mới ⇒ ghi đè key trong `bean.toml`.
+    /// Body gửi key mới ⇒ ghi vào `secrets.env` dưới tên `api_key_env`.
     Set(String),
 }
 

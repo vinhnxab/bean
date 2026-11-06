@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Khởi động Bean — đảm bảo CHỈ CÓ MỘT tiến trình bean trong một thời điểm.
 #
-# Vì sao cần script: `OPENROUTER_API_KEY` chỉ sống trong RAM của một terminal
-# thì lần restart sau (hoặc khi máy mở lại) Bean khởi động không có key ⇒
-# không gọi được LLM ⇒ chat im lặng, nhưng server vẫn trả 200 nên rất khó đoán.
+# Vì sao cần script: hai tiến trình cùng đọc `data.dir` sẽ tranh nhau SQLite và
+# scheduler, dễ sinh "database is locked" và task chạy hai lần.
 #
-# Vì sao phải dừng instance cũ trước: hai tiến trình cùng đọc `data.dir` sẽ tranh
-# nhau SQLite và scheduler, dễ sinh "database is locked" và task chạy hai lần.
+# M29: key KHÔNG còn được nạp vào môi trường tiến trình từ ~/.config/bean/env —
+# Bean tự đọc `data.dir/secrets.env` (0600) theo thứ tự env > secrets.env. Nếu key
+# cũ vẫn nằm trong file env, chạy một lần:
+#   bean config migrate-secrets --apply
 #
 # Cách dùng:
 #   beanctl start     # dừng instance cũ (nếu có) rồi khởi động mới
@@ -26,9 +27,10 @@ LOG="/tmp/bean-run/serve.log"
 # Chạy Bean nền, tách phiên terminal (nó sống sót sau khi terminal đóng) và
 # tách luôn stdin. `setsid` quan trọng: không có nó thì SIGHUP của terminal sẽ
 # giết Bean khi bạn đóng cửa sổ.
+# M29: KHÔNG nạp ENV_FILE vào môi trường — Bean tự đọc secrets.env.
 launch() {
   mkdir -p "$(dirname "$LOG")"
-  ( set -a; . "$ENV_FILE"; set +a
+  (
     export RUST_LOG="${RUST_LOG:-info,bean_security=warn}"
     exec setsid "$BIN" --config "$CONFIG" serve >>"$LOG" 2>&1 </dev/null
   ) &
@@ -55,17 +57,18 @@ stop_all() {
   sleep 1
 }
 
-require_key() {
-  if [ ! -r "$ENV_FILE" ]; then
-    echo "LỖI: thiếu $ENV_FILE" >&2
-    echo "Tạo file này (quyền 600) chứa: export OPENROUTER_API_KEY=<key>" >&2
-    echo "Lấy key ở https://openrouter.ai/keys" >&2
-    exit 1
+check_secrets() {
+  # M29: cảnh báo mềm (không chặn — provider tự host không cần key).
+  local dir="$(grep -m1 -E '^[[:space:]]*dir[[:space:]]*=' "$CONFIG" 2>/dev/null \
+    | sed -E 's/^[^=]*=[[:space:]]*"([^"]*)".*/\1/' | sed -E "s|^~|$HOME|")"
+  [ -n "$dir" ] || dir="$HOME/.bean"
+  if [ ! -f "$dir/secrets.env" ]; then
+    echo "⚠  Chưa có $dir/secrets.env — Bean chỉ resolve key từ biến môi trường." >&2
+    if [ -f "$ENV_FILE" ]; then
+      echo "   Key cũ đang nằm trong $ENV_FILE? Chạy một lần:" >&2
+      echo "     bean --config $CONFIG config migrate-secrets --apply" >&2
+    fi
   fi
-  ( set -a; . "$ENV_FILE"; set +a
-    if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-      echo "LỖI: OPENROUTER_API_KEY rỗng trong $ENV_FILE" >&2; exit 1
-    fi )
 }
 
 case "${1:-start}" in
@@ -74,7 +77,7 @@ case "${1:-start}" in
       echo "LỖI: không có binary $BIN — chạy 'make build' trong $REPO trước." >&2
       exit 1
     fi
-    require_key
+    check_secrets
     stop_all          # luôn dừng cái cũ trước, kể cả khi không thấy pid
     launch
     sleep 3
@@ -90,7 +93,7 @@ case "${1:-start}" in
     fi
     ;;
   stop)   stop_all ;;
-  restart) require_key; stop_all; launch; sleep 3
+  restart) check_secrets; stop_all; launch; sleep 3
            pgrep -f "target/release/bean --config" >/dev/null && echo "Đã restart." || { echo "Không lên, xem $LOG" >&2; exit 1; } ;;
   status)
     n=$(pgrep -f "target/release/bean --config" | grep -vx -e "$$" -e "$PPID" | wc -l)
@@ -107,18 +110,15 @@ case "${1:-start}" in
     # Foreground cho `systemd --user` (deploy/systemd/bean-user.service).
     # KHÔNG setsid/disown: systemd cần process chính là con trực tiếp để quản
     # vòng đời (stop/restart/Restart=on-failure). Log đi vào journald.
-    require_key
-    ( set -a; . "$ENV_FILE"; set +a
-      export RUST_LOG="${RUST_LOG:-info,bean_security=warn}"
-      # systemd user manager không có biến phiên đồ họa; chrome MCP cần X11.
-      # Fallback chuẩn desktop đơn người dùng — nếu XAUTHORITY khác (Wayland),
-      # đặt Environment=DISPLAY=… XAUTHORITY=… trong unit.
-      if [ -z "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then export DISPLAY=:0; fi
-      if [ -z "${XAUTHORITY:-}" ] && [ -f "$HOME/.Xauthority" ]; then
-        export XAUTHORITY="$HOME/.Xauthority"
-      fi
-      exec "$BIN" --config "$CONFIG" serve
-    )
+    # M29: KHÔNG nạp ENV_FILE — Bean tự đọc secrets.env. DISPLAY/XAUTHORITY vẫn
+    # cần fallback vì chrome MCP cần X11 (K23).
+    check_secrets
+    export RUST_LOG="${RUST_LOG:-info,bean_security=warn}"
+    if [ -z "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then export DISPLAY=:0; fi
+    if [ -z "${XAUTHORITY:-}" ] && [ -f "$HOME/.Xauthority" ]; then
+      export XAUTHORITY="$HOME/.Xauthority"
+    fi
+    exec "$BIN" --config "$CONFIG" serve
     ;;
   *) echo "Dùng: beanctl {start|stop|restart|status|run}" >&2; exit 2 ;;
 esac

@@ -145,6 +145,7 @@ fn setup() -> (TempDir, Arc<Router>, Config, Arc<EchoArgs>) {
     let store = Arc::new(MemoryStore::default());
     let store_dyn: Arc<dyn Store> = store;
     let router = Arc::new(Router::new(RouterDeps {
+        speech: None,
         default_profile: config.llm.as_profile(),
         config: config.clone(),
         store: store_dyn,

@@ -68,6 +68,11 @@ pub struct VoiceConfig {
     /// Cho phép cấu hình hai giọng theo ngôn ngữ, ví dụ tiếng Việt dùng một giọng riêng
     /// trong khi tiếng Anh dùng giọng mặc định.
     pub tts_voice_vi: Option<String>,
+    /// Voice ID fallback khi giọng chính (`tts_voice_id`) bị ElevenLabs từ chối (HTTP 402/403,
+    /// ví dụ giọng Voice Library yêu cầu gói trả phí). Mặc định là giọng "Bella" — giọng nữ
+    /// miễn phí (premade) của ElevenLabs, không cần gói trả phí.
+    #[serde(default)]
+    pub fallback_voice_id: Option<String>,
 }
 
 impl Default for VoiceConfig {
@@ -94,6 +99,9 @@ impl Default for VoiceConfig {
             // bạn dùng voice khác trong voice vault của mình.
             tts_voice_id: "21m00Tcm4TlvDq8ikWAM".to_string(),
             tts_voice_vi: None,
+            // Bella — giọng nữ miễn phí (premade) của ElevenLabs, dùng làm fallback khi
+            // giọng chính (Rachel, Voice Library) bị từ chối trên gói miễn phí (402).
+            fallback_voice_id: Some("EXAVITQu4vr4xnSDxMaL".to_string()),
         }
     }
 }

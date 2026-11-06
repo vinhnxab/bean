@@ -90,6 +90,8 @@ struct Setup {
     _temp: tempfile::TempDir,
     router: Router,
     config_path: std::path::PathBuf,
+    /// Kho secret của tiến trình test (M29) — trỏ vào `tempdir/secrets.env`.
+    secrets: Arc<bean_settings::SecretStore>,
 }
 
 /// Profile ollama chuẩn của setup — dùng cho cả TOML và nhánh config-from-code.
@@ -123,9 +125,13 @@ fn setup(config_is_directory: bool) -> Setup {
     let workspace_root = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace_root).unwrap();
     let workspace = Arc::new(CapWorkspace::open(workspace_root).unwrap());
+    let secrets = Arc::new(bean_settings::SecretStore::new(
+        temp.path().join("secrets.env"),
+    ));
     let router = Router::with_options(
         RouterDeps {
             config_path: Some(config_path.clone()),
+            speech: None,
             default_profile: config.llm.as_profile(),
             config,
             store: Arc::new(MemoryStore::new()),
@@ -139,12 +145,16 @@ fn setup(config_is_directory: bool) -> Setup {
             skills: None,
             llm_state_path: None,
         },
-        RouterOptions::default(),
+        RouterOptions {
+            secrets: Some(secrets.clone()),
+            ..RouterOptions::default()
+        },
     );
     Setup {
         _temp: temp,
         router,
         config_path,
+        secrets,
     }
 }
 
@@ -168,6 +178,7 @@ fn setup_ram_only() -> (tempfile::TempDir, Router) {
     let router = Router::with_options(
         RouterDeps {
             config_path: None,
+            speech: None,
             default_profile: config.llm.as_profile(),
             config,
             store: Arc::new(MemoryStore::new()),
@@ -546,7 +557,7 @@ impl KeyCaptureFactory {
 }
 
 #[test]
-fn stored_key_thang_env_va_hint_4_ky_tu_cuoi() {
+fn key_dan_vao_ui_vao_secrets_env_khong_vao_toml() {
     let setup = setup(false);
     let mut with_key = new_profile("paid", "anthropic/claude-opus-5");
     with_key.provider = LlmProviderKind::Anthropic;
@@ -554,18 +565,23 @@ fn stored_key_thang_env_va_hint_4_ky_tu_cuoi() {
     with_key.api_key = Some("sk-file-key-abcd".to_string());
     setup.router.add_llm_provider(with_key).unwrap();
 
-    // Danh sách profile: key_configured = true vì key nằm trong file, hint = 4
-    // ký tự cuối, và không bao giờ lộ key nguyên vẹn.
+    // Danh sách profile: key_configured = true (secrets.env có giá trị), hint = 4
+    // ký tự cuối, và key **không bao giờ** nằm trong bean.toml (M29).
     let profiles = setup.router.llm_profiles().unwrap();
     let paid = profiles.iter().find(|p| p.name == "paid").unwrap();
     assert!(paid.key_configured);
     assert_eq!(paid.api_key_hint.as_deref(), Some("••••abcd"));
     let raw = std::fs::read_to_string(&setup.config_path).unwrap();
-    assert!(raw.contains("api_key = \"sk-file-key-abcd\""));
-    assert!(!raw.contains("api_key_hint"));
+    assert!(
+        !raw.contains("sk-file-key-abcd"),
+        "key không được ghi vào bean.toml:\n{raw}"
+    );
+    assert!(raw.contains("api_key_env = \"BEAN_TEST_PAID_KEY_UNSET\""));
+    let stored = std::fs::read_to_string(setup.secrets.path()).unwrap();
+    assert!(stored.contains("BEAN_TEST_PAID_KEY_UNSET=sk-file-key-abcd"));
 
-    // Env biến KHÔNG tồn tại mà resolve vẫn ra key file ⇒ đường file được ưu tiên
-    // trước đường env (file-key trả về dù env vắng).
+    // Env biến KHÔNG tồn tại mà resolve vẫn ra key ⇒ đường secrets.env được dùng
+    // (env thật không test được vì `forbid(unsafe_code)` chặn `set_var`).
     let capture = KeyCaptureFactory {
         seen_keys: Mutex::new(Vec::new()),
     };
@@ -607,7 +623,7 @@ fn update_key_set_keep_clear() {
     paid.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
     setup.router.add_llm_provider(paid).unwrap();
 
-    // SET: dán key mới qua update.
+    // SET: key dán qua update vào secrets.env (0600); bean.toml không bao giờ chứa key.
     let mut updated = new_profile("paid", "claude-opus-5");
     updated.provider = LlmProviderKind::Anthropic;
     updated.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
@@ -616,7 +632,12 @@ fn update_key_set_keep_clear() {
         .update_llm_provider("paid", updated, ApiKeyUpdate::Set("sk-new-key-7777".into()))
         .unwrap();
     let raw = std::fs::read_to_string(&setup.config_path).unwrap();
-    assert!(raw.contains("api_key = \"sk-new-key-7777\""));
+    assert!(
+        !raw.contains("sk-new-key-7777"),
+        "key không được ghi vào bean.toml:\n{raw}"
+    );
+    let stored = std::fs::read_to_string(setup.secrets.path()).unwrap();
+    assert!(stored.contains("BEAN_TEST_PAID_KEY_UNSET=sk-new-key-7777"));
     let profiles = setup.router.llm_profiles().unwrap();
     assert_eq!(
         profiles
@@ -636,13 +657,13 @@ fn update_key_set_keep_clear() {
         .router
         .update_llm_provider("paid", edited, ApiKeyUpdate::Keep)
         .unwrap();
-    let raw = std::fs::read_to_string(&setup.config_path).unwrap();
+    let stored = std::fs::read_to_string(setup.secrets.path()).unwrap();
     assert!(
-        raw.contains("api_key = \"sk-new-key-7777\""),
-        "Keep phải giữ key cũ"
+        stored.contains("BEAN_TEST_PAID_KEY_UNSET=sk-new-key-7777"),
+        "Keep phải giữ key cũ trong secrets.env"
     );
 
-    // CLEAR: nút "Xoá key" ⇒ bỏ trường khỏi TOML, quay lại resolve env.
+    // CLEAR: nút "Xoá key" ⇒ xoá slot khỏi secrets.env, quay lại resolve env.
     let mut cleared = new_profile("paid", "claude-opus-5");
     cleared.provider = LlmProviderKind::Anthropic;
     cleared.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
@@ -650,18 +671,21 @@ fn update_key_set_keep_clear() {
         .router
         .update_llm_provider("paid", cleared, ApiKeyUpdate::Clear)
         .unwrap();
-    let config = Config::load(&setup.config_path).unwrap();
-    assert!(config.llm.providers.iter().all(|p| p.api_key.is_none()));
+    let stored = std::fs::read_to_string(setup.secrets.path()).unwrap();
+    assert!(
+        !stored.contains("BEAN_TEST_PAID_KEY_UNSET"),
+        "Clear phải xoá slot"
+    );
     let profiles = setup.router.llm_profiles().unwrap();
     let paid = profiles.iter().find(|p| p.name == "paid").unwrap();
     assert_eq!(paid.api_key_hint, None);
-    // Env không có ⇒ key_configured false (api_key_env không rỗng và key file trống).
+    // Env không có ⇒ key_configured false (api_key_env không rỗng, secrets.env trống).
     assert!(!paid.key_configured);
 }
 
 #[test]
 fn update_set_key_rong_bi_chuan_hoa_thanh_clear() {
-    // Set chuỗi chỉ khoảng trắng bị router normalize về None — giống Clear.
+    // Set chuỗi chỉ khoảng trắng bị coi như Clear — không lưu slot giá trị trắng.
     let setup = setup(false);
     let mut edited = new_profile("ollama", "qwen3:32b");
     edited.allowed_models = vec!["qwen3:32b".to_string()];
@@ -671,6 +695,8 @@ fn update_set_key_rong_bi_chuan_hoa_thanh_clear() {
         .unwrap();
     let config = Config::load(&setup.config_path).unwrap();
     assert!(config.llm.providers.iter().all(|p| p.api_key.is_none()));
+    // `api_key_env` của ollama rỗng ⇒ không có slot nào để ghi, secrets.env không được tạo.
+    assert!(!setup.secrets.path().exists());
 }
 
 #[test]
@@ -678,14 +704,17 @@ fn key_co_ky_tu_dieu_khien_bi_tu_choi_khi_update() {
     let setup = setup(false);
     let mut bad = new_profile("ollama", "qwen3:32b");
     bad.allowed_models = vec!["qwen3:32b".to_string()];
+    // M29: giá trị key được kiểm ở `SecretStore` (cấm rỗng/newline/NUL/quá dài)
+    // ⇒ lỗi là `SecretWrite`, và không file nào bị ghi.
     let error = setup
         .router
         .update_llm_provider("ollama", bad, ApiKeyUpdate::Set("sk-bad\nkey".into()))
         .unwrap_err();
-    assert!(matches!(error, RouterError::ProfileInvalid(_)));
+    assert!(matches!(error, RouterError::SecretWrite(_)));
     // Nguyên trạng: TOML không bị ghi.
     assert_eq!(
         count_provider_entries(&std::fs::read_to_string(&setup.config_path).unwrap()),
         1
     );
+    assert!(!setup.secrets.path().exists());
 }

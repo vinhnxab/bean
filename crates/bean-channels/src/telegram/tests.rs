@@ -212,6 +212,7 @@ async fn make_router(
     let router = Arc::new(Router::with_options(
         RouterDeps {
             config_path: None,
+            speech: None,
             default_profile: config.llm.as_profile(),
             config,
             store: Arc::new(MemoryStore::new()),
@@ -730,6 +731,7 @@ async fn skill_draft_inline_button_approves_for_exact_allowed_user() {
     config.agent.allowed_users = vec!["telegram:42".into()];
     let router = Arc::new(Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config.llm.as_profile(),
         config,
         store: Arc::new(MemoryStore::new()),

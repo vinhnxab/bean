@@ -24,6 +24,7 @@ impl Router {
             llm_state_path,
             config_path,
             default_profile,
+            speech,
         } = deps;
         let (events, _) = broadcast::channel(options.event_capacity.max(1));
         Self {
@@ -38,6 +39,7 @@ impl Router {
                 audit,
                 skills: SkillCoordinator::new(skills, skills_index),
                 learning_gate: LearningGate::default(),
+                speech,
                 options,
                 events,
                 channels: RwLock::new(HashMap::new()),
@@ -47,6 +49,15 @@ impl Router {
                 shutdown: CancellationToken::new(),
             }),
         }
+    }
+
+    /// Lấy server_speech từ config khi voice enabled.
+    fn get_server_speech(&self, incoming: &Incoming) -> Option<String> {
+        let config = read_lock(&self.inner.config).ok()?;
+        if !incoming.voice || !config.voice.enabled {
+            return None;
+        }
+        Some(config.voice.provider.as_str().to_string())
     }
 
     /// Đăng ký adapter gửi outbound.
@@ -127,6 +138,7 @@ impl Router {
 
     /// Submit trả `RunId` ngay; run LLM được spawn nền.
     pub async fn submit(&self, incoming: Incoming) -> Result<RunId, RouterError> {
+        let server_speech = self.get_server_speech(&incoming);
         let admission = self.admit(&incoming).await?;
         let run_id = admission.run_id;
         let text = incoming.text.trim();
@@ -143,6 +155,7 @@ impl Router {
             incoming,
             cancel: CancellationToken::new(),
             background_allowed_tools: None,
+            server_speech,
         })?;
         Ok(run_id)
     }
@@ -156,6 +169,7 @@ impl Router {
         incoming: Incoming,
         allowed_tools: Vec<String>,
     ) -> Result<RunId, RouterError> {
+        let server_speech = self.get_server_speech(&incoming);
         let admission = self.admit(&incoming).await?;
         let run_id = admission.run_id;
         self.enqueue(QueuedRun {
@@ -165,6 +179,7 @@ impl Router {
             incoming,
             cancel: CancellationToken::new(),
             background_allowed_tools: Some(Arc::new(allowed_tools.into_iter().collect())),
+            server_speech,
         })?;
         Ok(run_id)
     }

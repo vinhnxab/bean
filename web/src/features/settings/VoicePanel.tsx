@@ -9,6 +9,7 @@ import { ErrorState, LoadingState, Panel } from "@/components/ui/Page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useUpdateVoice, useVoiceStatus } from "@/features/chat/queries";
+import { ConnectionTestButton } from "@/features/settings/ConnectionTestButton";
 import { useI18n } from "@/i18n";
 
 /**
@@ -44,6 +45,9 @@ export function VoicePanel() {
           // thành công/lỗi của lần PATCH vừa rồi (thông báo "Đã lưu" phải còn).
           updateVoice={updateVoice}
         />
+        <div className="mt-4 flex gap-2">
+          <ConnectionTestButton target="voice" />
+        </div>
       </Panel>
     </div>
   );

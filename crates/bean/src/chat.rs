@@ -133,6 +133,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         default_profile,
         // CLI chat không biết đường config gốc — CRUD provider profile tắt (RAM only).
         config_path: None,
+        speech: None, // CLI không cần voice
     }));
     router
         .start_outbox_worker()
@@ -174,14 +175,44 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
 ///
 /// Lỗi trả về luôn nêu rõ **nguyên nhân cấu hình** (thiếu biến môi trường, sai provider…)
 /// chứ không lộ giá trị secret.
+/// Kho secret của tiến trình: `data.dir/secrets.env` (M29). Nhiều instance trỏ cùng
+/// đường dẫn là bình thường — ghi được bảo vệ bằng khoá file trong `SecretStore`.
+pub(crate) fn secret_store(config: &Config) -> Arc<bean_settings::SecretStore> {
+    Arc::new(bean_settings::SecretStore::new(
+        expand_tilde(&config.data.dir).join("secrets.env"),
+    ))
+}
+
+/// Đọc snapshot secret; file lỗi chỉ warn — resolve vẫn chạy với env.
+pub(crate) fn secret_snapshot(
+    store: &bean_settings::SecretStore,
+) -> Option<bean_settings::SecretSnapshot> {
+    match store.snapshot() {
+        Ok(snapshot) => Some(snapshot),
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "không đọc được secrets.env — key chỉ resolve từ biến môi trường"
+            );
+            None
+        }
+    }
+}
+
 pub(crate) fn build_provider(
     args: &ChatArgs,
     config: &mut Config,
 ) -> Result<(Arc<dyn LlmProvider>, Option<SecretString>)> {
+    let store = secret_store(config);
+    let snapshot = secret_snapshot(&store);
+    let get_secret = bean_settings::env_first_lookup(snapshot.as_ref());
     if let Some(path) = args.fake_llm.as_deref() {
         let provider =
             FakeProvider::from_json_path(path).context("nạp kịch bản --fake-llm thất bại")?;
-        return Ok((Arc::new(provider), config.resolve_web_search_api_key()));
+        return Ok((
+            Arc::new(provider),
+            config.resolve_web_search_api_key_with(&get_secret),
+        ));
     }
     let data_dir = expand_tilde(&config.data.dir);
     if bean_types::config::apply_persisted_llm_state(config, &data_dir) {
@@ -191,9 +222,10 @@ pub(crate) fn build_provider(
             "áp lựa chọn provider đã lưu từ phiên trước"
         );
     }
+    // M29: env > secrets.env (D19.3) — closure nộp thẳng cho resolve_secrets_with.
     let secrets = config
-        .resolve_secrets()
-        .context("đọc secret từ biến môi trường thất bại")?;
+        .resolve_secrets_with(get_secret)
+        .context("đọc secret (biến môi trường / secrets.env) thất bại")?;
     let web_search_api_key = secrets.web_search_api_key.clone();
     let provider = bean_llm::build_provider(&config.llm, secrets.llm_api_key)
         .context("dựng provider LLM thất bại (kiểm tra [llm] trong bean.toml)")?;
@@ -346,8 +378,11 @@ pub(crate) async fn build_registry(
     // (M22a) Domain tài chính read-only. Chỉ đăng ký khi `billing.enabled` **và** nhóm tool
     // `billing` bật; credential đọc từ biến môi trường riêng (validate đã chặn dùng chung).
     if config.billing.enabled && config.tools.enabled.iter().any(|g| g == "billing") {
+        let store = secret_store(config);
+        let snapshot = secret_snapshot(&store);
+        let get_secret = bean_settings::env_first_lookup(snapshot.as_ref());
         let billing_key = config
-            .resolve_billing_key()
+            .resolve_billing_key_with(&get_secret)
             .context("đọc credential billing thất bại")?;
         let client = BillingClient::new(&config.billing, billing_key);
         let configured = client.is_configured();
@@ -412,8 +447,11 @@ pub(crate) async fn build_registry(
     // (M24) Domain marketing. Chỉ đăng ký khi `marketing.enabled`; credential đọc từ
     // biến môi trường RIÊNG (validate chặn dùng chung với LLM/search/Telegram).
     if config.marketing.enabled {
+        let store = secret_store(config);
+        let snapshot = secret_snapshot(&store);
+        let get_secret = bean_settings::env_first_lookup(snapshot.as_ref());
         let key = config
-            .resolve_marketing_key()
+            .resolve_marketing_key_with(&get_secret)
             .context("đọc credential marketing thất bại")?;
         let client = PublishClient::new(&config.marketing, key);
         if !client.is_configured() {
@@ -589,6 +627,7 @@ fn event_run_id(event: &RunEvent) -> &RunId {
         | RunEvent::ConfirmRequest { run_id, .. }
         | RunEvent::ConfirmResolved { run_id, .. }
         | RunEvent::Final { run_id, .. }
+        | RunEvent::VoiceResponse { run_id, .. }
         | RunEvent::Error { run_id, .. } => run_id,
     }
 }
@@ -672,6 +711,11 @@ fn render_event(
                 let _ = writeln!(out, "{text}");
             }
             CliEventAction::Done
+        }
+        RunEvent::VoiceResponse { .. } => {
+            // Audio response chỉ gửi về web UI qua WebSocket.
+            // CLI không hỗ trợ phát audio.
+            CliEventAction::Ignore
         }
         RunEvent::Error { code, message, .. } => {
             let _ = writeln!(std::io::stderr(), "lỗi agent ({code}): {message}");

@@ -358,6 +358,14 @@ impl Config {
         }
         self.agent.workspace = expand_tilde(&self.agent.workspace)?;
         self.data.dir = expand_tilde(&self.data.dir)?;
+        // M29: `secrets.env` nằm trong `data.dir` — nếu `data.dir` nằm trong (hoặc trùng)
+        // workspace thì tool `read_file`/`grep`/`glob` của agent đọc được plaintext key.
+        // `Path::starts_with` so theo component nên không bị lừa bằng `bean-data` vs `bean`.
+        if self.data.dir.starts_with(&self.agent.workspace) {
+            return Err(invalid(
+                "data.dir nằm trong (hoặc trùng) agent.workspace — agent đọc được secrets.env; hãy tách hai thư mục",
+            ));
+        }
         if let Some(ui_dir) = self.web.ui_dir.as_ref() {
             self.web.ui_dir = Some(expand_tilde(ui_dir)?);
         }

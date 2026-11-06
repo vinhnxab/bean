@@ -64,7 +64,7 @@ pub use llm::{
     WebSearchConfig, default_max_tokens, validate_profile_name,
 };
 pub use llm_state::{LLM_STATE_FILE, LlmState, apply_persisted_llm_state, state_path};
-pub use llm_store::write_llm_providers;
+pub use llm_store::{remove_stored_api_keys, write_llm_providers};
 pub use products::{
     BillingConfig, MarketingConfig, QaConfig, QaSandboxConfig, QaSuiteConfig, ScanSandboxConfig,
     ScanScopeEntry, SecurityScanConfig,

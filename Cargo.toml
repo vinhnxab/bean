@@ -12,6 +12,7 @@ members = [
   "crates/bean-qa",
   "crates/bean-scan",
   "crates/bean-security",
+  "crates/bean-settings",
   "crates/bean-skills",
   "crates/bean-speech",
   "crates/bean-tools",
@@ -59,6 +60,7 @@ bean-marketing = { path = "crates/bean-marketing" }
 bean-qa = { path = "crates/bean-qa" }
 bean-scan = { path = "crates/bean-scan" }
 bean-security = { path = "crates/bean-security" }
+bean-settings = { path = "crates/bean-settings" }
 bean-tools = { path = "crates/bean-tools" }
 bean-memory = { path = "crates/bean-memory" }
 bean-skills = { path = "crates/bean-skills" }
@@ -101,6 +103,8 @@ url = "2.5.8"
 
 serde_json = "1.0.151"
 tempfile = "3.27.0"
+# Khoá file loại suy vấn cho ghi secrets.env an toàn nhiều tiến trình (M29).
+fd-lock = "4.0.4"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = [
   "rt-multi-thread",

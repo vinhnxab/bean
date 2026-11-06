@@ -290,6 +290,7 @@ name = "bean"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "async-trait",
  "axum",
  "bean-billing",
@@ -302,6 +303,7 @@ dependencies = [
  "bean-qa",
  "bean-scan",
  "bean-security",
+ "bean-settings",
  "bean-skills",
  "bean-speech",
  "bean-tools",
@@ -396,11 +398,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "bean-llm",
  "bean-memory",
  "bean-scan",
  "bean-security",
+ "bean-settings",
  "bean-skills",
+ "bean-speech",
  "bean-tools",
  "bean-types",
  "chrono",
@@ -560,6 +565,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bean-settings"
+version = "0.1.0"
+dependencies = [
+ "bean-llm",
+ "bean-security",
+ "bean-types",
+ "fd-lock",
+ "reqwest 0.13.5",
+ "secrecy",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "toml_edit",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "bean-skills"
 version = "0.1.0"
 dependencies = [
@@ -642,6 +666,7 @@ dependencies = [
  "bean-llm",
  "bean-memory",
  "bean-security",
+ "bean-settings",
  "bean-skills",
  "bean-speech",
  "bean-tools",
@@ -654,6 +679,7 @@ dependencies = [
  "mime_guess",
  "rusqlite",
  "rust-embed",
+ "secrecy",
  "serde",
  "serde_json",
  "sha2",
@@ -1449,6 +1475,17 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
+name = "fd-lock"
+version = "4.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
+dependencies = [
+ "cfg-if",
+ "rustix",
+ "windows-sys 0.52.0",
+]
 
 [[package]]
 name = "find-msvc-tools"

@@ -115,6 +115,7 @@ fn setup(persist: bool, allowed_models: Option<Vec<String>>) -> Setup {
     let router = Router::with_options(
         RouterDeps {
             config_path: None,
+            speech: None,
             default_profile: config.llm.as_profile(),
             config,
             store: Arc::new(MemoryStore::new()),
@@ -309,6 +310,7 @@ async fn switch_persist_failure_rejects_whole_switch() {
     let router = Router::with_options(
         RouterDeps {
             config_path: None,
+            speech: None,
             default_profile: config.llm.as_profile(),
             config: config.clone(),
             store: Arc::new(MemoryStore::new()),

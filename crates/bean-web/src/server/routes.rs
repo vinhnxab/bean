@@ -15,7 +15,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use super::guard::security_headers;
 use super::rest_audit_tools::{list_audit, list_mcp_servers, list_tools, set_tool_enabled};
-use super::rest_auth_status::{auth_me, list_agents, login, logout, status};
+use super::rest_auth_status::{auth_me, change_password, list_agents, login, logout, status};
 use super::rest_config::{
     create_llm_provider_profile, delete_llm_provider_profile, get_llm_config, update_llm_model,
     update_llm_provider, update_llm_provider_profile,
@@ -23,6 +23,9 @@ use super::rest_config::{
 use super::rest_memories::{delete_memory, get_memory_file, list_memories, put_memory_file};
 use super::rest_sessions::{
     create_session, delete_session, get_message, list_messages, list_sessions, update_session,
+};
+use super::rest_settings::{
+    secret_delete, secret_put, secrets_list, settings_list, settings_patch, settings_test,
 };
 use super::rest_skills::{
     approve_skill_draft, get_skill, list_skill_drafts, list_skills, reject_skill_draft,
@@ -39,6 +42,7 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(auth_me))
+        .route("/auth/change-password", post(change_password))
         .route("/status", get(status))
         .route("/system", get(system_info))
         .route("/config/llm", get(get_llm_config))
@@ -51,6 +55,10 @@ pub fn build_router(state: WebState) -> AxumRouter {
         )
         .route("/tools", get(list_tools))
         .route("/tools/{name}/enabled", put(set_tool_enabled))
+        .route("/settings", get(settings_list).patch(settings_patch))
+        .route("/settings/test/{target}", post(settings_test))
+        .route("/secrets", get(secrets_list))
+        .route("/secrets/{name}", put(secret_put).delete(secret_delete))
         .route("/mcp", get(list_mcp_servers))
         .route("/usage", get(usage_history))
         .route("/voice", get(voice_status).patch(voice_update))

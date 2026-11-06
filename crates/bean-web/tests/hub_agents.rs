@@ -84,7 +84,7 @@ fn config_for(data: &Path, workspace: &Path, viewer: Option<(&str, &str)>) -> Co
 
 /// Dựng app web từ config đã validate; giữ thư mục tạm sống suốt test.
 fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
-    set_password(&config.data.dir, PASSWORD).unwrap();
+    set_password(&config.data.dir, PASSWORD, None).unwrap();
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
     let registry = ToolRegistry::with_workspace(workspace.clone());
@@ -101,6 +101,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         skills_index: skills.index(),
         skills: Some(skills.clone()),
         llm_state_path: None,
+        speech: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {

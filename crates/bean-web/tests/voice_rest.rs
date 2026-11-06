@@ -54,24 +54,33 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
     // tình cờ có biến đó sẽ làm test "api thiếu key → 422" thất bại không xác định.
     config.voice.api_key_env = "BEAN_TEST_ELEVENLABS_KEY".to_string();
 
-    set_password(&config.data.dir, PASSWORD).unwrap();
+    set_password(&config.data.dir, PASSWORD, None).unwrap();
     let workspace_fs = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
     let registry = ToolRegistry::with_workspace(workspace_fs.clone());
     let draft = config.agent.workspace.join("skills/_drafts");
     let skills = SkillCatalog::load_with_paths(&[], draft.clone(), draft);
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
-    let router = Arc::new(Router::new(RouterDeps {
-        config_path: None,
-        default_profile: config.llm.as_profile(),
-        config: config.clone(),
-        store: store.clone(),
-        registry: Arc::new(registry),
-        llm: Arc::new(FakeProvider::new(Vec::<LlmResponse>::new())),
-        audit: None,
-        skills_index: skills.index(),
-        skills: Some(skills.clone()),
-        llm_state_path: None,
-    }));
+    // M29: Router cần kho secret để PATCH /api/voice ghi key vào secrets.env.
+    let secrets = Arc::new(bean_settings::SecretStore::new(data.join("secrets.env")));
+    let router = Arc::new(Router::with_options(
+        RouterDeps {
+            config_path: None,
+            default_profile: config.llm.as_profile(),
+            config: config.clone(),
+            store: store.clone(),
+            registry: Arc::new(registry),
+            llm: Arc::new(FakeProvider::new(Vec::<LlmResponse>::new())),
+            audit: None,
+            skills_index: skills.index(),
+            skills: Some(skills.clone()),
+            llm_state_path: None,
+            speech: None,
+        },
+        bean_core::RouterOptions {
+            secrets: Some(secrets),
+            ..bean_core::RouterOptions::default()
+        },
+    ));
     let auth = AuthService::load(&config, store.clone()).unwrap();
     let speech: Option<Arc<dyn SpeechProvider>> = if speech_enabled {
         Some(Arc::new(FakeSpeech::new("xin chào")))
@@ -387,12 +396,25 @@ async fn voice_update_to_api_persists_key_and_never_echoes_it() {
     let saved = std::fs::read_to_string(&state_file).unwrap();
     assert!(saved.contains("\"provider\":\"api\""), "{saved}");
     assert!(saved.contains("\"language\":\"vi\""), "{saved}");
-    assert!(saved.contains("sk-test-1234abcd"), "{saved}");
+    // M29: key KHÔNG nằm trong voice-state.json nữa — nó sống ở secrets.env.
+    assert!(
+        !saved.contains("sk-test-1234abcd"),
+        "rò key vào state file: {saved}"
+    );
+    let secrets_file = dir.path().join("data").join("secrets.env");
+    let stored = std::fs::read_to_string(&secrets_file).unwrap();
+    assert!(
+        stored.contains("BEAN_TEST_ELEVENLABS_KEY=sk-test-1234abcd"),
+        "{stored}"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&state_file).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "file chứa key phải là 0600");
+        let mode = std::fs::metadata(&secrets_file)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "secrets.env chứa key phải là 0600");
     }
 
     // GET sau khi đổi: provider/api + api_key_set, nhưng vẫn không lộ key.

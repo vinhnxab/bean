@@ -24,11 +24,13 @@ fn api_config(
     base_url: impl Into<String>,
     tts_voice_id: &str,
     tts_voice_vi: Option<&str>,
+    fallback_voice_id: Option<&str>,
 ) -> VoiceConfig {
     VoiceConfig {
         api_base_url: base_url.into(),
         tts_voice_id: tts_voice_id.to_string(),
         tts_voice_vi: tts_voice_vi.map(str::to_string),
+        fallback_voice_id: fallback_voice_id.map(str::to_string),
         timeout_seconds: 10,
         ..VoiceConfig::default()
     }
@@ -131,7 +133,7 @@ async fn elevenlabs_transcribes_and_synthesizes() {
         .await;
 
     let speech = ElevenLabsSpeech::from_config(
-        &api_config(server.uri(), "vid123", None),
+        &api_config(server.uri(), "vid123", None, None),
         SecretString::from("key".to_string()),
     )
     .unwrap();
@@ -171,7 +173,7 @@ async fn elevenlabs_selects_voice_by_language() {
         .await;
 
     let speech = ElevenLabsSpeech::from_config(
-        &api_config(server.uri(), "vid-en", Some("vid-vi")),
+        &api_config(server.uri(), "vid-en", Some("vid-vi"), None),
         SecretString::from("key".to_string()),
     )
     .unwrap();
@@ -199,7 +201,7 @@ async fn elevenlabs_falls_back_to_default_voice_without_vi() {
         .await;
 
     let speech = ElevenLabsSpeech::from_config(
-        &api_config(server.uri(), "vid-en", None),
+        &api_config(server.uri(), "vid-en", None, None),
         SecretString::from("key".to_string()),
     )
     .unwrap();
@@ -208,7 +210,8 @@ async fn elevenlabs_falls_back_to_default_voice_without_vi() {
 }
 
 /// Giọng `vi` bị ElevenLabs từ chối (402 paid_plan_required — gói free không dùng được
-/// voice library) thì văn bản tiếng Việt vẫn phải được đọc bằng giọng mặc định.
+/// voice library) thì văn bản tiếng Việt vẫn phải được đọc bằng giọng fallback
+/// (mặc định Bella, giọng nữ miễn phí).
 #[tokio::test]
 async fn elevenlabs_falls_back_to_default_voice_when_vi_voice_locked() {
     let server = MockServer::start().await;
@@ -221,7 +224,7 @@ async fn elevenlabs_falls_back_to_default_voice_when_vi_voice_locked() {
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/v1/text-to-speech/vid-en"))
+        .and(path("/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL"))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "audio/mpeg")
@@ -232,7 +235,12 @@ async fn elevenlabs_falls_back_to_default_voice_when_vi_voice_locked() {
         .await;
 
     let speech = ElevenLabsSpeech::from_config(
-        &api_config(server.uri(), "vid-en", Some("vid-vi")),
+        &api_config(
+            server.uri(),
+            "vid-en",
+            Some("vid-vi"),
+            Some("EXAVITQu4vr4xnSDxMaL"),
+        ),
         SecretString::from("key".to_string()),
     )
     .unwrap();
@@ -242,7 +250,7 @@ async fn elevenlabs_falls_back_to_default_voice_when_vi_voice_locked() {
     assert_eq!(out.data, vec![4]);
 }
 
-/// Giọng mặc định cũng lỗi (vd 401) thì lỗi phải được truyền ra — không nuốt im lặng.
+/// Giọng fallback cũng lỗi (vd 401) thì lỗi phải được truyền ra — không nuốt im lặng.
 #[tokio::test]
 async fn elevenlabs_propagates_error_when_fallback_also_fails() {
     let server = MockServer::start().await;
@@ -253,21 +261,31 @@ async fn elevenlabs_propagates_error_when_fallback_also_fails() {
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/v1/text-to-speech/vid-en"))
+        .and(path("/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL"))
         .respond_with(ResponseTemplate::new(401))
         .expect(1)
         .mount(&server)
         .await;
 
     let speech = ElevenLabsSpeech::from_config(
-        &api_config(server.uri(), "vid-en", Some("vid-vi")),
+        &api_config(
+            server.uri(),
+            "vid-en",
+            Some("vid-vi"),
+            Some("EXAVITQu4vr4xnSDxMaL"),
+        ),
         SecretString::from("key".to_string()),
     )
     .unwrap();
 
     let error = speech.synthesize("Xin chào").await.unwrap_err();
     assert!(matches!(error, SpeechError::Failed(_)), "{error:?}");
-    assert!(error.to_string().contains("401"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("giọng fallback cũng bị ElevenLabs từ chối"),
+        "{error}"
+    );
 }
 
 #[test]

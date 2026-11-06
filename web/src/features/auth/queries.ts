@@ -39,6 +39,10 @@ export const queryKeys = {
   system: ["system"] as const,
   /** Cấu hình LLM runtime — cùng nguồn với lệnh `/model`. */
   llmConfig: ["llm-config"] as const,
+  /** Bảng thiết lập thống nhất (M29) — schema + giá trị hiệu lực, không secret. */
+  settings: ["settings"] as const,
+  /** Secret slot (M29) — chỉ cờ `set`/`source`, không giá trị nên cache được. */
+  secrets: ["secrets"] as const,
 };
 
 export function useAuth() {

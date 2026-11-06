@@ -50,6 +50,7 @@ async fn router_with(
     let router = Arc::new(Router::with_options(
         RouterDeps {
             config_path: None,
+            speech: None,
             default_profile: config().llm.as_profile(),
             config: config(),
             store,
@@ -99,6 +100,7 @@ fn event_uses_run(event: &RunEvent, run_id: &RunId) -> bool {
         | RunEvent::ConfirmRequest { run_id: id, .. }
         | RunEvent::ConfirmResolved { run_id: id, .. }
         | RunEvent::Final { run_id: id, .. }
+        | RunEvent::VoiceResponse { run_id: id, .. }
         | RunEvent::Error { run_id: id, .. } => id == run_id,
     }
 }
@@ -566,6 +568,7 @@ async fn confirm_actor_is_written_to_audit_log() {
     ]));
     let router = Arc::new(Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config().llm.as_profile(),
         config: config(),
         store,
@@ -709,6 +712,7 @@ async fn explicit_session_id_from_another_user_is_rejected() {
     config.agent.allowed_users = vec!["cli:local".into(), "cli:other".into()];
     let router = Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config.llm.as_profile(),
         config,
         store,
@@ -794,6 +798,7 @@ async fn model_command_applies_override_to_next_run_only() {
     config.llm.allowed_models = vec!["model-a".into(), "model-b".into()];
     let router = Arc::new(Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config.llm.as_profile(),
         config,
         store,
@@ -938,6 +943,7 @@ async fn router_with_alerts(store: Arc<MemoryStore>) -> (tempfile::TempDir, Arc<
     let registry = ToolRegistry::with_workspace(workspace);
     let router = Arc::new(Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config_with_alerts().llm.as_profile(),
         config: config_with_alerts(),
         store,
@@ -1093,6 +1099,7 @@ async fn llm_config_snapshot_and_set_model_share_one_truth() {
     config.llm.api_key_env = "X_TEST_LLM_KEY".into();
     let router = Arc::new(Router::new(RouterDeps {
         config_path: None,
+        speech: None,
         default_profile: config.llm.as_profile(),
         config,
         store,

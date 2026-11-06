@@ -134,6 +134,10 @@ impl TelegramChannel {
                 }
                 self.stop_typing(&run_id);
             }
+            RunEvent::VoiceResponse { .. } => {
+                // Audio response chỉ gửi về web UI qua WebSocket.
+                // Telegram không hỗ trợ gửi audio từ bot.
+            }
             RunEvent::Error { code, message, .. } => {
                 if let Some(target) = self.remove_run(&run_id) {
                     self.send_chat_text(target.chat_id, &format!("Lỗi {code}: {message}"))
