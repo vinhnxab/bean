@@ -16,7 +16,8 @@ use axum_extra::extract::cookie::CookieJar;
 
 use crate::api_types::{
     AgentListResponse, AgentRelationDto, AgentReportDto, AgentStatusDto, AuthMeResponse,
-    LoginRequest, LoginResponse, LogoutResponse, StatusResponse,
+    ChangePasswordRequest, ChangePasswordResponse, LoginRequest, LoginResponse, LogoutResponse,
+    StatusResponse,
 };
 
 use crate::auth::AuthError;
@@ -97,6 +98,52 @@ pub(super) async fn auth_me(
 ) -> ApiResult<Json<AuthMeResponse>> {
     let user_id = require_user(&state, &jar).await?;
     Ok(Json(AuthMeResponse { user_id }))
+}
+
+/// Đổi mật khẩu; yêu cầu phiên hợp lệ và mật khẩu hiện tại đúng.
+/// Sau khi thành công, session cũ bị thu hồi và cấp session mới cho người gọi.
+pub(super) async fn change_password(
+    State(state): State<WebState>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
+    jar: CookieJar,
+    Json(request): Json<ChangePasswordRequest>,
+) -> Result<Response, ApiFailure> {
+    let token = cookie_token(&jar).ok_or_else(ApiFailure::unauthorized)?;
+    require_user(&state, &jar).await?;
+    let ip = peer.map_or(
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        |Extension(ConnectInfo(peer))| peer.ip(),
+    );
+    let session = state
+        .auth
+        .change_password(
+            &token,
+            &request.current_password,
+            &request.new_password,
+            state.audit.as_deref(),
+            ip,
+        )
+        .await
+        .map_err(|error| match error {
+            crate::auth::AuthError::InvalidCredentials => ApiFailure::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_credentials",
+                "mật khẩu hiện tại không đúng",
+            ),
+            crate::auth::AuthError::Io(msg) => {
+                tracing::error!(error = %msg, "lỗi I/O khi đổi mật khẩu");
+                ApiFailure::internal()
+            }
+            _ => ApiFailure::internal(),
+        })?;
+    // Gán cookie phiên mới cho người gọi (cookie cũ đã bị thu hồi).
+    let mut response = Json(ChangePasswordResponse { ok: true }).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.auth.session_cookie(&session))
+            .map_err(|_| ApiFailure::internal())?,
+    );
+    Ok(response)
 }
 
 /// Trạng thái runtime cho API.

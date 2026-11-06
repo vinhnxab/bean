@@ -32,6 +32,26 @@ pub enum Command {
 
     /// Chạy Bean ở chế độ **MCP server read-only** (M25) cho Cline/Cursor/OpenCode…
     Mcp(McpArgs),
+    Secret(SecretCommand),
+    Config(ConfigCommand),
+
+    /// Kiểm tra sức khoẻ cấu hình: quyền file, key sai chỗ, slot bị env che, proxy
+    /// (K29), tiến trình/port (K27), sandbox Docker, Chrome snap — không bao giờ in
+    /// giá trị secret. Mã thoát: 0 ok, 1 lỗi, 2 cảnh báo.
+    Doctor {
+        /// Thử request tối thiểu tới LLM/voice/Telegram/web search (tốn một call nhỏ,
+        /// opt-in).
+        #[arg(long)]
+        online: bool,
+    },
+
+    /// Cài đặt tương tác ban đầu (idempotent): nhà cung cấp + key, mật khẩu web,
+    /// Telegram, tìm kiếm web, giọng nói; mỗi bước có thể bỏ qua.
+    Setup,
+
+    /// Chọn nhà cung cấp/mô hình tương tác, lưu vào `llm-state.json` (cùng nơi
+    /// với giao diện web) và áp dụng khi khởi động lại Bean.
+    Model,
 }
 
 /// Tham số của `mcp`.
@@ -98,6 +118,71 @@ pub struct McpTokenArgs {
     /// Lệnh con của `mcp-token`.
     #[command(subcommand)]
     pub command: McpTokenCommand,
+}
+
+/// Quản lý kho secret thống nhất `data.dir/secrets.env` (M29).
+#[derive(Debug, Args)]
+pub struct SecretCommand {
+    #[command(subcommand)]
+    pub command: SecretCommandAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SecretCommandAction {
+    /// Nhập ẩn API key vào kho secret.
+    Set {
+        /// Tên slot secret (ví dụ ANTHROPIC_API_KEY).
+        name: String,
+        /// Đọc giá trị từ stdin thay vì nhập ẩn từ terminal.
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Liệt kê các slot secret và trạng thái.
+    List,
+    /// Xoá một secret khỏi kho.
+    Unset {
+        /// Tên slot secret.
+        name: String,
+    },
+}
+
+/// Quản lý bảng thiết lập thống nhất (M29).
+#[derive(Debug, Args)]
+pub struct ConfigCommand {
+    #[command(subcommand)]
+    pub command: ConfigCommandAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigCommandAction {
+    /// Di chuyển key mặc định từ bean.toml vào secrets.env.
+    MigrateSecrets {
+        /// Áp dụng thay đổi ngay (mặc định chỉ xem trước).
+        #[arg(long)]
+        apply: bool,
+        /// Đọc key từ file ~/.config/bean/env thay vì nhập tay.
+        #[arg(long)]
+        from_env_file: Option<PathBuf>,
+    },
+    /// Liệt kê bảng thiết lập.
+    List,
+    /// Xem giá trị một khoá.
+    Get {
+        /// Đường dẫn khoá (ví dụ agent.timezone).
+        key: String,
+    },
+    /// Ghi giá trị một khoá (chỉ tầng A).
+    Set {
+        /// Đường dẫn khoá.
+        key: String,
+        /// Giá trị mới.
+        value: String,
+    },
+    /// Xoá ghi đè một khoá (về mặc định).
+    Unset {
+        /// Đường dẫn khoá.
+        key: String,
+    },
 }
 
 /// Các lệnh con của `auth mcp-token`.

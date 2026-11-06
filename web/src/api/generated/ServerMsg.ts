@@ -14,4 +14,12 @@ role: string | null, } | { "type": "confirm_resolved", confirm_id: string, outco
 /**
  * (M27) Văn bản câu trả lời cuối — client dùng để gọi TTS khi lượt là voice.
  */
-text: string, } | { "type": "error", session_id: number | null, run_id: string | null, code: string, message: string, } | { "type": "notification", session_id: number, message_id: number, } | { "type": "pong" };
+text: string, } | { "type": "voice_response", session_id: number, run_id: string, 
+/**
+ * Audio base64 encoded.
+ */
+audio_base64: string, 
+/**
+ * MIME type của audio (ví dụ `audio/mpeg`, `audio/wav`).
+ */
+mime: string, } | { "type": "error", session_id: number | null, run_id: string | null, code: string, message: string, } | { "type": "notification", session_id: number, message_id: number, } | { "type": "pong" };

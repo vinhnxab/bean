@@ -28,13 +28,14 @@ impl Router {
             api_key_env: config.llm.api_key_env.clone(),
             base_url: config.llm.base_url.clone(),
             max_tokens: config.llm.max_tokens,
-            key_configured: config
-                .llm
-                .api_key
-                .as_deref()
-                .is_some_and(|key| !key.trim().is_empty())
-                || std::env::var(&config.llm.api_key_env)
-                    .is_ok_and(|value| !value.trim().is_empty()),
+            // M29: key_configured = env hoặc secrets.env có giá trị (D19.3).
+            // `api_key_env` rỗng (tự host) ⇒ false — giữ nguyên semantics cũ của endpoint.
+            key_configured: {
+                let snapshot = self.secret_snapshot();
+                let get_env = bean_settings::env_first_lookup(snapshot.as_ref());
+                !config.llm.api_key_env.trim().is_empty()
+                    && get_env(&config.llm.api_key_env).is_some()
+            },
         })
     }
 
@@ -140,8 +141,8 @@ impl Router {
             }
             None => resolved.model.clone(),
         };
-        // 2) Key theo profile: key dán trực tiếp trong toml thắng env; rỗng ⇒ không cần key.
-        let api_key = Self::resolve_profile_api_key(&resolved);
+        // 2) Key theo profile: env thắng secrets.env (D19.3); rỗng = tự host, không cần key.
+        let api_key = self.resolve_profile_api_key(&resolved);
         // Candidate config cho factory: chính là hình thái `[llm]` sẽ có sau khi apply.
         let candidate = {
             let mut candidate = config.llm.clone();

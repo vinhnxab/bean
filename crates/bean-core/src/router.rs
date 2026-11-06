@@ -26,6 +26,8 @@ use crate::learning::{ReflectionArgs, reflect};
 use crate::run_io::Decision;
 use crate::store::{Store, StoreError};
 
+use bean_speech::SpeechProvider;
+
 use alert::RouterAlertSink;
 use confirm::{ConfirmRegistry, ConfirmRequest};
 use io::RouterIo;
@@ -74,6 +76,8 @@ struct QueuedRun {
     /// được kích hoạt, `ActiveRun` nhận đúng role mà lúc xếp hàng đã quyết định —
     /// không phụ thuộc cấu hình có bị sửa giữa đường.
     role: Option<String>,
+    /// Speech provider khi voice enabled (M27).
+    server_speech: Option<String>,
 }
 
 #[derive(Debug)]
@@ -144,6 +148,8 @@ struct RouterInner {
     skills: SkillCoordinator,
     /// Cổng cooldown của learning loop (M15): giữ chỗ cho đề xuất skill sắp tới.
     learning_gate: LearningGate,
+    /// Provider STT/TTS cho push-to-talk (M27); `None` khi voice chưa cấu hình.
+    speech: Option<Arc<dyn SpeechProvider>>,
     options: RouterOptions,
     events: broadcast::Sender<RunEvent>,
     channels: RwLock<HashMap<String, Arc<dyn Channel>>>,

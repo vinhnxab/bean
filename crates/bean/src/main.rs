@@ -1,14 +1,20 @@
 //! Bean — binary duy nhất (agents.md mục 4).
 //!
-//! Ba lệnh: `chat` (REPL trên terminal), `serve` (web + Telegram),
-//! `auth` (tiện ích xác thực), `mcp` (MCP server read-only cho agent khác).
+//! Các lệnh: `chat` (REPL trên terminal), `serve` (web + Telegram), `auth` (tiện ích
+//! xác thực), `mcp` (MCP server read-only cho agent khác), `secret` + `config`
+//! (M29: kho secret thống nhất và migrate key), `doctor` (M29: kiểm tra sức khoẻ
+//! cấu hình).
 #![forbid(unsafe_code)]
 
 mod auth;
 mod chat;
 mod cli;
+mod config_cmd;
+mod doctor;
 mod mcp;
+mod secret;
 mod serve;
+mod setup;
 
 use clap::Parser;
 use cli::{Cli, Command};
@@ -25,6 +31,17 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve(args) => serve::run(&args, config_path.as_deref()).await,
         Command::Auth(args) => auth::run(&args, config_path.as_deref()).await,
         Command::Mcp(args) => mcp::run(args.command, config_path.as_deref()).await,
+        Command::Secret(args) => secret::run(&args.command, config_path.as_deref()),
+        Command::Config(args) => config_cmd::run(&args.command, config_path.as_deref()),
+        Command::Doctor { online } => {
+            let exit_code = doctor::run(online, config_path.as_deref()).await?;
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+            Ok(())
+        }
+        Command::Setup => setup::run_setup(config_path.as_deref()).await,
+        Command::Model => setup::run_model(config_path.as_deref()).await,
     }
 }
 

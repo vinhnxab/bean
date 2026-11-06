@@ -452,6 +452,17 @@ fn map_run_event(event: RunEvent) -> Option<ServerMsg> {
             message_id: message_id.unwrap_or_default(),
             text,
         },
+        RunEvent::VoiceResponse {
+            session_id,
+            run_id,
+            audio_base64,
+            mime,
+        } => ServerMsg::VoiceResponse {
+            session_id: session_id.get(),
+            run_id: run_id.as_str().into(),
+            audio_base64,
+            mime,
+        },
         RunEvent::Error {
             session_id,
             run_id,

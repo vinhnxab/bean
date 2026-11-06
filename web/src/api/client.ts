@@ -2,6 +2,8 @@ import type {
   AgentListResponse,
   AuditListResponse,
   AuthMeResponse,
+  ChangePasswordRequest,
+  ChangePasswordResponse,
   CreateSessionRequest,
   DeleteResponse,
   LlmConfigResponse,
@@ -20,9 +22,15 @@ import type {
   MessageDto,
   MessageListResponse,
   OkResponse,
+  SecretMutateResponse,
+  SecretsListResponse,
   SessionDto,
   SessionListResponse,
   SessionQuery,
+  SettingsListResponse,
+  SettingsPatchRequest,
+  SettingsPatchResponse,
+  SettingsTestResponse,
   SkillDetail,
   SkillDraftDecisionRequest,
   SkillDraftDecisionResponse,
@@ -151,6 +159,13 @@ export const api = {
     }),
 
   logout: () => requestJson<LogoutResponse>("/api/auth/logout", { method: "POST", body: {} }),
+
+  changePassword: (request: ChangePasswordRequest) =>
+    requestJson<ChangePasswordResponse>("/api/auth/change-password", {
+      method: "POST",
+      body: request,
+      redirectOnUnauthorized: false,
+    }),
 
   /**
    * Danh sách agent cho HUB. Server đã lọc theo RBAC **trước khi** trả, nên
@@ -350,4 +365,60 @@ export const api = {
   /** TTS: trả audio base64 để client dựng `Blob` và phát. */
   synthesize: (request: VoiceSynthesizeRequest) =>
     requestJson<VoiceSynthesizeResponse>("/api/voice/synthesize", { method: "POST", body: request }),
+
+  /**
+   * Bảng thiết lập thống nhất (M29): schema + giá trị hiệu lực + nguồn. Không có
+   * secret — secret đi qua `api.secrets` và chỉ có cờ `set`.
+   */
+  settings: (signal?: AbortSignal) => requestJson<SettingsListResponse>("/api/settings", { signal }),
+
+  /**
+   * Ghi một khoá tầng A. Giá trị là chuỗi, server tự parse theo kiểu của khoá.
+   * Lỗi: 403 `cli_only` (tầng B), 422 `unknown_setting`/`invalid_value`,
+   * 503 `config_readonly`.
+   */
+  patchSetting: (request: SettingsPatchRequest) =>
+    requestJson<SettingsPatchResponse>("/api/settings", { method: "PATCH", body: request }),
+
+  /**
+   * Secret slot: **không bao giờ** có giá trị — chỉ `set`/`source` và cờ bị env che.
+   */
+  secrets: (signal?: AbortSignal) => requestJson<SecretsListResponse>("/api/secrets", { signal }),
+
+  /**
+   * Lưu secret vào `secrets.env` (step-up mật khẩu, D19.5). Lỗi: 401
+   * `invalid_password`, 429 `rate_limited`, 422 `unknown_slot`.
+   */
+  putSecret: (name: string, request: SecretPutRequestPayload) =>
+    requestJson<SecretMutateResponse>(`/api/secrets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: request,
+    }),
+
+  /** Xoá secret khỏi `secrets.env` (step-up mật khẩu). */
+  deleteSecret: (name: string, password: string) =>
+    requestJson<SecretMutateResponse>(`/api/secrets/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      body: { password },
+    }),
+
+  /**
+   * Kiểm tra kết nối (`llm` | `voice` | `telegram` | `search`) — cùng probe với
+   * `bean doctor --online`, mọi lỗi đã redact secret.
+   */
+  testConnection: (target: string) =>
+    requestJson<SettingsTestResponse>(`/api/settings/test/${encodeURIComponent(target)}`, {
+      method: "POST",
+      body: {},
+    }),
 };
+
+/**
+ * Body PUT secret — viết tại đây thay vì dùng `SecretPutRequest` của generated vì
+ * `api.putSecret` nhận tham số rời (value, password) và người gọi **không được** giữ
+ * object này trong cache/state nào sau khi gửi.
+ */
+export interface SecretPutRequestPayload {
+  value: string;
+  password: string;
+}

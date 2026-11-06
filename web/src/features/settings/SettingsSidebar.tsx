@@ -1,17 +1,29 @@
-import { CpuIcon, type LucideIcon, MicIcon, XIcon } from "lucide-react";
+//! Sidebar phải cho màn **Cài đặt**: điều hướng giữa các section.
+
+import {
+  Building2Icon,
+  CpuIcon,
+  KeyRoundIcon,
+  type LucideIcon,
+  MessageCircleIcon,
+  MicIcon,
+  SearchIcon,
+  SlidersIcon,
+  XIcon,
+} from "lucide-react";
 import { NavLink } from "react-router";
 
 import { useI18n } from "@/i18n";
+import type { MessageKey } from "@/i18n/vi";
 
 /**
- * Các mục cài đặt. Giống `NAV_ITEMS` của sidebar trái: một bảng, thêm/bớt mục
- * là thêm/bớt một dòng. Các mục sau (Bảo mật, Giao diện…) thêm route con
- * `/settings/<section>` rồi khai báo ở đây.
+ * Các mục cài đặt. Thêm/bớt mục là thêm/bớt một dòng — sau đó khai báo route
+ * tại `SettingsPage`.
  */
 const SETTINGS_SECTIONS: {
   to: string;
-  labelKey: "settings.section.providers" | "settings.section.voice";
-  descKey: "settings.section.providersDescription" | "settings.section.voiceDescription";
+  labelKey: MessageKey;
+  descKey: MessageKey;
   icon: LucideIcon;
 }[] = [
   {
@@ -25,6 +37,36 @@ const SETTINGS_SECTIONS: {
     labelKey: "settings.section.voice",
     descKey: "settings.section.voiceDescription",
     icon: MicIcon,
+  },
+  {
+    to: "/settings/password",
+    labelKey: "settings.section.password",
+    descKey: "settings.section.passwordDescription",
+    icon: KeyRoundIcon,
+  },
+  {
+    to: "/settings/channels",
+    labelKey: "settings.section.channels",
+    descKey: "settings.section.channelsDescription",
+    icon: MessageCircleIcon,
+  },
+  {
+    to: "/settings/search",
+    labelKey: "settings.section.search",
+    descKey: "settings.section.searchDescription",
+    icon: SearchIcon,
+  },
+  {
+    to: "/settings/integrations",
+    labelKey: "settings.section.integrations",
+    descKey: "settings.section.integrationsDescription",
+    icon: Building2Icon,
+  },
+  {
+    to: "/settings/advanced",
+    labelKey: "settings.section.advanced",
+    descKey: "settings.section.advancedDescription",
+    icon: SlidersIcon,
   },
 ];
 

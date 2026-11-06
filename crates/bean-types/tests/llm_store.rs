@@ -256,7 +256,7 @@ fn validate_api_key_trong_luu_tru() {
 }
 
 #[test]
-fn round_trip_api_key_va_chmod_0600() {
+fn api_key_khong_bao_gio_ghi_vao_toml_m29() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = tempfile::tempdir().unwrap();
@@ -266,29 +266,27 @@ fn round_trip_api_key_va_chmod_0600() {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let mut paid = profile("paid", "claude-opus-5");
+    // M29: key dán trong profile không bao giờ được ghi vào `bean.toml` — nó sống
+    // ở env hoặc `secrets.env` (0600), do Router/SettingsService chịu trách nhiệm.
     paid.api_key = Some("sk-test-key-1234".to_string());
     let providers = vec![profile("ollama", "qwen3:14b"), paid];
     write_llm_providers(&path, &providers).unwrap();
 
-    // TOML parse lại có api_key đúng, phần [agent]/comment giữ nguyên.
+    // TOML parse lại: api_key là None, giá trị key không có mặt trong file.
     let config = bean_types::Config::load(&path).unwrap();
-    let saved = config
-        .llm
-        .providers
-        .iter()
-        .find(|p| p.name == "paid")
-        .unwrap();
-    assert_eq!(saved.api_key.as_deref(), Some("sk-test-key-1234"));
+    assert!(config.llm.providers.iter().all(|p| p.api_key.is_none()));
     let raw = std::fs::read_to_string(&path).unwrap();
-    assert!(raw.contains("api_key = \"sk-test-key-1234\""));
+    assert!(
+        !raw.contains("sk-test-key-1234"),
+        "key không được rò vào bean.toml:\n{raw}"
+    );
+    assert!(!raw.contains("api_key = "));
     assert!(raw.starts_with("# Cấu hình Bean của tôi"));
-
-    // Có key plaintext ⇒ file bị siết 0600.
+    // Không còn chmod 0600 theo key — quyền giữ nguyên như file gốc (0644).
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-    assert_eq!(mode & 0o777, 0o600);
+    assert_eq!(mode & 0o777, 0o644);
 
-    // Bỏ key hết ⇒ chmod giữ nguyên quyền file gốc (0600 đà trước), nội dung
-    // không còn trường api_key.
+    // Ghi lại không có key: nội dung ổn định, không xuất hiện trường api_key.
     let providers = vec![profile("ollama", "qwen3:14b")];
     write_llm_providers(&path, &providers).unwrap();
     let config = bean_types::Config::load(&path).unwrap();

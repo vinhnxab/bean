@@ -24,6 +24,7 @@
 //!    ├─ rest_skills.rs           skills và duyệt skill nháp
 //!    ├─ rest_tasks.rs            tác vụ định kỳ
 //!    ├─ rest_audit_tools.rs      audit log + danh sách tool
+//!    ├─ rest_settings.rs         cài đặt thống nhất + secret slot + probe (M29)
 //!    └─ rest_usage_system.rs     lịch sử token + thông tin hệ thống
 //! ```
 //!
@@ -66,6 +67,7 @@ mod rest_auth_status;
 mod rest_config;
 mod rest_memories;
 mod rest_sessions;
+mod rest_settings;
 mod rest_skills;
 mod rest_tasks;
 mod rest_usage_system;

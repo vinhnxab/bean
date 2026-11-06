@@ -131,6 +131,17 @@ pub enum RunEvent {
         /// Message assistant cuối trong DB nếu đã lấy được id.
         message_id: Option<i64>,
     },
+    /// Run kết thúc với voice response (audio). Chỉ emit khi `voice=true` trong `Incoming`.
+    VoiceResponse {
+        /// Session của run.
+        session_id: SessionId,
+        /// Run kết thúc.
+        run_id: RunId,
+        /// Audio base64 encoded.
+        audio_base64: String,
+        /// MIME type của audio (ví dụ `audio/mpeg`, `audio/wav`).
+        mime: String,
+    },
     /// Run kết thúc do lỗi.
     Error {
         /// Session của run.

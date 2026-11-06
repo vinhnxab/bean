@@ -1,6 +1,8 @@
 //! Vòng đời một run: `enqueue`, `spawn`, `execute`, `spawn_reflection`, `finish`
 //! (agents.md mục 6 + 10). Hàng đợi theo session nằm ở [`queue`](super::queue).
 
+use base64::Engine;
+
 use super::*;
 
 impl Router {
@@ -150,10 +152,40 @@ impl Router {
         })
         .await;
         match result {
-            Ok(outcome) => {
+            Ok(mut outcome) => {
                 let should_reflect = outcome.ended == crate::agent::EndReason::Final
                     && outcome.tool_call_count
                         >= usize::try_from(config.learning.min_tool_calls).unwrap_or(usize::MAX);
+
+                // Tổng hợp audio nếu voice enabled và có speech provider
+                if queued.incoming.voice
+                    && queued.server_speech.is_some()
+                    && let Some(speech) = self.inner.speech.as_ref()
+                {
+                    match speech.synthesize(&outcome.text).await {
+                        Ok(audio_output) => {
+                            let audio_base64 =
+                                base64::prelude::BASE64_STANDARD.encode(&audio_output.data);
+                            outcome.audio_base64 = Some(audio_base64.clone());
+                            outcome.mime = Some(audio_output.mime.clone());
+
+                            self.emit(RunEvent::VoiceResponse {
+                                session_id: queued.session_id,
+                                run_id: queued.run_id.clone(),
+                                audio_base64,
+                                mime: audio_output.mime,
+                            });
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                run_id = %queued.run_id,
+                                error = %error,
+                                "TTS thất bại"
+                            );
+                        }
+                    }
+                }
+
                 self.emit(RunEvent::Final {
                     session_id: queued.session_id,
                     run_id: queued.run_id.clone(),

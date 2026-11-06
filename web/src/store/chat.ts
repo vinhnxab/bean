@@ -95,6 +95,7 @@ function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): strin
     case "text":
       return `${message.type}:${message.run_id}:${message.text}`;
   }
+  return null;
 }
 
 /** Chỉ giữ 500 khóa event gần nhất để chống duplicate mà không phình vô hạn. */

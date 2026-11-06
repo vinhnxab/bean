@@ -300,6 +300,8 @@ impl<'a> Agent<'a> {
                     tool_call_count: state.tool_call_count,
                     loaded_skills: state.loaded_skills.into_iter().collect(),
                     transcript: state.transcript,
+                    audio_base64: None,
+                    mime: None,
                 });
             }
             // Text "suy nghĩ" của model khi vẫn còn gọi tool đã được phát theo từng delta
@@ -359,6 +361,8 @@ async fn finish_with_notice(
         tool_call_count,
         loaded_skills: loaded_skills.into_iter().collect(),
         transcript,
+        audio_base64: None,
+        mime: None,
     })
 }
 

@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ErrorState, LoadingState, Panel } from "@/components/ui/Page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ConnectionTestButton } from "@/features/settings/ConnectionTestButton";
 import {
   useCreateLlmProvider,
   useDeleteLlmProvider,
@@ -313,6 +314,9 @@ export function ProvidersPanel() {
           <Row label={t("providers.apiKeyEnv")} value={data.api_key_env} mono />
         </dl>
         <KeyStatus apiKeyEnv={data.api_key_env} keyConfigured={data.key_configured} large />
+        <div className="mt-4 flex gap-2">
+          <ConnectionTestButton target="llm" />
+        </div>
         <p className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
           {t("providers.readOnlyNote")}
         </p>

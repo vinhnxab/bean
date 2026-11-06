@@ -42,6 +42,29 @@ pub struct LogoutResponse {
     pub ok: bool,
 }
 
+/// Request đổi mật khẩu.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct ChangePasswordRequest {
+    /// Token phiên hiện tại của người gọi (lấy từ cookie), dùng để cấp session mới.
+    #[serde(default)]
+    #[ts(optional)]
+    pub token: Option<String>,
+    /// Mật khẩu hiện tại.
+    pub current_password: String,
+    /// Mật khẩu mới (tối thiểu 12 ký tự).
+    pub new_password: String,
+}
+
+/// Response đổi mật khẩu.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ChangePasswordResponse {
+    /// Luôn true khi thành công.
+    pub ok: bool,
+}
+
 /// Response trạng thái runtime.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -762,6 +785,15 @@ pub enum ServerMsg {
         /// (M27) Văn bản câu trả lời cuối — client dùng để gọi TTS khi lượt là voice.
         text: String,
     },
+    /// (M27) Voice response: audio base64 encoded.
+    VoiceResponse {
+        session_id: i64,
+        run_id: String,
+        /// Audio base64 encoded.
+        audio_base64: String,
+        /// MIME type của audio (ví dụ `audio/mpeg`, `audio/wav`).
+        mime: String,
+    },
     Error {
         session_id: Option<i64>,
         run_id: Option<String>,
@@ -1147,4 +1179,146 @@ pub struct VoiceSynthesizeResponse {
     pub audio_base64: String,
     /// MIME type để trình duyệt biết cách phát, ví dụ `audio/mpeg`.
     pub mime: String,
+}
+
+// ---------------------------------------------------------------------------
+// Màn Cài đặt thống nhất (M29 mục 8.1): bảng thiết lập + secret slot + probe.
+// Nguồn sự thật của schema là `bean-settings::SETTINGS`; ở đây chỉ là DTO hiển thị.
+// ---------------------------------------------------------------------------
+
+/// Một khoá thiết lập trong bảng M29 — mọi trường đều hiển thị được: giá trị không
+/// bao giờ là secret (secret đi qua `/api/secrets`, chỉ có cờ `set`).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SettingDto {
+    /// Đường dẫn khoá, ví dụ `agent.timezone`.
+    pub key: String,
+    /// Giá trị hiện có hiệu lực (đã gộp state runtime).
+    pub value: String,
+    /// Nguồn của giá trị (`default` | `bean.toml` | `llm-state.json` | `voice-state.json`).
+    pub source: String,
+    /// Tầng theo D19.4 (`A` = UI + CLI, `B` = chỉ CLI tương tác).
+    pub tier: String,
+    /// `hot` (hiệu lực ngay) hoặc `restart` (phải `beanctl restart`).
+    pub apply: String,
+    /// Kiểu dữ liệu (`bool`, `u32`, `str`, `str_list`…).
+    pub kind: String,
+    /// `false` (tầng B) ⇒ UI chỉ xem và gợi ý lệnh `bean config set`.
+    pub editable_in_ui: bool,
+    /// Mô tả tiếng Việt (ngôn ngữ mặc định của UI).
+    pub desc_vi: String,
+    /// Mô tả tiếng Anh.
+    pub desc_en: String,
+}
+
+/// `GET /api/settings` — toàn bộ bảng thiết lập + trạng thái ghi của server.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SettingsListResponse {
+    /// Bảng thiết lập, đã sắp theo đường dẫn (thứ tự của `SETTINGS`).
+    pub settings: Vec<SettingDto>,
+    /// `false` khi server không biết đường dẫn `bean.toml` (`chat`/`--fake-llm`) —
+    /// PATCH sẽ trả `config_readonly`, UI khoá form.
+    pub writable: bool,
+}
+
+/// `PATCH /api/settings` — ghi một khoá tầng A; giá trị là **chuỗi** và được
+/// `parse_value` parse theo kiểu của khoá (giống CLI `bean config set`).
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct SettingsPatchRequest {
+    /// Đường dẫn khoá, phải có trong bảng thiết lập.
+    pub key: String,
+    /// Giá trị dạng chuỗi; rỗng với `OptStr` nghĩa là xoá ghi đè.
+    pub value: String,
+}
+
+/// Kết quả ghi một khoá thiết lập.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SettingsPatchResponse {
+    /// Khoá vừa ghi.
+    pub key: String,
+    /// `hot` hoặc `restart` — UI hiện banner restart khi cần.
+    pub apply: String,
+    /// Nguồn của giá trị sau khi ghi.
+    pub source: String,
+    /// `true` ⇒ phải `beanctl restart` mới có hiệu lực.
+    pub restart_required: bool,
+}
+
+/// Một secret slot — **không bao giờ** có trường giá trị: chỉ cờ `set`, tên nguồn
+/// và cờ bị env che (K28: env thắng `secrets.env`, dễ đoán sai).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SecretSlotDto {
+    /// Tên biến môi trường, ví dụ `ANTHROPIC_API_KEY`.
+    pub name: String,
+    /// Các nơi dùng, ví dụ `llm: openrouter` (nhiều nơi dùng chia sẻ thì nối bằng dấu phẩy).
+    pub label: String,
+    /// Nhóm hiển thị (`llm` | `voice` | `telegram` | `search` | `billing` | `marketing`).
+    pub group: String,
+    /// `true` khi đã đặt ở **bất kỳ** nguồn nào (env hoặc `secrets.env`).
+    pub set: bool,
+    /// Nguồn thắng (`env` | `secrets_env` | `unset`) theo thứ tự D19.3.
+    pub source: String,
+    /// `true` khi cả env lẫn `secrets.env` đều có giá trị và env đang thắng — đổi
+    /// env mà không có tác dụng là bẫy K28, UI cần cảnh báo.
+    pub shadowed_by_env: bool,
+}
+
+/// `GET /api/secrets` — danh sách slot, không có giá trị.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SecretsListResponse {
+    /// Slot dẫn xuất từ cấu hình, sắp theo tên.
+    pub slots: Vec<SecretSlotDto>,
+}
+
+/// `PUT /api/secrets/{name}` — giá trị mới + mật khẩu hiện tại (step-up, D19.5).
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct SecretPutRequest {
+    /// Giá trị secret, chỉ đi qua request đúng một lần và không bao giờ được trả lại.
+    pub value: String,
+    /// Mật khẩu hiện tại để xác minh step-up.
+    pub password: String,
+}
+
+/// `DELETE /api/secrets/{name}` — xoá giá trị khỏi `secrets.env`, cần step-up.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct SecretDeleteRequest {
+    /// Mật khẩu hiện tại để xác minh step-up.
+    pub password: String,
+}
+
+/// Kết quả ghi/xoá secret — chỉ trạng thái, không giá trị.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SecretMutateResponse {
+    /// Đã ghi (hoặc xoá) thành công.
+    pub ok: bool,
+    /// Tên slot đã thao tác.
+    pub name: String,
+    /// Nguồn sau thao tác (`secrets_env` khi ghi thành công, `unset` khi không còn gì).
+    pub source: String,
+}
+
+/// `POST /api/settings/test/{target}` — kết quả probe dùng chung với `bean doctor
+/// --online` (M29 mục 8.1): cùng một nguồn sự thật `bean-settings::probe`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct SettingsTestResponse {
+    /// Target đã kiểm tra (`llm` | `voice` | `telegram` | `search`).
+    pub target: String,
+    /// `ok` | `warn` | `error`.
+    pub level: String,
+    /// Thông điệp đã redact (không secret, không URL chứa token).
+    pub message: String,
+    /// Gợi ý xử lý khi có vấn đề.
+    pub hint: Option<String>,
 }

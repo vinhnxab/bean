@@ -67,7 +67,10 @@ fn saved_voice_state(state: &WebState) -> Option<VoiceState> {
 /// Đây là nền duy nhất cho cả `voice_status` lẫn gộp request PATCH: một hàm gộp thì
 /// hai handler không bao giờ trả lệch nhau về cấu hình hiệu lực. Cờ `enabled` **không**
 /// được gộp ở đây — nó thuộc [`voice_runtime_enabled`] (state file có thể chỉ lưu toggle).
-fn effective_voice_config(state: &WebState) -> VoiceConfig {
+///
+/// `pub(super)` cho M29: `rest_settings::test_voice` probe đúng cấu hình hiệu lực này,
+/// không phải seed — probe một cấu hình mà UI đang hiển thị thì kết luận mới khớp.
+pub(super) fn effective_voice_config(state: &WebState) -> VoiceConfig {
     let mut voice = state.config.voice.clone();
     if let Some(saved) = saved_voice_state(state) {
         if let Some(provider) = saved.provider {
@@ -91,12 +94,16 @@ fn effective_voice_config(state: &WebState) -> VoiceConfig {
 
 /// `true` khi chế độ `api` có thể resolve được key: field đã lưu (từ UI/bean.toml —
 /// `effective_voice_config` đã gộp state file vào đây) hoặc biến môi trường.
-fn voice_api_key_set(voice: &VoiceConfig) -> bool {
+fn voice_api_key_set(state: &WebState, voice: &VoiceConfig) -> bool {
+    let snapshot = state.router.secret_snapshot();
+    let get_env = bean_settings::env_first_lookup(snapshot.as_ref());
+    // `api_key` còn trong `voice-state.json` cũ (trước M29) vẫn được tính là "đã có"
+    // để UI không hiện sai; resolver chạy thật thì bỏ qua trường này.
     voice
         .api_key
         .as_deref()
         .is_some_and(|key| !key.trim().is_empty())
-        || std::env::var(&voice.api_key_env).is_ok_and(|value| !value.trim().is_empty())
+        || get_env(&voice.api_key_env).is_some()
 }
 
 /// `GET /api/voice` — UI dùng để ẩn/hiện nút mic và dựng form cấu hình.
@@ -116,7 +123,7 @@ pub(super) async fn voice_status(
         provider: voice.provider.as_str().to_string(),
         language: voice.language.clone(),
         max_speak_chars: voice.max_speak_chars,
-        api_key_set: voice_api_key_set(&voice),
+        api_key_set: voice_api_key_set(&state, &voice),
         tts_voice_id: voice.tts_voice_id.clone(),
         tts_voice_vi: voice.tts_voice_vi.clone().unwrap_or_default(),
     }))
@@ -173,14 +180,22 @@ pub(super) async fn voice_update(
         next.language = trimmed.to_string();
     }
     // Chuỗi rỗng là ý định XOÁ key đã lưu (fallback về `api_key_env`), không phải lỗi.
+    // M29: key ElevenLabs chỉ sống ở `secrets.env` (0600) dưới slot `voice.api_key_env`
+    // — không bao giờ ghi vào `voice-state.json`/`bean.toml`. Ý định key chỉ được ghi
+    // đĩa SAU khi mọi validation + dựng provider thành công (mặc dưới) — request hỏng
+    // không để lại dấu vết trên đĩa.
     let key_changed = request.api_key.is_some();
-    if let Some(key) = request.api_key.as_deref() {
+    let key_intent: Option<Option<String>> = request.api_key.as_deref().map(|key| {
         let trimmed = key.trim();
-        next.api_key = if trimmed.is_empty() {
+        if trimmed.is_empty() {
             None
         } else {
             Some(trimmed.to_string())
-        };
+        }
+    });
+    if key_intent.is_some() {
+        // Cũ: dán key vào `next.api_key`. Giờ để None — key nằm trong secrets.env.
+        next.api_key = None;
         config_changed = true;
     }
     // Voice id mặc định là bắt buộc (TTS cần voice id trong URL) nên rỗng là lỗi;
@@ -217,7 +232,18 @@ pub(super) async fn voice_update(
                 "voice chưa cấu hình đủ — chế độ `local` cần whisper/piper model, chế độ `api` cần đủ endpoint/model; bổ sung trong bean.toml hoặc nhập API key ở form trên",
             ));
         }
-        let api_key = candidate.resolve_voice_api_key_lenient();
+        let api_key = match &key_intent {
+            // Ý định Set: dựng thử với key mới CHƯA ghi đĩa — build hỏng thì key cũ
+            // vẫn nguyên.
+            Some(Some(key)) => Some(secrecy::SecretString::from(key.clone())),
+            // Ý định Clear: dựng thử không key (nếu bắt buộc sẽ fail ở dưới).
+            Some(None) => None,
+            None => {
+                let snapshot = state.router.secret_snapshot();
+                let get_env = bean_settings::env_first_lookup(snapshot.as_ref());
+                candidate.resolve_voice_api_key_lenient_with(&get_env)
+            }
+        };
         match bean_speech::build_speech(&candidate, api_key) {
             Ok(Some(provider)) => rebuilt = Some(provider),
             Ok(None) => {
@@ -237,6 +263,30 @@ pub(super) async fn voice_update(
                     "dựng provider voice thất bại — kiểm tra key/binary/model rồi thử lại",
                 ));
             }
+        }
+    }
+
+    // Ghi ý định key vào `secrets.env` — chỉ tới được khi mọi bước trên thành công.
+    if let Some(intent) = &key_intent {
+        let store = state.router.secret_store().ok_or_else(|| {
+            ApiFailure::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "secret_unavailable",
+                "tiến trình không có khoá secret — cấu hình key qua biến môi trường",
+            )
+        })?;
+        let env_name = next.api_key_env.clone();
+        let registry = bean_settings::SecretSlotRegistry::from_names(&[env_name.as_str()]);
+        let result = match intent {
+            Some(key) => store.set(
+                &registry,
+                &env_name,
+                secrecy::SecretString::from(key.clone()),
+            ),
+            None => store.remove(&registry, &env_name).map(|_existed| ()),
+        };
+        if result.is_err() {
+            return Err(ApiFailure::internal());
         }
     }
 
@@ -268,7 +318,7 @@ pub(super) async fn voice_update(
         provider: next.provider.as_str().to_string(),
         language: next.language.clone(),
         max_speak_chars: state.config.voice.max_speak_chars,
-        api_key_set: voice_api_key_set(&next),
+        api_key_set: voice_api_key_set(&state, &next),
         tts_voice_id: next.tts_voice_id.clone(),
         tts_voice_vi: next.tts_voice_vi.clone().unwrap_or_default(),
     }))

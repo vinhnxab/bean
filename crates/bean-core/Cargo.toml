@@ -11,13 +11,17 @@ description = "Agent loop, context, Router, trait Channel, scheduler, learning l
 workspace = true
 
 [dependencies]
+base64.workspace = true
 bean-scan.workspace = true
 bean-security.workspace = true
+# M29: resolve secret env > secrets.env; ghi key profile từ UI.
+bean-settings.workspace = true
 bean-types.workspace = true
 bean-llm.workspace = true
 bean-tools.workspace = true
 bean-memory.workspace = true
 bean-skills.workspace = true
+bean-speech.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true

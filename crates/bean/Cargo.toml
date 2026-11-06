@@ -25,6 +25,8 @@ bean-billing.workspace = true
 bean-browser.workspace = true
 bean-marketing.workspace = true
 bean-scan.workspace = true
+# M29: kho secret thống nhất `secrets.env` + dịch vụ thiết lập.
+bean-settings.workspace = true
 bean-qa.workspace = true
 bean-llm.workspace = true
 bean-types.workspace = true
@@ -36,6 +38,7 @@ async-trait.workspace = true
 clap.workspace = true
 rustyline.workspace = true
 rpassword.workspace = true
+argon2.workspace = true
 secrecy.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
@@ -59,6 +62,8 @@ tower.workspace = true
 chrono.workspace = true
 # K24: `record_denied` trong `mcp.rs` dựng `args` cho bản ghi audit từ chối.
 serde_json.workspace = true
+# M29: `bean doctor --online` ping LLM/ElevenLabs/Telegram/web search.
+reqwest.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

@@ -37,6 +37,8 @@ pub struct ElevenLabsSpeech {
     /// Giọng TTS cho văn bản tiếng Việt (tuỳ chọn) — cấu hình qua `tts_voice_vi` trong
     /// `[voice]` (bean.toml).
     vi_voice: Option<String>,
+    /// Giọng TTS fallback (giọng nữ miễn phí) khi giọng chính bị ElevenLabs từ chối (402/403).
+    fallback_voice_id: Option<String>,
     language: String,
     timeout: Duration,
 }
@@ -60,6 +62,10 @@ impl ElevenLabsSpeech {
             tts_model: voice.tts_model.clone(),
             voice_id: voice.tts_voice_id.clone(),
             vi_voice: voice.tts_voice_vi.clone(),
+            fallback_voice_id: voice
+                .fallback_voice_id
+                .clone()
+                .or_else(|| Some("EXAVITQu4vr4xnSDxMaL".to_string())),
             language: voice.language.clone(),
             timeout: Duration::from_secs(voice.timeout_seconds.max(1)),
         })
@@ -113,50 +119,39 @@ impl SpeechProvider for ElevenLabsSpeech {
     async fn synthesize(&self, text: &str) -> Result<AudioOutput, SpeechError> {
         // Chọn giọng theo ngôn ngữ của văn bản cần đọc: có dấu tiếng Việt → giọng `vi`
         // (nếu đã cấu hình), còn lại giọng mặc định. Cả hai đều là voice id trong URL.
-        let wants_vi_voice = crate::has_vietnamese_diacritics(text) && self.vi_voice.is_some();
-        let voice_id = if crate::has_vietnamese_diacritics(text) {
+        let primary_voice_id = if crate::has_vietnamese_diacritics(text) {
             self.vi_voice.as_deref().unwrap_or(&self.voice_id)
         } else {
             self.voice_id.as_str()
         };
-        let response = match self.post_tts(voice_id, text).await {
-            Ok(response) if response.status().is_success() => response,
-            Ok(response) => {
-                let status = response.status();
-                // Gói free không dùng được giọng lấy từ Voice Library qua API (HTTP 402
-                // `paid_plan_required`): câu tiếng Việt vẫn phải được đọc nên rơi về
-                // giọng mặc định — premade phát được mọi ngôn ngữ qua
-                // `eleven_multilingual_v2`. Sau khi nâng gói, nhánh này không còn chạy.
-                if wants_vi_voice && matches!(status.as_u16(), 402 | 403) {
-                    tracing::warn!(
-                        voice_id = %voice_id,
-                        status = status.as_u16(),
-                        "giọng tiếng Việt bị ElevenLabs từ chối — rơi về giọng mặc định"
-                    );
-                    let fallback = self.post_tts(&self.voice_id, text).await?;
-                    let status = fallback.status();
-                    if !status.is_success() {
-                        return Err(SpeechError::Failed(format!("ElevenLabs trả HTTP {status}")));
-                    }
-                    fallback
-                } else {
-                    return Err(SpeechError::Failed(format!("ElevenLabs trả HTTP {status}")));
-                }
+
+        // Thử giọng chính trước. Nếu ElevenLabs từ chối (402 paid_plan_required / 403)
+        // — ví dụ giọng Voice Library yêu cầu gói trả phí — rơi về giọng fallback
+        // (mặc định Bella, giọng nữ miễn phí) để câu trả lời vẫn được đọc.
+        let response = self.post_tts(primary_voice_id, text).await?;
+        let status = response.status();
+        if status.is_success() {
+            return Self::finish_response(response).await;
+        }
+        if matches!(status.as_u16(), 402 | 403)
+            && let Some(fallback_id) = &self.fallback_voice_id
+        {
+            tracing::warn!(
+                voice_id = %primary_voice_id,
+                fallback_voice_id = %fallback_id,
+                status = status.as_u16(),
+                "giọng TTS bị ElevenLabs từ chối — rơi về giọng fallback"
+            );
+            let fallback = self.post_tts(fallback_id, text).await?;
+            let status = fallback.status();
+            if status.is_success() {
+                return Self::finish_response(fallback).await;
             }
-            Err(error) => return Err(error),
-        };
-        let mime = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("audio/mpeg")
-            .to_string();
-        let data = response
-            .bytes()
-            .await
-            .map_err(|e| SpeechError::Failed(format!("không đọc được audio TTS: {e}")))?
-            .to_vec();
-        Ok(AudioOutput { data, mime })
+            return Err(SpeechError::Failed(format!(
+                "giọng fallback cũng bị ElevenLabs từ chối (HTTP {status})"
+            )));
+        }
+        Err(SpeechError::Failed(format!("ElevenLabs trả HTTP {status}")))
     }
 }
 
@@ -180,6 +175,22 @@ impl ElevenLabsSpeech {
             .await
             .map_err(|_| SpeechError::Timeout(self.timeout))?
             .map_err(|e| SpeechError::Failed(format!("lỗi mạng ElevenLabs: {e}")))
+    }
+
+    /// Đọc body audio từ response thành [`AudioOutput`].
+    async fn finish_response(response: reqwest::Response) -> Result<AudioOutput, SpeechError> {
+        let mime = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("audio/mpeg")
+            .to_string();
+        let data = response
+            .bytes()
+            .await
+            .map_err(|e| SpeechError::Failed(format!("không đọc được audio TTS: {e}")))?
+            .to_vec();
+        Ok(AudioOutput { data, mime })
     }
 }
 

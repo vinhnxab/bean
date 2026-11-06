@@ -103,7 +103,7 @@ async fn make_state_with(
     extra_tools: Vec<Arc<dyn Tool>>,
     config_path: Option<std::path::PathBuf>,
 ) -> (AxumRouter, WebState) {
-    set_password(&config.data.dir, PASSWORD).unwrap();
+    set_password(&config.data.dir, PASSWORD, None).unwrap();
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
     let mut registry = ToolRegistry::with_workspace(workspace.clone());
     registry.register(Arc::new(ConfirmWrite)).unwrap();
@@ -128,6 +128,7 @@ async fn make_state_with(
         skills_index: skills.index(),
         skills: Some(skills.clone()),
         llm_state_path: None,
+        speech: None,
     }));
     let auth = AuthService::load(&config, store_dyn.clone()).unwrap();
     let state = WebState::new(WebStateDeps {
@@ -388,7 +389,7 @@ async fn auth_audit_never_contains_password_or_token() {
     let config = make_config(&data, &workspace, "http://127.0.0.1:7878");
     let store = Arc::new(MemoryStore::new());
     let store_dyn: Arc<dyn Store> = store;
-    set_password(&data, PASSWORD).unwrap();
+    set_password(&data, PASSWORD, None).unwrap();
     let auth = AuthService::load(&config, store_dyn).unwrap();
     let audit = AuditLog::open(&data.join("audit")).unwrap();
     let session = auth
@@ -507,7 +508,7 @@ async fn sqlite_stores_only_hashed_session_tokens_and_rejects_expired_tokens() {
     std::fs::create_dir_all(&workspace).unwrap();
     let config = make_config(&data, &workspace, "http://127.0.0.1:7878");
     let store = Arc::new(SqliteStore::open(&data.join("bean.db")).unwrap());
-    set_password(&data, PASSWORD).unwrap();
+    set_password(&data, PASSWORD, None).unwrap();
     let auth = AuthService::load(&config, store.clone()).unwrap();
     let session = auth
         .login(PASSWORD, IpAddr::V4(Ipv4Addr::LOCALHOST), None)
@@ -564,7 +565,7 @@ async fn password_rotation_revokes_existing_sessions() {
     std::fs::create_dir_all(&workspace).unwrap();
     let config = make_config(&data, &workspace, "http://127.0.0.1:7878");
     let store = Arc::new(SqliteStore::open(&data.join("bean.db")).unwrap());
-    set_password(&data, PASSWORD).unwrap();
+    set_password(&data, PASSWORD, None).unwrap();
     let old = AuthService::load(&config, store.clone())
         .unwrap()
         .login(PASSWORD, IpAddr::V4(Ipv4Addr::LOCALHOST), None)
