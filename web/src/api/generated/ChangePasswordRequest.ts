@@ -5,6 +5,10 @@
  */
 export type ChangePasswordRequest = { 
 /**
+ * Token phiên hiện tại của người gọi (lấy từ cookie), dùng để cấp session mới.
+ */
+token?: string, 
+/**
  * Mật khẩu hiện tại.
  */
 current_password: string, 

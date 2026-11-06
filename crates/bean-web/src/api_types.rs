@@ -48,7 +48,9 @@ pub struct LogoutResponse {
 #[ts(export)]
 pub struct ChangePasswordRequest {
     /// Token phiên hiện tại của người gọi (lấy từ cookie), dùng để cấp session mới.
-    pub token: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub token: Option<String>,
     /// Mật khẩu hiện tại.
     pub current_password: String,
     /// Mật khẩu mới (tối thiểu 12 ký tự).
