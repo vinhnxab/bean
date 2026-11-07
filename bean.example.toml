@@ -123,7 +123,7 @@ piper_model = ""                # ví dụ "/opt/piper/vi_VN-vivos-x_low.onnx"
 # Key: mặc định chỉ đọc biến môi trường. Key dán trong màn Cài đặt của UI được Bean
 # persist vào `data.dir/voice-state.json` (quyền 0600) và ƯU TIÊN HƠN biến môi trường —
 # cùng quy ước `[llm] api_key` (Q6 trong docs/known-issues.md). Đừng tự tay ghi key vào file.
-api_key_env = "ELEVENLABS_API_KEY"
+api_key_env = "ELEVENLABS_KEY"
 # api_base_url = "https://api.elevenlabs.io"   # chỉ đổi khi bạn tự host proxy
 stt_model = "scribe_v2"
 tts_model = "eleven_multilingual_v2"

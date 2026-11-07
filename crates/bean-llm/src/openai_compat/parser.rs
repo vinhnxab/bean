@@ -25,16 +25,20 @@ impl SseEventParser for OpenAiStreamParser {
 
         let mut deltas = Vec::new();
 
-        // 1. Trích xuất usage (thường ở chunk cuối).
+        // 1. Trích xuất usage (thường ở chunk cuối). Nvidia có thể trả "usage": null.
         if let Some(usage) = wire.get("usage") {
-            let u: WireUsage = serde_json::from_value(usage.clone())
-                .map_err(|e| LlmError::Decode(format!("Usage JSON sai: {e}")))?;
-            let usage = Usage {
-                input_tokens: u.prompt_tokens,
-                output_tokens: u.completion_tokens,
-            };
-            self.usage = Some(usage);
-            deltas.push(LlmDelta::Usage { usage });
+            if usage.is_null() {
+                // Bỏ qua, không trả về lỗi.
+            } else {
+                let u: WireUsage = serde_json::from_value(usage.clone())
+                    .map_err(|e| LlmError::Decode(format!("Usage JSON sai: {e}")))?;
+                let usage = Usage {
+                    input_tokens: u.prompt_tokens,
+                    output_tokens: u.completion_tokens,
+                };
+                self.usage = Some(usage);
+                deltas.push(LlmDelta::Usage { usage });
+            }
         }
 
         // 2. Trích xuất delta từ choice đầu tiên.
