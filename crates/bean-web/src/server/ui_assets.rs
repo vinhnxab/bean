@@ -131,7 +131,12 @@ fn embedded_response(path: &str) -> Response {
         .first_raw()
         .unwrap_or("application/octet-stream");
     let cache = if served_path.starts_with("assets/") {
-        "public, max-age=31536000, immutable"
+        // Tên file không còn hash (xem web/vite.config.ts) nên không thể dùng
+        // "immutable": trình duyệt sẽ không bao giờ kiểm tra lại và có thể giữ
+        // bản CSS/JS cũ khi người dùng chép web/dist mới vào [web].ui_dir.
+        // Dùng must-revalidate để browser vẫn cache nhưng phải xác nhận với server
+        // trước mỗi lần dùng; ServeDir/trả nhúng hỗ trợ ETag nên có thể trả 304.
+        "public, max-age=0, must-revalidate"
     } else {
         "no-cache"
     };

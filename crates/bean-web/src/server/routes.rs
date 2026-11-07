@@ -110,7 +110,10 @@ pub fn build_router(state: WebState) -> AxumRouter {
             router
                 .nest_service(
                     "/assets",
-                    cache_control_layer("public, max-age=31536000, immutable")
+                    // Tên file không còn hash (xem web/vite.config.ts) nên không
+                    // dùng "immutable": trình duyệt sẽ không bao giờ kiểm tra lại
+                    // và có thể giữ bản cũ khi web/dist được thay thế.
+                    cache_control_layer("public, max-age=0, must-revalidate")
                         .layer(ServeDir::new(dir.join("assets"))),
                 )
                 .fallback_service(
