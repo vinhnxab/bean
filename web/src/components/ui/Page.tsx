@@ -44,7 +44,7 @@ export function PageShell({
         <h1 id="page-title" className="text-2xl font-bold tracking-tight sm:text-3xl">
           {title}
         </h1>
-        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{description}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
       </header>
       {children}
     </section>

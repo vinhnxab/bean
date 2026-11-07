@@ -106,7 +106,7 @@ export function ProvidersPanel() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <>
       <Panel>
         <form onSubmit={save}>
           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -348,7 +348,7 @@ export function ProvidersPanel() {
         }}
         onCancel={() => setDeleting(null)}
       />
-    </div>
+    </>
   );
 }
 
