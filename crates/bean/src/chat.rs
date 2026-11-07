@@ -117,8 +117,8 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     let untrusted_tools = untrusted_tool_names(&registry);
     let audit = build_audit(&config);
     let workspace = config.agent.workspace.display().to_string();
-    // Đường persist lựa chọn provider (hot-swap): `data.dir/llm-state.json`.
-    let llm_state_path = Some(bean_types::config::state_path(&expand_tilde(
+    // Đường persist cài đặt runtime (hot-swap): `data.dir/settings-state.json`.
+    let llm_state_path = Some(bean_types::config::settings_state_path(&expand_tilde(
         &config.data.dir,
     )));
     let router = Arc::new(Router::new(RouterDeps {
@@ -215,7 +215,9 @@ pub(crate) fn build_provider(
         ));
     }
     let data_dir = expand_tilde(&config.data.dir);
-    if bean_types::config::apply_persisted_llm_state(config, &data_dir) {
+    // Migration từ file cũ (nếu có) trước khi áp state.
+    let _migrated = bean_types::config::SettingsState::migrate_from_legacy(&data_dir);
+    if bean_types::config::apply_persisted_settings_state(config, &data_dir) {
         tracing::info!(
             profile = %config.llm.active_profile_name(),
             model = %config.llm.model,

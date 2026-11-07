@@ -25,10 +25,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let mut config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
     let web_enabled = config.web.enabled;
     let telegram_enabled = config.telegram.enabled;
-    // Trạng thái bật/tắt voice persist qua restart (`data.dir/voice-state.json`) —
-    // toggle trong UI thắng seed `[voice].enabled`, giống `llm-state.json` với profile LLM.
+    // Migration từ file cũ (nếu có) trước khi áp state gộp.
     let data_dir = chat::expand_tilde(&config.data.dir);
-    let _voice_applied = bean_types::config::apply_persisted_voice_state(&mut config, &data_dir);
+    let _migrated = bean_types::config::SettingsState::migrate_from_legacy(&data_dir);
+    let _voice_applied = bean_types::config::apply_persisted_settings_state(&mut config, &data_dir);
     if !web_enabled && !telegram_enabled {
         bail!("không có kênh nào được bật: bật web.enabled hoặc telegram.enabled");
     }
@@ -131,10 +131,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let workspace = built.registry.workspace_opt();
     let registry = Arc::new(built.registry);
     let audit = chat::build_audit(&config);
-    // Đường persist lựa chọn provider (hot-swap): `data.dir/llm-state.json`.
-    let llm_state_path = Some(bean_types::config::state_path(&chat::expand_tilde(
-        &config.data.dir,
-    )));
+    // Đường persist cài đặt runtime (hot-swap): `data.dir/settings-state.json`.
+    let llm_state_path = Some(bean_types::config::settings_state_path(
+        &chat::expand_tilde(&config.data.dir),
+    ));
     let router = Arc::new(Router::with_options(
         RouterDeps {
             config: config.clone(),

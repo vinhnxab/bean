@@ -18,8 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use bean_settings::{ProbeLevel, ProbeOutcome, SecretSlotRegistry, SecretStore, env_first_lookup};
 use bean_types::config::{
-    Config, DEFAULT_CONFIG_FILE, LLM_STATE_FILE, LlmState, SpeechProviderKind, VOICE_STATE_FILE,
-    VoiceState,
+    Config, DEFAULT_CONFIG_FILE, SETTINGS_STATE_FILE, SettingsState, SpeechProviderKind,
 };
 
 use crate::chat::expand_tilde;
@@ -242,15 +241,9 @@ fn check_permissions(config_path: Option<&Path>, data_dir: &Path, findings: &mut
         );
         check_file_mode(&data_dir.join("auth.toml"), 0o600, "auth.toml", findings);
         check_file_mode(
-            &data_dir.join(LLM_STATE_FILE),
+            &data_dir.join(SETTINGS_STATE_FILE),
             0o600,
-            "llm-state.json",
-            findings,
-        );
-        check_file_mode(
-            &data_dir.join(VOICE_STATE_FILE),
-            0o600,
-            "voice-state.json",
+            "settings-state.json",
             findings,
         );
         let toml_path =
@@ -267,7 +260,7 @@ fn non_empty(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.trim().is_empty())
 }
 
-fn check_misplaced_keys(config: &Config, data_dir: &Path, findings: &mut Vec<Finding>) {
+fn check_misplaced_keys(config: &Config, _data_dir: &Path, findings: &mut Vec<Finding>) {
     const MIGRATE_HINT: &str = "bean config migrate-secrets --apply";
     if non_empty(config.llm.api_key.as_deref()) {
         findings.push(
@@ -287,16 +280,6 @@ fn check_misplaced_keys(config: &Config, data_dir: &Path, findings: &mut Vec<Fin
                 .with_hint(MIGRATE_HINT),
             );
         }
-    }
-    if let Some(state) = VoiceState::load(&data_dir.join(VOICE_STATE_FILE))
-        && non_empty(state.api_key.as_deref())
-    {
-        findings.push(
-            Finding::warn(
-                "voice-state.json còn key API — deprecated (M29), key nên nằm trong secrets.env",
-            )
-            .with_hint(MIGRATE_HINT),
-        );
     }
     let env_file = std::env::var("HOME")
         .ok()
@@ -491,26 +474,27 @@ fn check_processes_and_port(config: &Config, findings: &mut Vec<Finding>) {
 // ---------------------------------------------------------------------------
 
 fn check_llm_state_override(config: &Config, data_dir: &Path, findings: &mut Vec<Finding>) {
-    match LlmState::load(&data_dir.join(LLM_STATE_FILE)) {
+    match SettingsState::load(&data_dir.join(SETTINGS_STATE_FILE)) {
         Some(state) => {
-            if state.profile == config.llm.active_profile_name() && state.model == config.llm.model
+            if state.llm_profile == config.llm.active_profile_name()
+                && state.llm_model == config.llm.model
             {
                 findings.push(Finding::ok(format!(
-                    "llm-state.json khớp bean.toml (profile `{}`, model `{}`)",
-                    state.profile, state.model
+                    "settings-state.json khớp bean.toml (profile `{}`, model `{}`)",
+                    state.llm_profile, state.llm_model
                 )));
             } else {
                 findings.push(
                     Finding::ok(format!(
-                        "llm-state.json đang GHI ĐÈ bean.toml: profile `{}` model `{}` — bean.toml khai model `{}`; file state THẮNG lúc khởi động (22.24)",
-                        state.profile, state.model, config.llm.model
+                        "settings-state.json đang GHI ĐÈ bean.toml: profile `{}` model `{}` — bean.toml khai model `{}`; file state THẮNG lúc khởi động (22.24)",
+                        state.llm_profile, state.llm_model, config.llm.model
                     ))
                     .with_hint("muốn về theo bean.toml: `bean config unset llm.model`"),
                 );
             }
         }
         None => findings.push(Finding::ok(
-            "llm-state.json không có — model theo bean.toml",
+            "settings-state.json không có — model theo bean.toml",
         )),
     }
 }
@@ -879,24 +863,10 @@ mod tests {
             findings
         );
 
-        let state = VoiceState {
-            enabled: false,
-            provider: None,
-            language: None,
-            api_key: Some("k".into()),
-            tts_voice_id: None,
-            tts_voice_vi: None,
-        };
-        VoiceState::save(&dir.path().join(VOICE_STATE_FILE), &state).unwrap();
+        // settings-state.json không còn lưu api_key — check này chỉ còn ý nghĩa legacy.
+        // Giữ test để đảm bảo không panics khi file không tồn tại.
         let mut findings = Vec::new();
         check_misplaced_keys(&config, dir.path(), &mut findings);
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.message.contains("voice-state")),
-            "phải gắn cờ key trong voice-state.json: {:?}",
-            findings
-        );
     }
 
     #[test]

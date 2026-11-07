@@ -1,3 +1,4 @@
+use std::io::{self, IsTerminal};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -32,6 +33,9 @@ pub fn set_password(data_dir: &Path, password: &str) -> Result<()> {
 pub async fn run(args: &AuthArgs, config_path: Option<&Path>) -> Result<()> {
     match &args.command {
         AuthCommand::SetPassword => {
+            if !io::stdin().is_terminal() {
+                bail!("`auth set-password` cần TTY để nhập ẩn — chạy trong terminal tương tác");
+            }
             let config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
             let data_dir = expand_tilde(&config.data.dir);
             let password = rpassword::prompt_password("Nhập mật khẩu web (ít nhất 12 ký tự): ")

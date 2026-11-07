@@ -18,7 +18,7 @@ use bean_llm::{ChatRequest, build_provider};
 use bean_security::AuditLog;
 use bean_settings::{SecretSlotRegistry, SecretStore, SettingsService, parse_value};
 use bean_types::Message;
-use bean_types::config::{Config, LlmState, WebSearchProvider};
+use bean_types::config::{Config, SettingsState, WebSearchProvider};
 use secrecy::SecretString;
 
 /// Nhập một dòng từ TTY; Enter rỗng = bỏ qua.
@@ -106,14 +106,22 @@ fn slot_value(config: &Config, _registry: &SecretSlotRegistry, env_name: &str) -
     get_env(env_name)
 }
 
-/// Lưu `llm-state.json` (profile + model, áp dụng khi khởi động lại Bean).
-fn save_llm_state(data_dir: &Path, profile: &str, model: &str) -> Result<()> {
-    let state = LlmState {
-        profile: profile.to_string(),
-        model: model.to_string(),
+/// Lưu `settings-state.json` (profile + model + voice, áp dụng khi khởi động lại Bean).
+fn save_settings_state(data_dir: &Path, profile: &str, model: &str) -> Result<()> {
+    let state = SettingsState {
+        llm_profile: profile.to_string(),
+        llm_model: model.to_string(),
+        voice_enabled: false,
+        voice_provider: None,
+        voice_language: None,
+        voice_tts_voice_id: None,
+        voice_tts_voice_vi: None,
     };
-    LlmState::save(&data_dir.join(bean_types::config::LLM_STATE_FILE), &state)
-        .context("ghi llm-state.json thất bại")?;
+    SettingsState::save(
+        &data_dir.join(bean_types::config::SETTINGS_STATE_FILE),
+        &state,
+    )
+    .context("ghi settings-state.json thất bại")?;
     Ok(())
 }
 
@@ -201,7 +209,7 @@ async fn setup_provider(
             set_toml(service, audit, key, &value)?;
         }
         config.llm.apply_profile(profile);
-        save_llm_state(
+        save_settings_state(
             &expand_tilde(&config.data.dir),
             &profile.name,
             &profile.model,
@@ -240,13 +248,13 @@ async fn setup_provider(
     };
     if model != config.llm.model {
         set_toml(service, audit, "llm.model", &model)?;
-        save_llm_state(
+        save_settings_state(
             &expand_tilde(&config.data.dir),
             config.llm.active_profile_name(),
             &model,
         )?;
         config.llm.model = model.clone();
-        println!("Đã lưu model `{model}` vào llm-state.json.");
+        println!("Đã lưu model `{model}` vào settings-state.json.");
     }
 
     // API key (nếu nhà cung cấp cần). Probe trước khi move key vào store.
@@ -507,7 +515,7 @@ pub async fn run_setup(config_path: Option<&Path>) -> Result<()> {
     std::process::exit(exit_code);
 }
 
-/// Chạy `bean model` — chọn provider/model tương tác, lưu vào `llm-state.json`
+/// Chạy `bean model` — chọn provider/model tương tác, lưu vào `settings-state.json`
 /// (cùng nơi với UI) và áp dụng khi khởi động lại Bean.
 pub async fn run_model(config_path: Option<&Path>) -> Result<()> {
     let mut config = Config::load_or_default(config_path).context("nạp cấu hình thất bại")?;
@@ -559,7 +567,7 @@ pub async fn run_model(config_path: Option<&Path>) -> Result<()> {
                     }
                 };
                 set_toml(&service, &audit, "llm.model", &model)?;
-                save_llm_state(&data_dir, &active, &model)?;
+                save_settings_state(&data_dir, &active, &model)?;
                 config.llm.model = model.clone();
                 println!("Đã lưu model `{model}` (áp dụng khi khởi động lại Bean).");
             }
@@ -590,9 +598,9 @@ pub async fn run_model(config_path: Option<&Path>) -> Result<()> {
                     set_toml(&service, &audit, key, &value)?;
                 }
                 config.llm.apply_profile(profile);
-                save_llm_state(&data_dir, &profile.name, &profile.model)?;
+                save_settings_state(&data_dir, &profile.name, &profile.model)?;
                 println!(
-                    "Đã chuyển sang profile `{}` và lưu llm-state.json.",
+                    "Đã chuyển sang profile `{}` và lưu settings-state.json.",
                     profile.name
                 );
             }

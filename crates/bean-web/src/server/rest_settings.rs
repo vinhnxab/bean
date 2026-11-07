@@ -517,8 +517,7 @@ const fn source_str(source: SettingSource) -> &'static str {
     match source {
         SettingSource::Default => "default",
         SettingSource::BeanToml => "bean.toml",
-        SettingSource::LlmState => "llm-state.json",
-        SettingSource::VoiceState => "voice-state.json",
+        SettingSource::SettingsState => "settings-state.json",
     }
 }
 

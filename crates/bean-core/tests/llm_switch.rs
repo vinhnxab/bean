@@ -13,7 +13,7 @@ use bean_llm::{ChatRequest, LlmError, LlmProvider};
 use bean_security::CapWorkspace;
 use bean_tools::ToolRegistry;
 use bean_types::LlmResponse;
-use bean_types::config::{DEFAULT_PROFILE_NAME, LlmProfile, LlmProviderKind, LlmState};
+use bean_types::config::{DEFAULT_PROFILE_NAME, LlmProfile, LlmProviderKind, SettingsState};
 use bean_types::{Config, RunEvent};
 use secrecy::SecretString;
 use tokio::sync::broadcast::Receiver;
@@ -108,7 +108,8 @@ fn setup(persist: bool, allowed_models: Option<Vec<String>>) -> Setup {
     if let Some(models) = allowed_models {
         config.llm.allowed_models = models;
     }
-    let state_path = persist.then(|| bean_types::config::state_path(&temp.path().join("data")));
+    let state_path =
+        persist.then(|| bean_types::config::settings_state_path(&temp.path().join("data")));
     let workspace_root = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace_root).unwrap();
     let workspace = Arc::new(CapWorkspace::open(workspace_root).unwrap());
@@ -188,9 +189,9 @@ async fn switch_provider_swaps_runtime_and_persists_state() {
     assert!(!after.key_configured, "api_key_env rỗng ⇒ không cần key");
 
     // State file ghi đúng profile + model.
-    let saved = LlmState::load(&state_path).expect("state phải được ghi");
-    assert_eq!(saved.profile, "ollama");
-    assert_eq!(saved.model, "qwen3:14b");
+    let saved = SettingsState::load(&state_path).expect("state phải được ghi");
+    assert_eq!(saved.llm_profile, "ollama");
+    assert_eq!(saved.llm_model, "qwen3:14b");
 
     // Danh sách profile: ollama active, "default" vẫn là snapshot `[llm]` gốc.
     let profiles = router.llm_profiles().unwrap();
@@ -288,7 +289,7 @@ async fn switch_failure_keeps_old_provider_and_state() {
     let current = router.llm_config().unwrap();
     assert_eq!(current.provider, LlmProviderKind::Anthropic);
     assert!(
-        LlmState::load(&state_path).is_none(),
+        SettingsState::load(&state_path).is_none(),
         "factory lỗi ⇒ không ghi state"
     );
 
@@ -360,9 +361,9 @@ async fn set_llm_model_persists_state_with_active_profile() {
     router
         .set_llm_model("claude-opus-5")
         .expect("model allowed");
-    let saved = LlmState::load(&state_path).expect("set_llm_model phải persist");
-    assert_eq!(saved.profile, DEFAULT_PROFILE_NAME);
-    assert_eq!(saved.model, "claude-opus-5");
+    let saved = SettingsState::load(&state_path).expect("set_llm_model phải persist");
+    assert_eq!(saved.llm_profile, DEFAULT_PROFILE_NAME);
+    assert_eq!(saved.llm_model, "claude-opus-5");
 
     let denied = router.set_llm_model("model-la").unwrap_err();
     assert!(matches!(denied, RouterError::ModelNotAllowed(_)));
@@ -378,7 +379,7 @@ async fn set_llm_model_persists_state_with_active_profile() {
     router
         .set_llm_model("qwen3:32b")
         .expect("model allowed của ollama");
-    let saved = LlmState::load(&state_path).unwrap();
-    assert_eq!(saved.profile, "ollama");
-    assert_eq!(saved.model, "qwen3:32b");
+    let saved = SettingsState::load(&state_path).unwrap();
+    assert_eq!(saved.llm_profile, "ollama");
+    assert_eq!(saved.llm_model, "qwen3:32b");
 }

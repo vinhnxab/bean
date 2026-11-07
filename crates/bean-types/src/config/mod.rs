@@ -45,6 +45,7 @@ mod llm_store;
 mod load;
 mod products;
 mod secrets;
+mod settings_state;
 mod tools;
 mod validate;
 mod validate_integrations;
@@ -68,6 +69,10 @@ pub use llm_store::{remove_stored_api_keys, write_llm_providers};
 pub use products::{
     BillingConfig, MarketingConfig, QaConfig, QaSandboxConfig, QaSuiteConfig, ScanSandboxConfig,
     ScanScopeEntry, SecurityScanConfig,
+};
+pub use settings_state::{
+    SETTINGS_STATE_FILE, SettingsState, apply_persisted_settings_state, settings_state_path,
+    settings_state_path_from_config,
 };
 pub use tools::{SandboxConfig, SecurityConfig, ToolsConfig};
 pub use validate::validate_scope_value;

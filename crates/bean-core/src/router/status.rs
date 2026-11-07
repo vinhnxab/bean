@@ -76,11 +76,21 @@ impl Router {
         let Some(path) = &self.inner.llm_state_path else {
             return Ok(());
         };
-        let state = bean_types::config::LlmState {
-            profile: profile.to_string(),
-            model: model.to_string(),
-        };
-        bean_types::config::LlmState::save(path, &state)
+        // Load state hiện có (nếu có) để giữ voice settings, chỉ cập nhật llm fields.
+        let mut state = bean_types::config::SettingsState::load(path).unwrap_or_else(|| {
+            bean_types::config::SettingsState {
+                llm_profile: profile.to_string(),
+                llm_model: model.to_string(),
+                voice_enabled: false,
+                voice_provider: None,
+                voice_language: None,
+                voice_tts_voice_id: None,
+                voice_tts_voice_vi: None,
+            }
+        });
+        state.llm_profile = profile.to_string();
+        state.llm_model = model.to_string();
+        bean_types::config::SettingsState::save(path, &state)
             .map_err(|error| RouterError::Persist(error.to_string()))
     }
 

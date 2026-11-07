@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 
 use bean_security::{AuditLog, entry_now};
 use bean_types::config::{
-    Config, DEFAULT_CONFIG_FILE, LLM_STATE_FILE, LlmState, SpeechProviderKind, VOICE_STATE_FILE,
-    VoiceState, apply_persisted_llm_state, apply_persisted_voice_state,
+    Config, DEFAULT_CONFIG_FILE, SETTINGS_STATE_FILE, SettingsState, SpeechProviderKind,
+    apply_persisted_settings_state,
 };
 use serde_json::json;
 
@@ -129,10 +129,8 @@ impl SettingApply {
 pub enum SettingStore {
     /// `bean.toml` — cấu hình tĩnh, không bao giờ chứa key.
     BeanToml,
-    /// `llm-state.json` — lựa chọn profile/model runtime.
-    LlmState,
-    /// `voice-state.json` — lựa chọn voice runtime, không chứa key mới (M29).
-    VoiceState,
+    /// `data.dir/settings-state.json` — lựa chọn runtime (llm profile/model + voice).
+    SettingsState,
 }
 
 impl SettingStore {
@@ -141,8 +139,7 @@ impl SettingStore {
     pub fn label(self) -> &'static str {
         match self {
             Self::BeanToml => "bean.toml",
-            Self::LlmState => "llm-state.json",
-            Self::VoiceState => "voice-state.json",
+            Self::SettingsState => "settings-state.json",
         }
     }
 }
@@ -154,10 +151,8 @@ pub enum SettingSource {
     Default,
     /// Trong `bean.toml` (seed, chưa bị state ghi đè).
     BeanToml,
-    /// Trong `data.dir/llm-state.json`.
-    LlmState,
-    /// Trong `data.dir/voice-state.json`.
-    VoiceState,
+    /// Trong `data.dir/settings-state.json`.
+    SettingsState,
 }
 
 impl SettingSource {
@@ -167,8 +162,7 @@ impl SettingSource {
         match self {
             Self::Default => "mặc định",
             Self::BeanToml => "bean.toml",
-            Self::LlmState => "llm-state.json",
-            Self::VoiceState => "voice-state.json",
+            Self::SettingsState => "settings-state.json",
         }
     }
 }
@@ -236,7 +230,7 @@ pub static SETTINGS: &[SettingEntry] = &[
         kind: SettingKind::Str,
         tier: SettingTier::A,
         apply: SettingApply::Hot,
-        store: SettingStore::LlmState,
+        store: SettingStore::SettingsState,
         desc_vi: "Model đang dùng của profile hiện tại (lựa chọn runtime)",
         desc_en: "Active model of the current profile (runtime selection)",
     },
@@ -531,7 +525,7 @@ pub static SETTINGS: &[SettingEntry] = &[
         kind: SettingKind::Bool,
         tier: SettingTier::A,
         apply: SettingApply::Hot,
-        store: SettingStore::VoiceState,
+        store: SettingStore::SettingsState,
         desc_vi: "Bật push-to-talk (cần cấu hình đủ [voice] mới thực sự hoạt động)",
         desc_en: "Enable push-to-talk (needs a complete [voice] config)",
     },
@@ -540,7 +534,7 @@ pub static SETTINGS: &[SettingEntry] = &[
         kind: SettingKind::Str,
         tier: SettingTier::A,
         apply: SettingApply::Hot,
-        store: SettingStore::VoiceState,
+        store: SettingStore::SettingsState,
         desc_vi: "Nhà cung cấp STT/TTS: local | api",
         desc_en: "STT/TTS provider: local | api",
     },
@@ -549,7 +543,7 @@ pub static SETTINGS: &[SettingEntry] = &[
         kind: SettingKind::Str,
         tier: SettingTier::A,
         apply: SettingApply::Hot,
-        store: SettingStore::VoiceState,
+        store: SettingStore::SettingsState,
         desc_vi: "Ngôn ngữ STT/TTS (vi, en…)",
         desc_en: "STT/TTS language (vi, en…)",
     },
@@ -558,7 +552,7 @@ pub static SETTINGS: &[SettingEntry] = &[
         kind: SettingKind::Str,
         tier: SettingTier::A,
         apply: SettingApply::Hot,
-        store: SettingStore::VoiceState,
+        store: SettingStore::SettingsState,
         desc_vi: "Voice ID TTS mặc định (ElevenLabs)",
         desc_en: "Default TTS voice ID (ElevenLabs)",
     },
@@ -567,7 +561,7 @@ pub static SETTINGS: &[SettingEntry] = &[
         kind: SettingKind::OptStr,
         tier: SettingTier::A,
         apply: SettingApply::Hot,
-        store: SettingStore::VoiceState,
+        store: SettingStore::SettingsState,
         desc_vi: "Voice ID TTS cho tiếng Việt; bỏ trống để xoá",
         desc_en: "TTS voice ID for Vietnamese; empty to clear",
     },
@@ -926,13 +920,9 @@ impl SettingsService {
         let old_source = self.source_of(entry);
         match entry.store {
             SettingStore::BeanToml => self.set_toml_key(entry, &value)?,
-            SettingStore::LlmState => {
+            SettingStore::SettingsState => {
                 let seed = self.load_seed();
-                self.set_llm_state(&seed, entry, &value)?;
-            }
-            SettingStore::VoiceState => {
-                let seed = self.load_seed();
-                self.set_voice_state(&seed, entry, &value)?;
+                self.set_settings_state(&seed, entry, &value)?;
             }
         }
         let new_source = self.source_of(entry);
@@ -957,13 +947,9 @@ impl SettingsService {
         let old_source = self.source_of(entry);
         let changed = match entry.store {
             SettingStore::BeanToml => self.unset_toml_key(entry)?,
-            SettingStore::LlmState => {
+            SettingStore::SettingsState => {
                 let seed = self.load_seed();
-                self.unset_llm_state(&seed)?
-            }
-            SettingStore::VoiceState => {
-                let seed = self.load_seed();
-                self.unset_voice_state(&seed, entry)?
+                self.unset_settings_state(&seed, entry)?
             }
         };
         let new_source = self.source_of(entry);
@@ -977,20 +963,12 @@ impl SettingsService {
         })
     }
 
-    fn llm_state_path(&self) -> PathBuf {
-        self.data_dir.join(LLM_STATE_FILE)
+    fn settings_state_path(&self) -> PathBuf {
+        self.data_dir.join(SETTINGS_STATE_FILE)
     }
 
-    fn voice_state_path(&self) -> PathBuf {
-        self.data_dir.join(VOICE_STATE_FILE)
-    }
-
-    fn llm_state(&self) -> Option<LlmState> {
-        LlmState::load(&self.llm_state_path())
-    }
-
-    fn voice_state(&self) -> Option<VoiceState> {
-        VoiceState::load(&self.voice_state_path())
+    fn settings_state(&self) -> Option<SettingsState> {
+        SettingsState::load(&self.settings_state_path())
     }
 
     /// Nạp seed từ `bean.toml`; file hỏng/thiếu ⇒ mặc định. Set/unset vẫn từ chối ghi
@@ -1007,8 +985,7 @@ impl SettingsService {
     fn effective(&self, seed: &Config) -> Config {
         let mut config = seed.clone();
         // Giá trị trả về (có áp state hay không) không cần ở đây — chỉ cần config đã gộp.
-        let _ = apply_persisted_llm_state(&mut config, &self.data_dir);
-        let _ = apply_persisted_voice_state(&mut config, &self.data_dir);
+        let _ = apply_persisted_settings_state(&mut config, &self.data_dir);
         config
     }
 
@@ -1022,30 +999,11 @@ impl SettingsService {
         };
         match entry.store {
             SettingStore::BeanToml => toml_source(),
-            SettingStore::LlmState => {
-                // State áp cả profile (provider/model/allowed_models/…) nên khi file
-                // tồn tại, mọi khoá `llm.*` đều coi như đến từ state.
-                if self.llm_state().is_some() {
-                    SettingSource::LlmState
-                } else {
-                    toml_source()
-                }
-            }
-            SettingStore::VoiceState => {
-                let Some(state) = self.voice_state() else {
-                    return toml_source();
-                };
-                // Trường optional chỉ là nguồn state khi state thực sự ghi đè nó.
-                let overrides = match entry.path {
-                    "voice.enabled" => true,
-                    "voice.provider" => state.provider.is_some(),
-                    "voice.language" => state.language.is_some(),
-                    "voice.tts_voice_id" => state.tts_voice_id.is_some(),
-                    "voice.tts_voice_vi" => state.tts_voice_vi.is_some(),
-                    _ => false,
-                };
-                if overrides {
-                    SettingSource::VoiceState
+            SettingStore::SettingsState => {
+                // State áp cả llm (profile/model) lẫn voice (enabled/provider/language/voice id)
+                // nên khi file tồn tại, mọi khoá liên quan đều coi như đến từ state.
+                if self.settings_state().is_some() {
+                    SettingSource::SettingsState
                 } else {
                     toml_source()
                 }
@@ -1192,83 +1150,46 @@ impl SettingsService {
         Ok(true)
     }
 
-    fn set_llm_state(
+    fn set_settings_state(
         &self,
         seed: &Config,
         entry: &SettingEntry,
         value: &SettingValue,
     ) -> Result<(), SettingsError> {
-        let path = self.llm_state_path();
-        let mut state = self.llm_state().unwrap_or_else(|| LlmState {
-            profile: seed.llm.active_profile_name().to_string(),
-            model: seed.llm.model.clone(),
-        });
-        let SettingValue::Str(model) = value else {
-            return Err(SettingsError::InvalidSetting {
-                key: entry.path.to_string(),
-                reason: "cần một chuỗi".to_string(),
-            });
-        };
-        let Some(profile) = seed.llm.profile(&state.profile) else {
-            return Err(SettingsError::ConfigRejected {
-                message: format!(
-                    "profile `{}` trong llm-state.json không còn trong bean.toml — chọn lại profile trước khi đổi model",
-                    state.profile
-                ),
-            });
-        };
-        let allowed = profile.effective_allowed_models();
-        if !allowed.iter().any(|candidate| candidate == model) {
-            return Err(SettingsError::InvalidSetting {
-                key: entry.path.to_string(),
-                reason: format!(
-                    "model phải nằm trong allowed_models của profile `{}`: [{}]",
-                    state.profile,
-                    allowed.join(", ")
-                ),
-            });
-        }
-        state.model = model.clone();
-        LlmState::save(&path, &state).map_err(|source| SettingsError::Io { path, source })?;
-        Ok(())
-    }
-
-    /// Unset `llm.model` — model quay về model của profile; khi state trùng seed thì
-    /// xoá file (vắng mặt ⇒ theo `bean.toml`).
-    fn unset_llm_state(&self, seed: &Config) -> Result<bool, SettingsError> {
-        let path = self.llm_state_path();
-        let Some(mut state) = self.llm_state() else {
-            return Ok(false);
-        };
-        let Some(profile) = seed.llm.profile(&state.profile) else {
-            return Ok(false);
-        };
-        state.model = profile.model.clone();
-        if state.profile == seed.llm.active_profile_name() && state.model == seed.llm.model {
-            remove_if_exists(&path)?;
-            return Ok(true);
-        }
-        LlmState::save(&path, &state).map_err(|source| SettingsError::Io { path, source })?;
-        Ok(true)
-    }
-
-    fn set_voice_state(
-        &self,
-        seed: &Config,
-        entry: &SettingEntry,
-        value: &SettingValue,
-    ) -> Result<(), SettingsError> {
-        let path = self.voice_state_path();
-        let mut state = self.voice_state().unwrap_or(VoiceState {
-            enabled: seed.voice.enabled,
-            provider: None,
-            language: None,
-            api_key: None,
-            tts_voice_id: None,
-            tts_voice_vi: None,
+        let path = self.settings_state_path();
+        let mut state = self.settings_state().unwrap_or_else(|| SettingsState {
+            llm_profile: seed.llm.active_profile_name().to_string(),
+            llm_model: seed.llm.model.clone(),
+            voice_enabled: seed.voice.enabled,
+            voice_provider: None,
+            voice_language: None,
+            voice_tts_voice_id: None,
+            voice_tts_voice_vi: None,
         });
         match (entry.path, value) {
-            ("voice.enabled", SettingValue::Bool(enabled)) => state.enabled = *enabled,
+            ("llm.model", SettingValue::Str(model)) => {
+                let profile = seed.llm.profile(&state.llm_profile).ok_or_else(|| {
+                    SettingsError::ConfigRejected {
+                        message: format!(
+                            "profile `{}` trong settings-state.json không còn trong bean.toml — chọn lại profile trước khi đổi model",
+                            state.llm_profile
+                        ),
+                    }
+                })?;
+                let allowed = profile.effective_allowed_models();
+                if !allowed.iter().any(|candidate| candidate == model) {
+                    return Err(SettingsError::InvalidSetting {
+                        key: entry.path.to_string(),
+                        reason: format!(
+                            "model phải nằm trong allowed_models của profile `{}`: [{}]",
+                            state.llm_profile,
+                            allowed.join(", ")
+                        ),
+                    });
+                }
+                state.llm_model = model.clone();
+            }
+            ("voice.enabled", SettingValue::Bool(enabled)) => state.voice_enabled = *enabled,
             ("voice.provider", SettingValue::Str(raw)) => {
                 let parsed = SpeechProviderKind::from_config_str(raw).ok_or_else(|| {
                     SettingsError::InvalidSetting {
@@ -1276,71 +1197,73 @@ impl SettingsService {
                         reason: "cần `local` hoặc `api`".to_string(),
                     }
                 })?;
-                state.provider = Some(parsed);
+                state.voice_provider = Some(parsed);
             }
             ("voice.language", SettingValue::Str(language)) => {
-                state.language = Some(language.clone());
+                state.voice_language = Some(language.clone());
             }
             ("voice.tts_voice_id", SettingValue::Str(id)) => {
-                state.tts_voice_id = Some(id.clone());
+                state.voice_tts_voice_id = Some(id.clone());
             }
             ("voice.tts_voice_vi", SettingValue::Str(id) | SettingValue::OptStr(Some(id))) => {
-                state.tts_voice_vi = Some(id.clone());
+                state.voice_tts_voice_vi = Some(id.clone());
             }
-            ("voice.tts_voice_vi", SettingValue::OptStr(None)) => state.tts_voice_vi = None,
+            ("voice.tts_voice_vi", SettingValue::OptStr(None)) => state.voice_tts_voice_vi = None,
             _ => {
                 return Err(SettingsError::InvalidSetting {
                     key: entry.path.to_string(),
-                    reason: "khoá này không lưu ở voice-state.json hoặc kiểu giá trị sai"
+                    reason: "khoá này không lưu ở settings-state.json hoặc kiểu giá trị sai"
                         .to_string(),
                 });
             }
         }
-        // Chặn "bật có nghĩa" trước khi ghi: state bật nhưng `[voice]` chưa đủ cấu
-        // hình thì `apply_to_config` sẽ âm thầm giữ seed — người dùng bật mà không
-        // thấy gì xảy ra. Từ chối ngay với lý do rõ ràng.
+        // Chặn "bật có nghĩa" trước khi ghi: state bật voice nhưng `[voice]` chưa đủ
+        // cấu hình thì `apply_to_config` sẽ giữ seed — người dùng bật mà không thấy
+        // gì xảy ra. Từ chối ngay với lý do rõ ràng.
         let mut probe = seed.clone();
         let applied = state.apply_to_config(&mut probe);
-        if state.enabled && !applied {
+        if state.voice_enabled && !applied {
             return Err(SettingsError::ConfigRejected {
                 message: "[voice] chưa đủ cấu hình để bật — chế độ local cần whisper_command/whisper_model và piper_command/piper_model, chế độ api cần key; hoàn tất [voice] trong bean.toml trước".to_string(),
             });
         }
-        VoiceState::save(&path, &state).map_err(|source| SettingsError::Io { path, source })?;
+        SettingsState::save(&path, &state).map_err(|source| SettingsError::Io { path, source })?;
         Ok(())
     }
 
-    /// Unset một trường voice-state; khi state không còn ghi đè gì (và không còn key
-    /// legacy) thì xoá file — đúng ngữ nghĩa "vắng mặt ⇒ theo seed".
-    fn unset_voice_state(
+    /// Unset một trường settings-state; khi state không còn ghi đè gì thì xoá file —
+    /// đúng ngữ nghĩa "vắng mặt ⇒ theo seed".
+    fn unset_settings_state(
         &self,
         seed: &Config,
         entry: &SettingEntry,
     ) -> Result<bool, SettingsError> {
-        let path = self.voice_state_path();
-        let Some(mut state) = self.voice_state() else {
+        let path = self.settings_state_path();
+        let Some(mut state) = self.settings_state() else {
             return Ok(false);
         };
         match entry.path {
-            "voice.enabled" => state.enabled = seed.voice.enabled,
-            "voice.provider" => state.provider = None,
-            "voice.language" => state.language = None,
-            "voice.tts_voice_id" => state.tts_voice_id = None,
-            "voice.tts_voice_vi" => state.tts_voice_vi = None,
+            "llm.model" => state.llm_model = seed.llm.model.clone(),
+            "voice.enabled" => state.voice_enabled = seed.voice.enabled,
+            "voice.provider" => state.voice_provider = None,
+            "voice.language" => state.voice_language = None,
+            "voice.tts_voice_id" => state.voice_tts_voice_id = None,
+            "voice.tts_voice_vi" => state.voice_tts_voice_vi = None,
             _ => return Ok(false),
         }
-        let seed_state = VoiceState {
-            enabled: seed.voice.enabled,
-            provider: None,
-            language: None,
-            api_key: None,
-            tts_voice_id: None,
-            tts_voice_vi: None,
+        let seed_state = SettingsState {
+            llm_profile: seed.llm.active_profile_name().to_string(),
+            llm_model: seed.llm.model.clone(),
+            voice_enabled: seed.voice.enabled,
+            voice_provider: None,
+            voice_language: None,
+            voice_tts_voice_id: None,
+            voice_tts_voice_vi: None,
         };
         if state == seed_state {
             remove_if_exists(&path)?;
         } else {
-            VoiceState::save(&path, &state).map_err(|source| SettingsError::Io {
+            SettingsState::save(&path, &state).map_err(|source| SettingsError::Io {
                 path: path.clone(),
                 source,
             })?;
@@ -1569,7 +1492,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
-    use bean_types::config::{Config, LlmState};
+    use bean_types::config::{Config, SettingsState};
 
     /// Ghi nội dung `bean.toml` vào thư mục tạm, tự nối `[data] dir` trỏ vào tempdir
     /// để state/audit không bao giờ rơi vào `$HOME` thật. Nội dung test không được
@@ -1742,12 +1665,17 @@ mod tests {
         let entry = lookup("llm.model").unwrap();
         let value = parse_value(entry, "m2").unwrap();
         let outcome = store.set(entry, value, &audit, "test:actor").unwrap();
-        assert_eq!(outcome.new_source, SettingSource::LlmState);
+        assert_eq!(outcome.new_source, SettingSource::SettingsState);
         assert_eq!(
-            LlmState::load(&dir.path().join(LLM_STATE_FILE)),
-            Some(LlmState {
-                profile: "default".into(),
-                model: "m2".into()
+            SettingsState::load(&dir.path().join(SETTINGS_STATE_FILE)),
+            Some(SettingsState {
+                llm_profile: "default".into(),
+                llm_model: "m2".into(),
+                voice_enabled: false,
+                voice_provider: None,
+                voice_language: None,
+                voice_tts_voice_id: None,
+                voice_tts_voice_vi: None,
             })
         );
         assert!(
@@ -1760,10 +1688,15 @@ mod tests {
         let value = parse_value(entry, "m3").unwrap();
         assert!(store.set(entry, value, &audit, "test:actor").is_err());
         assert_eq!(
-            LlmState::load(&dir.path().join(LLM_STATE_FILE)),
-            Some(LlmState {
-                profile: "default".into(),
-                model: "m2".into()
+            SettingsState::load(&dir.path().join(SETTINGS_STATE_FILE)),
+            Some(SettingsState {
+                llm_profile: "default".into(),
+                llm_model: "m2".into(),
+                voice_enabled: false,
+                voice_provider: None,
+                voice_language: None,
+                voice_tts_voice_id: None,
+                voice_tts_voice_vi: None,
             })
         );
     }
@@ -1832,20 +1765,20 @@ mod tests {
         store.set(enabled, value, &audit, "test:actor").unwrap();
         let read = store.get(enabled);
         assert_eq!(read.value, "true");
-        assert_eq!(read.source, SettingSource::VoiceState);
+        assert_eq!(read.source, SettingSource::SettingsState);
 
         let value = parse_value(vi, "giọng-việt").unwrap();
         store.set(vi, value, &audit, "test:actor").unwrap();
         let read = store.get(vi);
         assert_eq!(read.value, "giọng-việt");
-        assert_eq!(read.source, SettingSource::VoiceState);
+        assert_eq!(read.source, SettingSource::SettingsState);
 
         // Unset từng trường; state còn tts_voice_vi chưa xoá nên file vẫn còn.
         store.unset(enabled, &audit, "test:actor").unwrap();
-        assert!(dir.path().join(VOICE_STATE_FILE).exists());
+        assert!(dir.path().join(SETTINGS_STATE_FILE).exists());
         store.unset(vi, &audit, "test:actor").unwrap();
         assert!(
-            !dir.path().join(VOICE_STATE_FILE).exists(),
+            !dir.path().join(SETTINGS_STATE_FILE).exists(),
             "state về đúng seed — file phải bị xoá"
         );
         let read = store.get(enabled);
@@ -1868,7 +1801,7 @@ mod tests {
             .expect_err("bật voice thiếu cấu hình phải bị từ chối");
         assert!(matches!(error, SettingsError::ConfigRejected { .. }));
         assert!(
-            !dir.path().join(VOICE_STATE_FILE).exists(),
+            !dir.path().join(SETTINGS_STATE_FILE).exists(),
             "không được ghi state khi bị từ chối"
         );
     }
@@ -1886,11 +1819,11 @@ mod tests {
         let entry = lookup("llm.model").unwrap();
         let value = parse_value(entry, "m2").unwrap();
         store.set(entry, value, &audit, "test:actor").unwrap();
-        assert!(dir.path().join(LLM_STATE_FILE).exists());
+        assert!(dir.path().join(SETTINGS_STATE_FILE).exists());
 
         store.unset(entry, &audit, "test:actor").unwrap();
         assert!(
-            !dir.path().join(LLM_STATE_FILE).exists(),
+            !dir.path().join(SETTINGS_STATE_FILE).exists(),
             "state trùng seed — file phải bị xoá"
         );
         let read = store.get(entry);

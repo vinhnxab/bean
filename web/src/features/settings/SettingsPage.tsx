@@ -20,7 +20,7 @@ function RestartBanner({ keys }: { keys: string[] }) {
   const { t } = useI18n();
   if (keys.length === 0) return null;
   return (
-    <div className="my-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-300">
+    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-300">
       {t("settings.restartBanner", { keys: keys.join(", ") })}
     </div>
   );

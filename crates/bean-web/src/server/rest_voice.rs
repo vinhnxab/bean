@@ -31,7 +31,9 @@ use axum_extra::extract::cookie::CookieJar;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bean_speech::{AudioInput, SpeechError, SpeechProvider};
-use bean_types::config::{SpeechProviderKind, VoiceConfig, VoiceState, voice_state_path};
+use bean_types::config::{
+    SettingsState, SpeechProviderKind, VoiceConfig, settings_state_path_from_config,
+};
 
 use crate::api_types::{
     VoiceStatusResponse, VoiceSynthesizeRequest, VoiceSynthesizeResponse, VoiceTranscribeRequest,
@@ -47,66 +49,57 @@ use super::{ApiFailure, ApiResult, WebState, require_user};
 /// thưa theo hành động của người dùng, còn một nguồn sự thật duy nhất trên đĩa thì
 /// không bao giờ lệch giữa nhiều handler.
 fn voice_runtime_enabled(state: &WebState) -> bool {
-    match saved_voice_state(state) {
-        Some(saved) => saved.enabled,
+    match saved_settings_state(state) {
+        Some(saved) => saved.voice_enabled,
         None => state.config.voice.enabled,
     }
 }
 
-/// Đọc state voice đã persist (nếu có); lỗi đĩa/file hỏng coi như chưa có gì lưu.
-fn saved_voice_state(state: &WebState) -> Option<VoiceState> {
-    voice_state_path(&state.config)
+/// Đọc settings-state đã persist (nếu có); lỗi đĩa/file hỏng coi như chưa có gì lưu.
+fn saved_settings_state(state: &WebState) -> Option<SettingsState> {
+    settings_state_path_from_config(&state.config)
         .ok()
         .as_deref()
-        .and_then(VoiceState::load)
+        .and_then(SettingsState::load)
 }
 
-/// Bản sao `[voice]` seed **đã áp state file** — lựa chọn từ UI (provider/ngôn ngữ/key)
+/// Bản sao `[voice]` seed **đã áp state file** — lựa chọn từ UI (provider/ngôn ngữ/voice id)
 /// thắng seed `bean.toml`, "hành động mới nhất trên UI là ý cuối cùng".
 ///
 /// Đây là nền duy nhất cho cả `voice_status` lẫn gộp request PATCH: một hàm gộp thì
 /// hai handler không bao giờ trả lệch nhau về cấu hình hiệu lực. Mọi trường runtime
-/// (bao gồm cả `enabled`) được gộp từ state file — "hành động mới nhất trên UI là ý
-/// cuối cùng", state file thắng seed `bean.toml`.
+/// (bao gồm cả `enabled`) được gộp từ settings-state file — "hành động mới nhất trên UI
+/// là ý cuối cùng", settings-state file thắng seed `bean.toml`.
 ///
 /// `pub(super)` cho M29: `rest_settings::test_voice` probe đúng cấu hình hiệu lực này,
 /// không phải seed — probe một cấu hình mà UI đang hiển thị thì kết luận mới khớp.
 pub(super) fn effective_voice_config(state: &WebState) -> VoiceConfig {
     let mut voice = state.config.voice.clone();
-    if let Some(saved) = saved_voice_state(state) {
-        if let Some(provider) = saved.provider {
+    if let Some(saved) = saved_settings_state(state) {
+        if let Some(provider) = saved.voice_provider {
             voice.provider = provider;
         }
-        if let Some(language) = &saved.language {
+        if let Some(language) = &saved.voice_language {
             voice.language = language.clone();
         }
-        if let Some(key) = &saved.api_key {
-            voice.api_key = Some(key.clone());
-        }
-        if let Some(voice_id) = &saved.tts_voice_id {
+        if let Some(voice_id) = &saved.voice_tts_voice_id {
             voice.tts_voice_id = voice_id.clone();
         }
-        if let Some(voice_vi) = &saved.tts_voice_vi {
+        if let Some(voice_vi) = &saved.voice_tts_voice_vi {
             voice.tts_voice_vi = Some(voice_vi.clone());
         }
-        // enabled cũng 1 nơi: state file (UI) thắng seed bean.toml.
-        voice.enabled = saved.enabled;
+        // enabled cũng 1 nơi: settings-state file (UI) thắng seed bean.toml.
+        voice.enabled = saved.voice_enabled;
     }
     voice
 }
 
-/// `true` khi chế độ `api` có thể resolve được key: field đã lưu (từ UI/bean.toml —
-/// `effective_voice_config` đã gộp state file vào đây) hoặc biến môi trường.
+/// `true` khi chế độ `api` có thể resolve được key: biến môi trường (resolve qua
+/// `secrets.env`) — key không còn lưu trong settings-state.json.
 fn voice_api_key_set(state: &WebState, voice: &VoiceConfig) -> bool {
     let snapshot = state.router.secret_snapshot();
     let get_env = bean_settings::env_first_lookup(snapshot.as_ref());
-    // `api_key` còn trong `voice-state.json` cũ (trước M29) vẫn được tính là "đã có"
-    // để UI không hiện sai; resolver chạy thật thì bỏ qua trường này.
-    voice
-        .api_key
-        .as_deref()
-        .is_some_and(|key| !key.trim().is_empty())
-        || get_env(&voice.api_key_env).is_some()
+    get_env(&voice.api_key_env).is_some()
 }
 
 /// `GET /api/voice` — UI dùng để ẩn/hiện nút mic và dựng form cấu hình.
@@ -198,9 +191,8 @@ pub(super) async fn voice_update(
             Some(trimmed.to_string())
         }
     });
+    // Key luôn ở secrets.env, không ghi vào settings-state.json.
     if key_intent.is_some() {
-        // Cũ: dán key vào `next.api_key`. Giờ để None — key nằm trong secrets.env.
-        next.api_key = None;
         config_changed = true;
     }
     // Voice id mặc định là bắt buộc (TTS cần voice id trong URL) nên rỗng là lỗi;
@@ -295,22 +287,25 @@ pub(super) async fn voice_update(
         }
     }
 
-    // Persist cả lựa chọn cấu hình (provider/language/key) lẫn toggle vào một file —
-    // restart sau đó `apply_persisted_voice_state` dựng lại đúng provider đã chọn.
-    let saved = VoiceState {
-        enabled: request.enabled,
-        provider: Some(next.provider),
-        language: Some(next.language.clone()),
-        api_key: next.api_key.clone(),
-        tts_voice_id: Some(next.tts_voice_id.clone()),
-        tts_voice_vi: next.tts_voice_vi.clone(),
+    // Persist cả lựa chọn cấu hình (provider/language/voice id) lẫn toggle vào một
+    // file — restart sau đó `apply_persisted_settings_state` dựng lại đúng provider.
+    // Key không lưu ở đây (luôn ở secrets.env).
+    let saved = SettingsState {
+        llm_profile: state.config.llm.active_profile_name().to_string(),
+        llm_model: state.config.llm.model.clone(),
+        voice_enabled: request.enabled,
+        voice_provider: Some(next.provider),
+        voice_language: Some(next.language.clone()),
+        voice_tts_voice_id: Some(next.tts_voice_id.clone()),
+        voice_tts_voice_vi: next.tts_voice_vi.clone(),
     };
-    let path = voice_state_path(&state.config).map_err(|_| ApiFailure::internal())?;
-    VoiceState::save(&path, &saved).map_err(|_| {
+    let path =
+        settings_state_path_from_config(&state.config).map_err(|_| ApiFailure::internal())?;
+    SettingsState::save(&path, &saved).map_err(|_| {
         ApiFailure::new(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "voice_state_unwritable",
-            "không ghi được voice-state.json — kiểm tra quyền ghi data.dir",
+            "settings_state_unwritable",
+            "không ghi được settings-state.json — kiểm tra quyền ghi data.dir",
         )
     })?;
     if let Some(provider) = rebuilt {
