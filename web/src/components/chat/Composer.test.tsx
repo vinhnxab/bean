@@ -28,7 +28,7 @@ describe("Composer", () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
     renderComposer({ onSubmit });
-    const box = screen.getByLabelText("Nhập tin nhắn của bạn…");
+    const box = screen.getByLabelText("Type your message…");
 
     await user.type(box, "xin chào");
     await user.keyboard("{Enter}");
@@ -44,7 +44,7 @@ describe("Composer", () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
     renderComposer({ onSubmit });
-    const box = screen.getByLabelText("Nhập tin nhắn của bạn…");
+    const box = screen.getByLabelText("Type your message…");
 
     await user.type(box, "x");
     // Mô phỏng trạng thái IME: `keydown` có `isComposing = true`.
@@ -57,35 +57,37 @@ describe("Composer", () => {
   it("nút gửi chỉ bật khi có nội dung và không bị khoá khi mất kết nối", () => {
     const { rerender } = renderComposer({ value: "   " });
     // Chỉ khoảng trắng không phải tin nhắn — nút vẫn tắt.
-    expect(screen.getByRole("button", { name: "Gửi" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 
     rerender(
       <I18nProvider>
         <Composer value="có nội dung" {...NOOP} />
       </I18nProvider>,
     );
-    expect(screen.getByRole("button", { name: "Gửi" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 
   it("khi đang chạy thì nút Dừng thay cho nút Gửi", () => {
     renderComposer({ value: "abc", canStop: true });
-    expect(screen.queryByRole("button", { name: "Gửi" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dừng" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
   });
 
   it("nút Dừng khoá lại khi đã gửi lệnh dừng", () => {
     renderComposer({ value: "abc", canStop: true, stopping: true });
-    expect(screen.getByRole("button", { name: "Đang dừng…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
   });
 
   it("báo lỗi gửi bằng thông báo có vai trò alert", () => {
     renderComposer({ sendError: true });
-    expect(screen.getByRole("alert")).toHaveTextContent("Không gửi được tin nhắn");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not send the message. Check your connection and try again.",
+    );
   });
 
   it("không render con trỏ con nhảy dòng — khung tự giãn", () => {
     renderComposer({ value: "một\nhai\nba" });
-    const box = screen.getByLabelText("Nhập tin nhắn của bạn…");
+    const box = screen.getByLabelText("Type your message…");
     expect(box.className).toContain("resize-none");
   });
 });

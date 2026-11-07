@@ -72,12 +72,12 @@ describe("ThemeToggle", () => {
 
     const button = screen.getByRole("button");
     expect(button).toHaveTextContent("Giao diện");
-    expect(button).toHaveTextContent("Tối");
+    expect(button).toHaveTextContent("Dark");
     expect(button).toHaveAttribute("data-theme-state", "dark");
 
     await user.click(button);
 
-    expect(button).toHaveTextContent("Sáng");
+    expect(button).toHaveTextContent("Light");
     expect(button).toHaveAttribute("data-theme-state", "light");
   });
 
@@ -87,8 +87,8 @@ describe("ThemeToggle", () => {
     render(<ThemeToggle label="Giao diện" />, { wrapper: Wrapper });
     const name = screen.getByRole("button").getAttribute("aria-label") ?? "";
     expect(name).toContain("Giao diện");
-    expect(name).toContain("Tối");
-    expect(name).toContain("Chuyển sang giao diện sáng");
+    expect(name).toContain("Dark");
+    expect(name).toContain("Switch to light appearance");
   });
 
   // Không `label` thì chỉ còn icon — dùng ở chỗ hẹp (rail 80px) không chứa nổi
@@ -97,6 +97,6 @@ describe("ThemeToggle", () => {
     render(<ThemeToggle />, { wrapper: Wrapper });
     const button = screen.getByRole("button");
     expect(button.textContent).toBe("");
-    expect(button).toHaveAccessibleName("Chuyển sang giao diện sáng");
+    expect(button).toHaveAccessibleName("Switch to light appearance");
   });
 });

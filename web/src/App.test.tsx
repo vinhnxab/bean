@@ -32,8 +32,8 @@ describe("App", () => {
 
     renderApp();
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: /Đăng nhập Bean/ })).toBeInTheDocument());
-    expect(screen.getByLabelText("Mật khẩu")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Sign in to Bean/ })).toBeInTheDocument());
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
   });
 
   // Route lazy: `App.tsx` nạp từng màn bằng `React.lazy`. Các test này chốt đúng một
@@ -64,24 +64,22 @@ describe("App", () => {
   it("đường dẫn /mcp mở màn MCP", async () => {
     window.history.pushState({}, "", "/mcp");
     renderApp();
-    expect(await screen.findByRole("heading", { name: "MCP server" }, lazyTimeout)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "MCP servers" }, lazyTimeout)).toBeInTheDocument();
   });
 
   it("đường dẫn /memory mở màn Bộ nhớ", async () => {
     window.history.pushState({}, "", "/memory");
     renderApp();
-    expect(await screen.findByRole("heading", { name: /Bộ nhớ/ }, lazyTimeout)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Memory/ }, lazyTimeout)).toBeInTheDocument();
   });
 
   it("đường dẫn /status mở màn Trạng thái", async () => {
     window.history.pushState({}, "", "/status");
     renderApp();
     // Khớp **tiêu đề trang** (`status.title`), không phải nhãn nav: `nav.status`
-    // là "Trạng thái" còn tiêu đề là "Trạng thái hệ thống" — đây là hai chỗ
+    // là "Status" còn tiêu đề là "System status" — đây là hai chỗ
     // khác nhau có chủ đích, test phải trỏ đúng chỗ.
-    expect(
-      await screen.findByRole("heading", { name: /Trạng thái hệ thống/ }, lazyTimeout),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /System status/ }, lazyTimeout)).toBeInTheDocument();
   });
 
   it("đường dẫn /audit mở màn Nhật ký", async () => {

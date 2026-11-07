@@ -25,7 +25,7 @@ describe("UsageBars", () => {
   it("tổng và ngày cao nhất đọc được bằng cả mắt lẫn màn hình", () => {
     renderManagement(<UsageBars days={threeDays} budget={1_000_000} />);
     expect(screen.getByText("5,200")).toBeInTheDocument();
-    expect(screen.getByText("Ngày cao nhất")).toBeInTheDocument();
+    expect(screen.getByText("Peak day")).toBeInTheDocument();
     expect(screen.getByRole("img")).toHaveAccessibleName(/5,200/);
     expect(screen.getByRole("img")).toHaveAccessibleName(/4,000/);
   });
@@ -35,20 +35,22 @@ describe("UsageBars", () => {
     const bars = screen.getAllByTestId("usage-bar");
     expect(bars[1]?.className).toContain("bg-need");
     expect(bars[2]?.className).toContain("bg-live");
-    expect(screen.getByText(/Hạn mức 1,000,000\/ngày/)).toBeInTheDocument();
+    expect(screen.getByText(/Budget 1,000,000\/day/)).toBeInTheDocument();
   });
 
   it("ngày cuối vượt hạn mức thì báo vượt, không vẽ cột bình thường", () => {
     renderManagement(
       <UsageBars days={usageFixture([{ day: "2026-09-29", total: 2000 }]).days} budget={1000} />,
     );
-    expect(screen.getByText("Đã vượt ngân sách")).toBeInTheDocument();
-    expect(screen.queryByText(/Hạn mức/)).not.toBeInTheDocument();
+    expect(screen.getByText("Budget exceeded")).toBeInTheDocument();
+    // Ghim đủ chuỗi hạn mức thay vì /Budget/: bản vượt hạn mức ("Budget exceeded")
+    // cũng chứa "Budget" nên regex trần sẽ match nhầm.
+    expect(screen.queryByText(/Budget 1,000,000\/day/)).not.toBeInTheDocument();
   });
 
   it("không có ngày nào thì nói chưa có dữ liệu thay vì biểu đồ rỗng", () => {
     renderManagement(<UsageBars days={[]} budget={1000} />);
-    expect(screen.getByText("Chưa có dữ liệu token theo ngày.")).toBeInTheDocument();
+    expect(screen.getByText("No daily token data yet.")).toBeInTheDocument();
     expect(screen.queryByTestId("usage-bar")).not.toBeInTheDocument();
   });
 

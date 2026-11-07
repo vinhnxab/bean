@@ -15,7 +15,7 @@ describe("StatusPage", () => {
       }),
     );
     renderManagement(<StatusPage />);
-    expect(screen.getByRole("status")).toHaveTextContent("Đang tải");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
   });
 
   it("hiển thị version, model, ngân sách và channel", async () => {
@@ -45,7 +45,7 @@ describe("StatusPage", () => {
       http.get("/api/status", () => HttpResponse.json({ code: "boom", message: "no" }, { status: 500 })),
     );
     renderManagement(<StatusPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Đã xảy ra lỗi.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong.");
   });
 
   it("hiển thị xu hướng token 14 ngày cạnh số của hôm nay", async () => {
@@ -61,7 +61,7 @@ describe("StatusPage", () => {
     );
     renderManagement(<StatusPage />);
     expect(await screen.findAllByTestId("usage-bar")).toHaveLength(2);
-    expect(screen.getByText("Token 14 ngày")).toBeInTheDocument();
+    expect(screen.getByText("Tokens, last 14 days")).toBeInTheDocument();
     expect(screen.getByText("1,300")).toBeInTheDocument();
   });
 
@@ -70,7 +70,7 @@ describe("StatusPage", () => {
     expect(await screen.findByText("bean-sandbox:latest")).toBeInTheDocument();
     expect(screen.getByText("docker")).toBeInTheDocument();
     expect(screen.getByText("127.0.0.1:7878")).toBeInTheDocument();
-    expect(screen.getByText(/RBAC đang tắt/)).toBeInTheDocument();
+    expect(screen.getByText(/RBAC is off/)).toBeInTheDocument();
   });
 
   it("panel cấu hình chỉ in **tên** biến API key, không có chỗ cho giá trị", async () => {

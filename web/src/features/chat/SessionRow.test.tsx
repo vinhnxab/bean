@@ -43,7 +43,7 @@ function renderRow(overrides: Partial<SessionDto> = {}) {
  * trạng thái pointer còn sót, và đúng bằng cách người dùng thật mở menu.
  */
 async function pickAction(user: ReturnType<typeof userEvent.setup>, name: string) {
-  const trigger = screen.getByRole("button", { name: "Thao tác khác" });
+  const trigger = screen.getByRole("button", { name: "More actions" });
   trigger.focus();
   await user.keyboard("{Enter}");
   const item = await screen.findByRole("menuitem", { name });
@@ -61,11 +61,11 @@ describe("SessionRow menu", () => {
       }),
     );
     const user = renderRow();
-    await pickAction(user, "Đổi tên");
-    const input = screen.getByLabelText("Đổi tên");
+    await pickAction(user, "Rename");
+    const input = screen.getByLabelText("Rename");
     await user.clear(input);
     await user.type(input, "Ten moi");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await expect.poll(() => body, { timeout: 5000 }).toEqual({ title: "Ten moi", archived: null });
   });
 
@@ -78,7 +78,7 @@ describe("SessionRow menu", () => {
       }),
     );
     const user = renderRow();
-    await pickAction(user, "Lưu trữ");
+    await pickAction(user, "Archive");
     await expect.poll(() => body, { timeout: 5000 }).toEqual({ title: null, archived: true });
   });
 
@@ -91,7 +91,7 @@ describe("SessionRow menu", () => {
       }),
     );
     const user = renderRow({ archived: true });
-    await pickAction(user, "Bỏ lưu trữ");
+    await pickAction(user, "Unarchive");
     await expect.poll(() => body, { timeout: 5000 }).toEqual({ title: null, archived: false });
   });
 
@@ -104,10 +104,10 @@ describe("SessionRow menu", () => {
       }),
     );
     const user = renderRow();
-    await pickAction(user, "Xoá");
+    await pickAction(user, "Delete");
     await screen.findByRole("dialog");
     expect(called).toBe(false);
-    await user.click(screen.getByRole("button", { name: "Xoá" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await expect.poll(() => called, { timeout: 5000 }).toBe(true);
   });
 });

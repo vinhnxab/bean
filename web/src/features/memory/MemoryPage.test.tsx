@@ -16,7 +16,7 @@ describe("MemoryPage", () => {
       }),
     );
     renderManagement(<MemoryPage />);
-    expect(screen.getAllByText("Đang tải…").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Loading…").length).toBeGreaterThan(0);
   });
 
   it("hiển thị lỗi và yêu cầu xác nhận trước khi lưu", async () => {
@@ -31,13 +31,13 @@ describe("MemoryPage", () => {
     );
     const user = userEvent.setup();
     renderManagement(<MemoryPage />);
-    const editor = await screen.findByLabelText("Ghi chú hệ thống");
+    const editor = await screen.findByLabelText("System notes");
     await user.clear(editor);
     await user.paste("mới");
-    expect(screen.getAllByText("Thay đổi chưa lưu").length).toBeGreaterThan(0);
-    await user.click(screen.getAllByRole("button", { name: "Lưu thay đổi" })[0]);
-    expect(screen.getByRole("dialog")).toHaveTextContent("Xác nhận lưu bộ nhớ?");
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Lưu thay đổi" }));
+    expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Confirm memory save?");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(putCalled).toBe(true));
   });
   it("hiển thị lỗi khi tải file bộ nhớ", async () => {

@@ -31,10 +31,10 @@ describe("SettingsPage — Providers", () => {
     // Chỉ có TÊN biến môi trường; giá trị key không bao giờ xuất hiện.
     expect(screen.getByText("OPENROUTER_API_KEY")).toBeInTheDocument();
     // Trạng thái key xuất hiện 2 lần: card profile mặc định + panel thông tin.
-    expect(screen.getAllByText("Đã cấu hình trong môi trường")).toHaveLength(2);
+    expect(screen.getAllByText("Configured in the environment")).toHaveLength(2);
 
     // Lưu khoá khi chưa đổi: nút phải disabled.
-    expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("key thiếu trong môi trường là cảnh báo destructive, không phải lỗi im lặng", async () => {
@@ -43,7 +43,9 @@ describe("SettingsPage — Providers", () => {
     );
     renderProviders();
 
-    const warning = await screen.findByText("Chưa có trong môi trường — Bean sẽ không gọi được API");
+    const warning = await screen.findByText(
+      "Not present in the environment — Bean will not be able to call the API",
+    );
     expect(warning.className).toContain("text-destructive");
   });
 
@@ -64,7 +66,7 @@ describe("SettingsPage — Providers", () => {
     await screen.findByRole("option", { name: "model-b" });
     await user.click(screen.getByRole("option", { name: "model-b" }));
 
-    const save = screen.getByRole("button", { name: "Lưu" });
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeEnabled();
     await user.click(save);
 
@@ -91,10 +93,12 @@ describe("SettingsPage — Providers", () => {
     await user.keyboard("{Enter}");
     await screen.findByRole("option", { name: "model-c" });
     await user.click(screen.getByRole("option", { name: "model-c" }));
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Không lưu được. Kiểm tra model nằm trong danh sách");
+    expect(alert).toHaveTextContent(
+      "Could not save. Check the model is allowed, the profile exists, and the API key is set in the environment.",
+    );
     // Không có thông báo thành công song song với lỗi.
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
   });
@@ -102,17 +106,17 @@ describe("SettingsPage — Providers", () => {
   it("hiển thị danh sách profile: profile active có badge, profile khác có trạng thái key", async () => {
     renderProviders();
 
-    const group = await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    const group = await screen.findByRole("radiogroup", { name: "Providers" });
     expect(group).toBeInTheDocument();
-    // Profile mặc định active — radio được chọn và có badge "Đang dùng".
+    // Profile mặc định active — radio được chọn và có badge "In use".
     const defaultRadio = screen.getByRole("radio", { name: "default" });
     expect(defaultRadio).toBeChecked();
-    expect(screen.getByText("Đang dùng")).toBeInTheDocument();
+    expect(screen.getByText("In use")).toBeInTheDocument();
     // Profile ollama: base URL tự host + không cần key.
     expect(screen.getByText("openai_compat · http://localhost:11434/v1")).toBeInTheDocument();
-    expect(screen.getByText("Không cần API key (server tự host)")).toBeInTheDocument();
+    expect(screen.getByText("No API key needed (self-hosted)")).toBeInTheDocument();
     // Lưu khoá khi chưa đổi gì.
-    expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("chọn profile khác rồi Lưu: PUT /provider đúng body, UI phản chiếu snapshot mới", async () => {
@@ -142,7 +146,7 @@ describe("SettingsPage — Providers", () => {
     renderProviders();
 
     // Chọn profile ollama — danh sách model chuyển sang allowed_models của profile.
-    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    await screen.findByRole("radiogroup", { name: "Providers" });
     await user.click(screen.getByRole("radio", { name: "ollama" }));
     const select = screen.getByRole("combobox", { name: "Model" });
     select.focus();
@@ -152,7 +156,7 @@ describe("SettingsPage — Providers", () => {
     expect(screen.queryByRole("option", { name: "model-a" })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await screen.findByRole("status");
     // Không chọn model: gửi null = dùng model mặc định của profile (serde → None).
@@ -160,7 +164,7 @@ describe("SettingsPage — Providers", () => {
     // Badge chuyển sang ollama — UI phản chiếu snapshot server trả về.
     expect(screen.getByRole("radio", { name: "ollama" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "default" })).not.toBeChecked();
-    const badges = screen.getAllByText("Đang dùng");
+    const badges = screen.getAllByText("In use");
     expect(badges).toHaveLength(1);
   });
 
@@ -185,14 +189,14 @@ describe("SettingsPage — Providers", () => {
     );
     renderProviders();
 
-    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    await screen.findByRole("radiogroup", { name: "Providers" });
     await user.click(screen.getByRole("radio", { name: "ollama" }));
     const select = screen.getByRole("combobox", { name: "Model" });
     select.focus();
     await user.keyboard("{Enter}");
     await screen.findByRole("option", { name: "qwen3:32b" });
     await user.click(screen.getByRole("option", { name: "qwen3:32b" }));
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await screen.findByRole("status");
     expect(sent).toEqual({ profile: "ollama", model: "qwen3:32b" });
@@ -210,16 +214,18 @@ describe("SettingsPage — Providers", () => {
     );
     renderProviders();
 
-    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
+    await screen.findByRole("radiogroup", { name: "Providers" });
     await user.click(screen.getByRole("radio", { name: "ollama" }));
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Không lưu được. Kiểm tra model nằm trong danh sách");
-    // Form giữ lựa chọn của người dùng để sửa lại; badge "Đang dùng" vẫn trên profile
+    expect(alert).toHaveTextContent(
+      "Could not save. Check the model is allowed, the profile exists, and the API key is set in the environment.",
+    );
+    // Form giữ lựa chọn của người dùng để sửa lại; badge "In use" vẫn trên profile
     // mặc định vì snapshot server không đổi sau lỗi.
     expect(screen.getByRole("radio", { name: "ollama" })).toBeChecked();
-    expect(screen.getAllByText("Đang dùng")).toHaveLength(1);
+    expect(screen.getAllByText("In use")).toHaveLength(1);
   });
 
   it("profile thiếu key trong môi trường: cảnh báo destructive ngay trên card", async () => {
@@ -236,7 +242,9 @@ describe("SettingsPage — Providers", () => {
     renderProviders();
 
     // Chỉ card ollama thiếu key; panel thông tin (profile active) vẫn key OK.
-    const warnings = await screen.findAllByText("Chưa có trong môi trường — Bean sẽ không gọi được API");
+    const warnings = await screen.findAllByText(
+      "Not present in the environment — Bean will not be able to call the API",
+    );
     expect(warnings).toHaveLength(1);
     expect(warnings[0].className).toContain("text-destructive");
   });
@@ -246,11 +254,11 @@ describe("SettingsPage — Providers CRUD", () => {
   it("profile mặc định không có nút sửa/xoá; có nút thêm profile", async () => {
     renderProviders();
 
-    await screen.findByRole("radiogroup", { name: "Nhà cung cấp" });
-    expect(screen.getByRole("button", { name: "Thêm profile" })).toBeInTheDocument();
+    await screen.findByRole("radiogroup", { name: "Providers" });
+    expect(screen.getByRole("button", { name: "Add profile" })).toBeInTheDocument();
     // Chỉ card ollama có nút sửa/xoá — default là ánh xạ của [llm], read-only.
-    expect(screen.getAllByRole("button", { name: "Sửa profile" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Xoá profile" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Edit profile" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete profile" })).toHaveLength(1);
   });
 
   it("thêm profile: POST đúng body, card mới xuất hiện, thông báo thành công", async () => {
@@ -284,12 +292,12 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Thêm profile" }));
+    await user.click(await screen.findByRole("button", { name: "Add profile" }));
     const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText("Tên profile"), "openrouter");
+    await user.type(within(dialog).getByLabelText("Profile name"), "openrouter");
     await user.type(within(dialog).getByLabelText("Model"), "anthropic/claude-sonnet-5");
-    await user.type(within(dialog).getByLabelText("Biến môi trường API key"), "OPENROUTER_API_KEY");
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.type(within(dialog).getByLabelText("API key environment variable"), "OPENROUTER_API_KEY");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(sent).not.toBeNull());
     expect(sent).toEqual({
@@ -305,7 +313,7 @@ describe("SettingsPage — Providers CRUD", () => {
     // Dialog đóng sau thành công; snapshot mới có card openrouter (radio).
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(await screen.findByRole("radio", { name: "openrouter" })).toBeInTheDocument();
-    expect(screen.getByText("Đã thêm profile vào bean.toml.")).toBeInTheDocument();
+    expect(screen.getByText("Profile added to bean.toml.")).toBeInTheDocument();
   });
 
   it("thêm profile với key dán trực tiếp: POST chứa api_key, card hiển thị hint 4 ký tự cuối", async () => {
@@ -339,19 +347,19 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Thêm profile" }));
+    await user.click(await screen.findByRole("button", { name: "Add profile" }));
     const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByLabelText("Tên profile"), "paid-key");
+    await user.type(within(dialog).getByLabelText("Profile name"), "paid-key");
     await user.type(within(dialog).getByLabelText("Model"), "m");
     const keyInput = within(dialog).getByLabelText("API key");
     expect(keyInput).toHaveAttribute("type", "password");
     await user.type(keyInput, "sk-test-abcd");
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(sent).not.toBeNull());
     expect(sent).toMatchObject({ api_key: "sk-test-abcd" });
     // Key nguyên vẹn không bao giờ hiển thị lại — chỉ hint 4 ký tự cuối.
-    expect(await screen.findByText("Đã lưu trực tiếp trong bean.toml (••••abcd)")).toBeInTheDocument();
+    expect(await screen.findByText("Stored directly in bean.toml (••••abcd)")).toBeInTheDocument();
     expect(screen.queryByText("sk-test-abcd")).not.toBeInTheDocument();
   });
 
@@ -373,19 +381,19 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Sửa profile" }));
+    await user.click(await screen.findByRole("button", { name: "Edit profile" }));
     const dialog = await screen.findByRole("dialog");
     // Không có ô "Tên profile" khi sửa — tên là định danh lấy từ đường dẫn.
-    expect(within(dialog).queryByLabelText("Tên profile")).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Profile name")).not.toBeInTheDocument();
     const modelInput = within(dialog).getByLabelText("Model");
     await user.clear(modelInput);
     await user.type(modelInput, "qwen3:32b");
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(sent).not.toBeNull());
     expect(path).toBe("ollama");
     expect(sent).toMatchObject({ provider: "openai_compat", model: "qwen3:32b", api_key: null });
-    expect(await screen.findByText("Đã cập nhật profile trong bean.toml.")).toBeInTheDocument();
+    expect(await screen.findByText("Profile updated in bean.toml.")).toBeInTheDocument();
   });
 
   it("sửa profile có key đã lưu: ô trống giữ nguyên key (Keep), placeholder hiện hint", async () => {
@@ -407,17 +415,17 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Sửa profile" }));
+    await user.click(await screen.findByRole("button", { name: "Edit profile" }));
     const dialog = await screen.findByRole("dialog");
     // Placeholder phản chiếu key đã lưu — người dùng biết để trống là giữ nguyên.
     expect(within(dialog).getByLabelText("API key")).toHaveAttribute(
       "placeholder",
-      "Đã lưu ••••abcd — để trống giữ nguyên",
+      "Saved ••••abcd — leave empty to keep it",
     );
-    expect(within(dialog).getByRole("button", { name: "Xoá key đã lưu" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Clear stored key" })).toBeInTheDocument();
 
     // Submit không dán gì ⇒ api_key: null = Keep (không xoá key đã lưu).
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(sent).not.toBeNull());
     expect(sent).toMatchObject({ api_key: null });
   });
@@ -441,13 +449,13 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Sửa profile" }));
+    await user.click(await screen.findByRole("button", { name: "Edit profile" }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Xoá key đã lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Clear stored key" }));
 
     const keyInput = within(dialog).getByLabelText("API key");
     expect(keyInput).toBeDisabled();
-    await user.click(within(dialog).getByRole("button", { name: "Lưu" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(sent).not.toBeNull());
     expect(sent).toMatchObject({ api_key: "" });
@@ -467,12 +475,12 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Xoá profile" }));
+    await user.click(await screen.findByRole("button", { name: "Delete profile" }));
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("Xoá profile?");
-    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+    expect(dialog).toHaveTextContent("Delete profile?");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    expect(await screen.findByText("Đã xoá profile khỏi bean.toml.")).toBeInTheDocument();
+    expect(await screen.findByText("Profile removed from bean.toml.")).toBeInTheDocument();
     expect(deleted).toBe("ollama");
     expect(screen.queryByRole("radio", { name: "ollama" })).not.toBeInTheDocument();
   });
@@ -489,9 +497,9 @@ describe("SettingsPage — Providers CRUD", () => {
     );
     renderProviders();
 
-    await user.click(await screen.findByRole("button", { name: "Xoá profile" }));
+    await user.click(await screen.findByRole("button", { name: "Delete profile" }));
     const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Xoá" }));
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "profile đang active — hãy chuyển sang profile khác trước",
@@ -520,15 +528,15 @@ describe("SettingsPage — Voice", () => {
   it("hiển thị trạng thái: provider (nhãn Select), ngôn ngữ (input), switch phản chiếu enabled", async () => {
     renderVoice();
 
-    expect(await screen.findByText("Giọng nói (push-to-talk)")).toBeInTheDocument();
+    expect(await screen.findByText("Voice (push-to-talk)")).toBeInTheDocument();
     // Radix portal nhãn của item được chọn vào trigger kể cả khi đóng.
-    expect(screen.getByRole("combobox", { name: "Nhà cung cấp STT/TTS" })).toHaveTextContent(
-      "Local — whisper + Piper trên máy",
+    expect(screen.getByRole("combobox", { name: "STT/TTS provider" })).toHaveTextContent(
+      "Local — whisper + Piper on this machine",
     );
     expect(screen.getByDisplayValue("vi")).toBeInTheDocument();
     // Fixture mặc định: configured, đang tắt.
-    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).not.toBeChecked();
-    expect(screen.getByText("Đang tắt")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Toggle voice" })).not.toBeChecked();
+    expect(screen.getByText("Off")).toBeInTheDocument();
   });
 
   it("bật voice: PATCH gửi cả cấu hình đang hiển thị, switch cập nhật theo snapshot server", async () => {
@@ -551,14 +559,14 @@ describe("SettingsPage — Voice", () => {
     );
     renderVoice();
 
-    const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
+    const toggle = await screen.findByRole("switch", { name: "Toggle voice" });
     await user.click(toggle);
 
     // Một PATCH = toàn bộ trạng thái form + giá trị enabled mới (không có key vì
     // provider local — dán key chỉ áp dụng cho chế độ api).
     await waitFor(() => expect(sent).toEqual({ enabled: true, provider: "local", language: "vi" }));
-    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
-    expect(screen.getByText("Đang bật")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Toggle voice" })).toBeChecked();
+    expect(screen.getByText("On")).toBeInTheDocument();
   });
 
   it("server từ chối (422 voice_state_unwritable): alert lỗi, switch giữ nguyên", async () => {
@@ -573,11 +581,11 @@ describe("SettingsPage — Voice", () => {
     );
     renderVoice();
 
-    const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
+    const toggle = await screen.findByRole("switch", { name: "Toggle voice" });
     await user.click(toggle);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("không ghi được file trạng thái voice");
-    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Toggle voice" })).not.toBeChecked();
   });
 
   it("chưa cấu hình [voice]: switch bị khoá, form vẫn hiện để cấu hình tại chỗ", async () => {
@@ -603,17 +611,17 @@ describe("SettingsPage — Voice", () => {
     );
     renderVoice();
 
-    const toggle = await screen.findByRole("switch", { name: "Bật/tắt giọng nói" });
+    const toggle = await screen.findByRole("switch", { name: "Toggle voice" });
     expect(toggle).toBeDisabled();
-    expect(screen.getByText("Chưa cấu hình")).toBeInTheDocument();
+    expect(screen.getByText("Not configured")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Chưa cấu hình đủ — chọn nhà cung cấp và nhập key (hoặc khai báo model local trong bean.toml) ngay tại đây, không cần khởi động lại Bean.",
+        "Voice is not fully configured — pick a provider and enter a key (or declare local models in bean.toml) right here, no restart needed.",
       ),
     ).toBeInTheDocument();
     // Form cấu hình vẫn hiện được (đó là cách cấu hình chính); nút Lưu bị khoá vì
     // form chưa dirty (provider/language vẫn bằng seed) — không có gì để lưu.
-    expect(screen.getByRole("button", { name: "Lưu và bật" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save & enable" })).toBeDisabled();
     // disabled ⇒ không thể click; guard phòng hờ: PATCH không bao giờ được gọi.
     await user.click(toggle);
     await waitFor(() => expect(patchCount).toBe(0));
@@ -636,18 +644,18 @@ describe("SettingsPage — Voice", () => {
     );
     renderVoice();
 
-    expect(await screen.findByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Toggle voice" })).toBeChecked();
     expect(
-      screen.getByText("Bản ghi âm sẽ được gửi lên ElevenLabs để nhận dạng/phát âm thanh."),
+      screen.getByText("Recordings are sent to ElevenLabs for transcription and synthesis."),
     ).toBeInTheDocument();
     // Key đã lưu: ô nhập hiện placeholder "đã lưu", KHÔNG bao giờ chứa giá trị key.
-    expect(screen.getByLabelText("API key ElevenLabs")).toHaveAttribute(
+    expect(screen.getByLabelText("ElevenLabs API key")).toHaveAttribute(
       "placeholder",
-      "Đã lưu key — để trống giữ nguyên",
+      "Key stored — leave empty to keep it",
     );
     // Hai ô Voice ID (mặc định + tiếng Việt) phản chiếu giá trị server.
-    expect(screen.getByLabelText("Voice ID ElevenLabs (mặc định)")).toHaveValue("voice-default");
-    expect(screen.getByLabelText("Voice ID tiếng Việt (tuỳ chọn)")).toHaveValue("voice-vi");
+    expect(screen.getByLabelText("ElevenLabs voice ID (default)")).toHaveValue("voice-default");
+    expect(screen.getByLabelText("Vietnamese voice ID (optional)")).toHaveValue("voice-vi");
   });
 
   it("đổi sang ElevenLabs, dán key rồi Lưu và bật: PATCH đúng body, key không bị echo", async () => {
@@ -682,13 +690,13 @@ describe("SettingsPage — Voice", () => {
     );
     renderVoice();
 
-    const providerSelect = await screen.findByRole("combobox", { name: "Nhà cung cấp STT/TTS" });
+    const providerSelect = await screen.findByRole("combobox", { name: "STT/TTS provider" });
     providerSelect.focus();
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("option", { name: "ElevenLabs API (đám mây)" }));
+    await user.click(await screen.findByRole("option", { name: "ElevenLabs API (cloud)" }));
 
-    await user.type(screen.getByLabelText("API key ElevenLabs"), "sk-test-1234abcd");
-    await user.click(screen.getByRole("button", { name: "Lưu và bật" }));
+    await user.type(screen.getByLabelText("ElevenLabs API key"), "sk-test-1234abcd");
+    await user.click(screen.getByRole("button", { name: "Save & enable" }));
 
     await waitFor(() =>
       expect(sent).toEqual({
@@ -701,12 +709,12 @@ describe("SettingsPage — Voice", () => {
       }),
     );
     // Snapshot server (api_key_set: true) cập nhật switch và placeholder key.
-    expect(screen.getByRole("switch", { name: "Bật/tắt giọng nói" })).toBeChecked();
-    expect(screen.getByLabelText("API key ElevenLabs")).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "Toggle voice" })).toBeChecked();
+    expect(screen.getByLabelText("ElevenLabs API key")).toHaveAttribute(
       "placeholder",
-      "Đã lưu key — để trống giữ nguyên",
+      "Key stored — leave empty to keep it",
     );
-    expect(await screen.findByRole("status")).toHaveTextContent("Đã lưu cấu hình giọng nói.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Voice settings saved.");
   });
 
   it("chế độ api chưa có key: nút Lưu và công tắc bị khoá, không gửi PATCH", async () => {
@@ -732,13 +740,13 @@ describe("SettingsPage — Voice", () => {
     );
     renderVoice();
 
-    const providerSelect = await screen.findByRole("combobox", { name: "Nhà cung cấp STT/TTS" });
+    const providerSelect = await screen.findByRole("combobox", { name: "STT/TTS provider" });
     providerSelect.focus();
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("option", { name: "ElevenLabs API (đám mây)" }));
+    await user.click(await screen.findByRole("option", { name: "ElevenLabs API (cloud)" }));
 
-    expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
-    const toggle = screen.getByRole("switch", { name: "Bật/tắt giọng nói" });
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    const toggle = screen.getByRole("switch", { name: "Toggle voice" });
     expect(toggle).toBeDisabled();
     await user.click(toggle);
     await waitFor(() => expect(patchCount).toBe(0));

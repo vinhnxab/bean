@@ -70,9 +70,9 @@ describe("HUB", () => {
     expect(screen.getByTestId("hub-edge-reviews")).toBeInTheDocument();
     expect(screen.getByTestId("hub-edge-alerts")).toBeInTheDocument();
     // Nhãn nói rõ cảnh báo đi thẳng tới người dùng, không qua Manager (D14.11).
-    expect(screen.getByText(/đi thẳng tới bạn, không qua Manager/)).toBeInTheDocument();
+    expect(screen.getByText(/bypassing the Manager/)).toBeInTheDocument();
     // Nhãn four-eyes nói rõ không tự duyệt.
-    expect(screen.getByText(/không agent nào tự duyệt/)).toBeInTheDocument();
+    expect(screen.getByText(/no agent approves its own work/)).toBeInTheDocument();
   });
 
   it("đặt agent review và agent cảnh báo vào đúng vùng của chúng", async () => {
@@ -115,7 +115,7 @@ describe("HUB", () => {
     expect(within(feed).getByText("tool_0")).toBeInTheDocument();
     expect(within(feed).queryByText("tool_5")).not.toBeInTheDocument();
     // Có lối sang màn Audit đầy đủ, vì widget cố tình không đủ dữ liệu.
-    expect(within(feed).getByRole("link", { name: /Xem toàn bộ/ })).toBeInTheDocument();
+    expect(within(feed).getByRole("link", { name: /See all/ })).toBeInTheDocument();
   });
 
   it("bảng hệ thống lấy số thật từ tools, MCP và usage", async () => {
@@ -180,8 +180,8 @@ describe("HUB", () => {
   it("trạng thái rỗng là lời mời hành động kèm mascot, không phải dòng xám", async () => {
     testServer.use(agentsHandler([]));
     renderHub();
-    expect(await screen.findByText("Chưa có agent nào đang chạy")).toBeInTheDocument();
-    expect(screen.getByText(/Khi bạn giao việc/)).toBeInTheDocument();
+    expect(await screen.findByText("No agent is running")).toBeInTheDocument();
+    expect(screen.getByText(/Give Bean a task/)).toBeInTheDocument();
   });
 
   it("mọi node agent đều mang nhãn trạng thái bằng chữ, không chỉ bằng màu", async () => {
@@ -189,10 +189,10 @@ describe("HUB", () => {
     renderHub();
     await screen.findByTestId("agent-node-developer");
     // Người mù màu phải đọc được: mỗi node có badge chữ tương ứng trạng thái.
-    // Dùng `getAllByText` vì "Rảnh" xuất hiện ở nhiều node — đó là đúng.
-    expect(screen.getAllByText("Đang chạy").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Rảnh").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Chờ bạn duyệt").length).toBeGreaterThan(0);
+    // Dùng `getAllByText` vì "Idle" xuất hiện ở nhiều node — đó là đúng.
+    expect(screen.getAllByText("Running").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Idle").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Waiting for you").length).toBeGreaterThan(0);
     // Số badge bằng số node: mỗi agent có đúng một nhãn trạng thái.
     const nodes = document.querySelectorAll("[data-testid^='agent-node-']");
     expect(nodes.length).toBe(4);

@@ -36,9 +36,9 @@ describe("ConfirmCard", () => {
     );
 
     expect(screen.getByText(/rm -rf \/tmp\/demo/)).toBeInTheDocument();
-    expect(screen.getByText("Nguy hiểm")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cho phép trong phiên" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cho phép" })).not.toHaveFocus();
+    expect(screen.getByText("Dangerous")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow for this session" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow" })).not.toHaveFocus();
   });
 
   it("đếm ngược, khoá sau khi hết hạn và không tự focus nút cho phép", () => {
@@ -54,7 +54,7 @@ describe("ConfirmCard", () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByRole("button", { name: "Cho phép" })).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Allow" })).not.toHaveFocus();
     act(() => vi.advanceTimersByTime(1_100));
     expect(onExpire).toHaveBeenCalledWith("confirm-1");
   });
@@ -70,8 +70,8 @@ describe("ConfirmCard", () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText("Đã cho phép")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cho phép" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Từ chối" })).not.toBeInTheDocument();
+    expect(screen.getByText("Allowed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
   });
 });

@@ -24,7 +24,7 @@ describe("TasksPage", () => {
       http.get("/api/tasks", () => HttpResponse.json({ code: "boom", message: "no" }, { status: 500 })),
     );
     renderManagement(<TasksPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Đã xảy ra lỗi.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong.");
   });
 
   it("tạo và bật/tắt tác vụ", async () => {
@@ -44,10 +44,10 @@ describe("TasksPage", () => {
     const user = userEvent.setup();
     renderManagement(<TasksPage />);
     expect(await screen.findByText("Tóm tắt hôm nay")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Tắt" }));
+    await user.click(screen.getByRole("button", { name: "Disable" }));
     await waitFor(() => expect(toggled).toEqual({ enabled: false }));
     await user.type(screen.getByLabelText("Prompt"), "Tạo task mới");
-    await user.click(screen.getByRole("button", { name: "Tạo tác vụ" }));
+    await user.click(screen.getByRole("button", { name: "Create task" }));
     await waitFor(() => expect(created).toMatchObject({ prompt: "Tạo task mới", cron: "0 9 * * *" }));
   });
   it("hiển thị trạng thái tải", () => {
@@ -58,6 +58,6 @@ describe("TasksPage", () => {
       }),
     );
     renderManagement(<TasksPage />);
-    expect(screen.getByText("Đang tải…")).toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 });

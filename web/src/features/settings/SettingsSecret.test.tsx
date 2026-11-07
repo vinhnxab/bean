@@ -27,10 +27,10 @@ async function fillSecret(
   value: string,
   password: string = PASSWORD,
 ) {
-  const valueInput = screen.getByLabelText("Giá trị mới");
+  const valueInput = screen.getByLabelText("New value");
   await user.clear(valueInput);
   await user.type(valueInput, value);
-  const passwordInput = screen.getByLabelText("Mật khẩu hiện tại");
+  const passwordInput = screen.getByLabelText("Current password");
   await user.clear(passwordInput);
   await user.type(passwordInput, password);
 }
@@ -39,28 +39,28 @@ describe("SecretField — ô nhập secret write-only", () => {
   it("slot chưa đặt: hiển thị 'Chưa đặt', không có ô nhập, không lộ giá trị", () => {
     renderManagement(<SecretField slot={slot({ set: false, source: "unset" })} />);
 
-    expect(screen.getByText("Chưa đặt")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Giá trị mới")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Thêm" })).toBeInTheDocument();
+    expect(screen.getByText("Not set")).toBeInTheDocument();
+    expect(screen.queryByLabelText("New value")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
     expect(screen.queryByText("sk-test")).not.toBeInTheDocument();
   });
 
   it("slot đã đặt từ secrets.env: hiển thị nguồn, nút Thay/Xoá", () => {
     renderManagement(<SecretField slot={slot({ set: true, source: "secrets_env" })} />);
 
-    expect(screen.getByText("Đã đặt")).toBeInTheDocument();
+    expect(screen.getByText("Set")).toBeInTheDocument();
     expect(screen.getByText("secrets.env")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Thay" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Xoá" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("slot bị env ghi đè: khóa nhập và hiện giải thích", () => {
     renderManagement(<SecretField slot={slot({ set: true, source: "env", shadowed_by_env: true })} />);
 
-    expect(screen.getByText("biến môi trường")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Thay" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Xoá" })).toBeDisabled();
-    expect(screen.getByText("Khóa — giá trị đang bị biến môi trường ghi đè.")).toBeInTheDocument();
+    expect(screen.getByText("environment variable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+    expect(screen.getByText("Locked — value is overridden by environment variable.")).toBeInTheDocument();
   });
 
   it("lưu thành công: xóa nhập, hiện 'Đã lưu'", async () => {
@@ -83,12 +83,12 @@ describe("SecretField — ô nhập secret write-only", () => {
     const user = userEvent.setup();
     renderManagement(<SecretField slot={current} />);
 
-    await user.click(screen.getByRole("button", { name: "Thêm" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
     await fillSecret(user, "sk-test-123");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(screen.getByText("Đã lưu.")).toBeInTheDocument());
-    expect(screen.queryByLabelText("Giá trị mới")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Saved.")).toBeInTheDocument());
+    expect(screen.queryByLabelText("New value")).not.toBeInTheDocument();
   });
 
   it("sai mật khẩu: 401 hiện lỗi, không lưu", async () => {
@@ -104,9 +104,9 @@ describe("SecretField — ô nhập secret write-only", () => {
     const user = userEvent.setup();
     renderManagement(<SecretField slot={slot({ set: false })} />);
 
-    await user.click(screen.getByRole("button", { name: "Thêm" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
     await fillSecret(user, "sk-test-123");
-    await user.click(screen.getByRole("button", { name: "Lưu" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("mật khẩu không đúng"));
   });
@@ -123,11 +123,11 @@ describe("SecretField — ô nhập secret write-only", () => {
     const user = userEvent.setup();
     renderManagement(<SecretField slot={current} />);
 
-    await user.click(screen.getByRole("button", { name: "Xoá" }));
-    await user.type(screen.getByLabelText("Mật khẩu hiện tại"), PASSWORD);
-    await user.click(screen.getByRole("button", { name: "Xoá" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.type(screen.getByLabelText("Current password"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
-    await waitFor(() => expect(screen.getByText("Đã xoá.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Deleted.")).toBeInTheDocument());
   });
 });
 
@@ -147,8 +147,8 @@ describe("ConnectionTestButton — kiểm tra kết nối", () => {
     const user = userEvent.setup();
     renderManagement(<ConnectionTestButton target="voice" />);
 
-    await user.click(screen.getByRole("button", { name: "Kiểm tra kết nối" }));
-    await waitFor(() => expect(screen.getByText("Cảnh báo")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => expect(screen.getByText("Warning")).toBeInTheDocument());
     expect(screen.getByText("voice: provider `local` không kiểm tra được qua HTTP")).toBeInTheDocument();
   });
 });

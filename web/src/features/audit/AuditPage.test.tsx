@@ -33,7 +33,7 @@ describe("AuditPage", () => {
     const user = userEvent.setup();
     renderManagement(<AuditPage />);
     expect(await screen.findByText(/file-0/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Tải thêm" }));
+    await user.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => expect(screen.getByText(/file-25/)).toBeInTheDocument());
   });
 
@@ -42,7 +42,7 @@ describe("AuditPage", () => {
       http.get("/api/audit", () => HttpResponse.json({ code: "boom", message: "no" }, { status: 500 })),
     );
     renderManagement(<AuditPage />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Đã xảy ra lỗi.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong.");
   });
   it("hiển thị trạng thái tải", () => {
     testServer.use(
@@ -52,6 +52,6 @@ describe("AuditPage", () => {
       }),
     );
     renderManagement(<AuditPage />);
-    expect(screen.getByText("Đang tải…")).toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 });

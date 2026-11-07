@@ -23,7 +23,7 @@ describe("SkillsPage", () => {
       </Routes>,
       ["/skills"],
     );
-    expect(screen.getAllByRole("status")[0]).toHaveTextContent("Đang tải");
+    expect(screen.getAllByRole("status")[0]).toHaveTextContent("Loading…");
   });
 
   it("tải danh sách và mở nội dung skill", async () => {
@@ -91,13 +91,13 @@ describe("SkillsPage", () => {
       ["/skills"],
     );
 
-    expect(await screen.findByText(/Có đề xuất skill mới/)).toBeInTheDocument();
+    expect(await screen.findByText(/proposed a new skill/)).toBeInTheDocument();
     expect(screen.getByText(/Quy trình lặp lại/)).toBeInTheDocument();
     expect(screen.getByText(/# Checklist/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bỏ" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Duyệt" }));
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve" }));
     await waitFor(() => {
-      expect(screen.queryByText(/Có đề xuất skill mới/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/proposed a new skill/)).not.toBeInTheDocument();
     });
   });
 
@@ -112,6 +112,6 @@ describe("SkillsPage", () => {
       </Routes>,
       ["/skills"],
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("Đã xảy ra lỗi.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong.");
   });
 });

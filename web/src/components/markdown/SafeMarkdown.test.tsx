@@ -16,7 +16,9 @@ describe("SafeMarkdown", () => {
     expect(document.querySelector("script")).toBeNull();
     expect(document.querySelector("img")).toBeNull();
     expect(screen.queryByRole("link", { name: /bad/ })).toBeNull();
-    expect(screen.getByText(/Ảnh từ xa/)).toBeInTheDocument();
+    // Neo đầu chuỗi: câu cảnh báo tiếng Anh ("Remote images are not loaded…") cũng
+    // chứa "Remote image" nên regex trần sẽ match cả khung cảnh báo.
+    expect(screen.getByText(/^Remote image:/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /ok/ })).toHaveAttribute("href", "https://example.com/docs");
     expect(screen.getByRole("link", { name: /ok/ })).toHaveAttribute("rel", "noopener noreferrer");
   });
@@ -42,7 +44,7 @@ describe("SafeMarkdown — khối code", () => {
     );
     // Tên ngôn ngữ phải đọc được TRƯỚC khi đọc code — đó là lý do có header.
     expect(screen.getByText("python")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sao chép mã" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeInTheDocument();
   });
 
   it("gắn nhãn 'văn bản thuần' khi khối không có ngôn ngữ", () => {
@@ -51,7 +53,7 @@ describe("SafeMarkdown — khối code", () => {
         <SafeMarkdown>{"```\nplain\n```"}</SafeMarkdown>
       </I18nProvider>,
     );
-    expect(screen.getByText("văn bản thuần")).toBeInTheDocument();
+    expect(screen.getByText("plain text")).toBeInTheDocument();
   });
 
   it("không hiện nút thu gọn với khối ngắn, nhưng thu gọn khối dài và báo số dòng ẩn", async () => {
@@ -62,7 +64,7 @@ describe("SafeMarkdown — khối code", () => {
         <SafeMarkdown>{short}</SafeMarkdown>
       </I18nProvider>,
     );
-    expect(screen.queryByRole("button", { name: "Mở rộng khối mã" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Expand code block" })).not.toBeInTheDocument();
 
     // 30 dòng: dài hơn ngưỡng 12 nên phải thu gọn và nói rõ còn bao nhiêu dòng.
     const long = `\`\`\`rust\n${Array.from({ length: 30 }, (_, i) => `let x = ${i};`).join("\n")}\n\`\`\``;
@@ -71,11 +73,14 @@ describe("SafeMarkdown — khối code", () => {
         <SafeMarkdown>{long}</SafeMarkdown>
       </I18nProvider>,
     );
-    expect(screen.getByText("18 dòng ẩn")).toBeInTheDocument();
+    expect(screen.getByText("18 hidden lines")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Mở rộng khối mã" }));
-    expect(screen.queryByText("18 dòng ẩn")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Thu gọn khối mã" })).toHaveAttribute("aria-expanded", "true");
+    await user.click(screen.getByRole("button", { name: "Expand code block" }));
+    expect(screen.queryByText("18 hidden lines")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse code block" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it("dòng cuối bị cắt vẫn hiện đủ, không mất ký tự UTF-8", () => {

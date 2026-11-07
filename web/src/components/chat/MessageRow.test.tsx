@@ -17,7 +17,7 @@ describe("MessageRow", () => {
       </MessageRow>,
     );
     // Nhãn lấy từ phần tử chứa tên + giờ, không phải từ toàn bộ nội dung tin.
-    const region = screen.getByRole("article", { name: /Bạn/ });
+    const region = screen.getByRole("article", { name: /You/ });
     expect(region).toBeInTheDocument();
     expect(screen.getByText("Xin chào")).toBeInTheDocument();
   });
@@ -39,7 +39,7 @@ describe("MessageRow", () => {
           Kết quả
         </MessageRow>,
       );
-      const button = screen.getByRole("button", { name: "Sao chép tin nhắn" });
+      const button = screen.getByRole("button", { name: "Copy message" });
       // Bàn phím không có hover: nút vẫn phải focus được bằng Tab.
       button.focus();
       expect(button).toHaveFocus();
@@ -56,7 +56,7 @@ describe("MessageRow", () => {
         <span />
       </MessageRow>,
     );
-    expect(screen.getByRole("button", { name: "Sao chép tin nhắn" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Copy message" })).toBeDisabled();
   });
 
   it("đổi nhãn Bean theo vai trò, không dùng chung nhãn chung chung", () => {
@@ -73,7 +73,7 @@ describe("MessageRow", () => {
         </MessageRow>
       </I18nProvider>,
     );
-    expect(screen.getByRole("article", { name: /Bạn/ })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: /You/ })).toBeInTheDocument();
   });
 });
 
@@ -89,6 +89,6 @@ describe("MessageRow — an toàn", () => {
 
   it("vô hiệu hoá nút sao chép khi tin chỉ có khoảng trắng", () => {
     renderRow(<MessageRow author="assistant">{"  "}</MessageRow>);
-    expect(screen.getByRole("button", { name: "Sao chép tin nhắn" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Copy message" })).toBeDisabled();
   });
 });

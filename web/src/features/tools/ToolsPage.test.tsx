@@ -7,7 +7,7 @@ import { ToolsPage } from "@/features/tools/ToolsPage";
 import { renderManagement } from "@/test/management";
 import { TOOLS_FIXTURE, testServer } from "@/test/server";
 
-const SEARCH_PLACEHOLDER = "Tìm theo tên, mô tả hoặc tag";
+const SEARCH_PLACEHOLDER = "Search by name, description or tag";
 
 describe("ToolsPage", () => {
   it("hiển thị tool, mô tả model đang đọc, tag và nguồn MCP", async () => {
@@ -21,16 +21,16 @@ describe("ToolsPage", () => {
     expect(screen.getByText("dev-write")).toBeInTheDocument();
     // Mọi tool đọc nội dung ngoài đều phải gắn nhãn "không tin cậy": UI phải escape
     // và mọi tool Confirm phải hỏi lại sau khi thấy nó (mục 15.4 của spec).
-    expect(screen.getAllByText("Nội dung không tin cậy")).toHaveLength(3);
-    expect(screen.getAllByText("Cần xác nhận")).toHaveLength(3);
+    expect(screen.getAllByText("Untrusted content")).toHaveLength(3);
+    expect(screen.getAllByText("Confirmation required")).toHaveLength(3);
   });
 
   it("nói thẳng RBAC đang cắt danh sách, không để người dùng tưởng registry có ít tool", async () => {
     testServer.use(http.get("/api/tools", () => HttpResponse.json(TOOLS_FIXTURE)));
     renderManagement(<ToolsPage />);
     await screen.findByText("read_file");
-    expect(screen.getByText(/finance-readonly được phép thấy 3\/5/)).toBeInTheDocument();
-    expect(screen.getByText("Tool bạn thấy")).toBeInTheDocument();
+    expect(screen.getByText(/finance-readonly may see 3 of 5/)).toBeInTheDocument();
+    expect(screen.getByText("Tools you can see")).toBeInTheDocument();
   });
 
   it("lọc chỉ là tiện ích: không gọi lại API và không lộ tool bị RBAC ẩn", async () => {
@@ -64,23 +64,23 @@ describe("ToolsPage", () => {
     renderManagement(<ToolsPage />);
     await screen.findByText("read_file");
     await user.type(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), "khong-ton-tai");
-    expect(await screen.findByText("Không có kết quả")).toBeInTheDocument();
-    expect(screen.queryByText(/Registry trống/)).not.toBeInTheDocument();
+    expect(await screen.findByText("No matches")).toBeInTheDocument();
+    expect(screen.queryByText(/registry is empty/)).not.toBeInTheDocument();
   }, 15000);
 
   it("registry trống thì chỉ thẳng chỗ cấu hình", async () => {
     renderManagement(<ToolsPage />);
-    expect(await screen.findByText("Không có tool nào")).toBeInTheDocument();
-    expect(screen.getByText(/Registry trống/)).toBeInTheDocument();
+    expect(await screen.findByText("No tools")).toBeInTheDocument();
+    expect(screen.getByText(/registry is empty/)).toBeInTheDocument();
   });
 
   it("hiển thị đúng trạng thái bật/tắt từng tool", async () => {
     testServer.use(http.get("/api/tools", () => HttpResponse.json(TOOLS_FIXTURE)));
     renderManagement(<ToolsPage />);
     await screen.findByText("read_file");
-    expect(screen.getAllByText("Đang bật")).toHaveLength(2);
-    expect(screen.getByText("Đang tắt")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Bật/tắt tool run_shell" })).toHaveAttribute(
+    expect(screen.getAllByText("Enabled")).toHaveLength(2);
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Enable/disable tool run_shell" })).toHaveAttribute(
       "aria-checked",
       "false",
     );
@@ -99,7 +99,7 @@ describe("ToolsPage", () => {
     renderManagement(<ToolsPage />);
     await screen.findByText("read_file");
 
-    const switchInput = screen.getByRole("switch", { name: "Bật/tắt tool run_shell" });
+    const switchInput = screen.getByRole("switch", { name: "Enable/disable tool run_shell" });
     expect(switchInput).toBeDisabled();
     await user.click(switchInput);
     expect(toggles).toBe(0);
@@ -130,10 +130,10 @@ describe("ToolsPage", () => {
     await screen.findByText("read_file");
     expect(toolLists).toBe(1);
 
-    await user.click(screen.getByRole("switch", { name: "Bật/tắt tool run_shell" }));
+    await user.click(screen.getByRole("switch", { name: "Enable/disable tool run_shell" }));
     expect(toggles).toBe(1);
     // Mutation thành công → invalidate → nạp lại danh sách (GET thứ hai).
-    expect(await screen.findByText("Đang tắt")).toBeInTheDocument();
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
     expect(toolLists).toBe(2);
   });
 });

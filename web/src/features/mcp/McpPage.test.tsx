@@ -17,16 +17,16 @@ describe("McpPage", () => {
     expect(screen.getByText("docker run --rm siem-mcp")).toBeInTheDocument();
     expect(screen.getByText("/usr/local/bin/weather-mcp")).toBeInTheDocument();
 
-    expect(screen.getByText("Đã kết nối")).toBeInTheDocument();
-    expect(screen.getByText("Chưa kết nối")).toBeInTheDocument();
-    expect(screen.getByText("4 tool")).toBeInTheDocument();
-    expect(screen.getByText("0 tool")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+    expect(screen.getByText("4 tools")).toBeInTheDocument();
+    expect(screen.getByText("0 tools")).toBeInTheDocument();
 
     // trust=false → mỗi lời gọi phải xác nhận; trust=true → chạy thẳng (Safe).
-    expect(screen.getByText("Mỗi lời gọi phải xác nhận")).toBeInTheDocument();
-    expect(screen.getByText("Tool chạy thẳng (Safe)")).toBeInTheDocument();
-    expect(screen.getByText("300 giây")).toBeInTheDocument();
-    expect(screen.getByText("Mặc định 60 giây")).toBeInTheDocument();
+    expect(screen.getByText("Every call needs confirmation")).toBeInTheDocument();
+    expect(screen.getByText("Tools run directly (Safe)")).toBeInTheDocument();
+    expect(screen.getByText("300 seconds")).toBeInTheDocument();
+    expect(screen.getByText("Default 60 seconds")).toBeInTheDocument();
     expect(screen.getByText("infra-read")).toBeInTheDocument();
   });
 
@@ -34,14 +34,14 @@ describe("McpPage", () => {
     testServer.use(http.get("/api/mcp", () => HttpResponse.json(MCP_FIXTURE)));
     renderManagement(<McpPage />);
     await screen.findByText("siem");
-    expect(screen.getByText(/không phải kiểm tra sống\/chết/)).toBeInTheDocument();
+    expect(screen.getByText(/not a liveness check/)).toBeInTheDocument();
   });
 
   it("không có server nào thì hướng dẫn cách khai báo", async () => {
     renderManagement(<McpPage />);
-    expect(await screen.findByText("Chưa có MCP server nào")).toBeInTheDocument();
+    expect(await screen.findByText("No MCP servers")).toBeInTheDocument();
     expect(screen.getByText(/bean\.toml/)).toBeInTheDocument();
-    expect(screen.queryByText(/Đã kết nối/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connected/)).not.toBeInTheDocument();
   });
 
   it("lỗi API hiển thị dạng alert, không im lặng", async () => {
