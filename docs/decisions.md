@@ -710,3 +710,28 @@ báo lỗi rõ ràng thay vì trang lỗi trắng của trình duyệt.
 (212 test, gồm 9 test chiến lược SW và 5 test đăng ký) + `pnpm build` xanh;
 `curl` server thật xác nhận `/manifest.webmanifest` trả
 `application/manifest+json`, mọi file PWA `no-cache`, `/api/*` vẫn 404 JSON.
+
+
+
+## 21. LAN Access — bật/tắt truy cập mạng LAN từ UI (D21.x — 2026-11-07)
+
+Bean thêm card **LAN Access** trong màn Cài đặt → Nâng cao: bật/tắt truy cập từ
+mạng nội bộ (`web.bind`, `web.public_origin`, `web.allow_remote`) ngay trên UI,
+thay vì sửa tay `bean.toml` rồi `beanctl restart`. Server tự dò IPv4 LAN bằng
+trick UDP connect (không gửi packet), port giữ nguyên từ cấu hình đang chạy.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D21.1 | Ba khoá tầng B `web.*` được sửa từ UI **như một ngoại lệ có kiểm soát** so với M29 (tầng B CLI-only) | Người chủ dự án yêu cầu tùy chọn UI; sửa tay toml + restart mỗi lần đổi là ma sát vận hành thật. Bù bằng đúng lớp bảo mật của secrets: chỉ admin (RBAC), **step-up mật khẩu** (D19.5, dùng chung rate-limiter login), audit một event `config.set` cho mỗi khoá, hiệu lực sau `beanctl restart` (banner pending restart tái dụng). | Khoá tầng B khác vẫn CLI-only; REST `PATCH /api/settings` tiếp tục trả `403 cli_only` cho chúng. |
+| D21.2 | Ghi **atomic cả ba khoá** qua `SettingsService::set_many` (một lượt `toml_edit`, validate một lần) | `Config::validate()` từ chối bind ngoài loopback khi `allow_remote = false` — ghi lẻ từng khoá luôn kẹt ở trạng thái nửa chừng. `set_many` toàn bộ hoặc không khoá nào. | `set_many` chỉ nhận khoá `bean.toml` (khoá state không cần atomic) — bị từ chối bằng error. |
+| D21.3 | Khi **tắt** LAN, `public_origin` luôn về `http://127.0.0.1:{port}` — không bao giờ giữ IP LAN | Origin là lớp chống CSRF/CSWSH (mục 15.7); giữ IP LAN khi bind đã về loopback tạo cấu hình dư và gây hiểu nhầm nguồn sự thật. | `lan_ip` trong DTO GET vẫn hiển thị IP dò được (thông tin, không phải trạng thái). |
+| D21.4 | Dò IP LAN bằng UDP connect tới 8.8.8.8/1.1.1.1 rồi đọc `local_addr()` — **không gửi packet**, không cần dependency | Kernel tự chọn đường ra; rẻ, chính xác cho trường hợp một NIC LAN phổ biến. Không dò được ⇒ **fail-closed** (422 `lan_ip_unavailable`), không bao giờ bind `0.0.0.0` mù. | Máy nhiều NIC sẽ chọn theo default route — đổi bind tay vẫn được qua `bean config set` như cũ. |
+| D21.5 | LAN http **không mã hoá** — UI hiện cảnh báo rõ trong form bật; khuyến nghị reverse proxy TLS/Tailscale (mục 23) không đổi | Mục đích là tiện truy cập điện thoại/máy khác trong mạng nhà; người dùng tự chịu rủi ro mạng. | Mật khẩu phiên đi qua LAN dưới dạng cookie thường (chưa `Secure` vì origin http) — chỉ bật trên mạng tin cậy. |
+
+**Kiểm chứng:** `cargo test --workspace` (mới có 2 test `set_many` ở bean-settings
+và 6 test `/api/settings/lan-access` ở bean-web: 401, 403 admin, 401 sai mật
+khẩu, ghi atomic + audit khi tắt LAN, enable fail-closed khi không dò được IP,
+503 config_readonly) + `cargo clippy --workspace --all-targets -D warnings` +
+`pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (217 test, gồm 5
+test card LAN) + `pnpm build` xanh; test kiến trúc 600-dòng vẫn pass (handler
+LAN tách riêng `rest_lan_access.rs`).

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ChangePasswordRequest,
+  LanAccessRequest,
   LlmModelUpdateRequest,
   LlmProviderCreateRequest,
   LlmProviderSwitchRequest,
@@ -59,6 +60,30 @@ export function usePatchSetting() {
       if (request.key.endsWith("_env") || request.key.endsWith("_TOKEN")) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.secrets });
       }
+    },
+  });
+}
+
+/** Trạng thái LAN access (D21.x) — chế độ hiện hành, IP LAN, cổng, URL. */
+export function useLanAccess() {
+  return useQuery({
+    queryKey: queryKeys.lanAccess,
+    queryFn: ({ signal }) => api.lanAccess(signal),
+  });
+}
+
+/**
+ * Bật/tắt truy cập LAN (D21.x): server ghi atomic 3 khoá tầng B `web.*` sau
+ * step-up mật khẩu. Vô hiệu cả `settings` — banner pending restart của panel
+ * Advanced đọc từ bảng thiết lập, và cả `lanAccess` để switch về đúng trạng thái.
+ */
+export function useSetLanAccess() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: LanAccessRequest) => api.setLanAccess(request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.lanAccess });
     },
   });
 }

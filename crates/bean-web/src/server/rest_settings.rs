@@ -333,7 +333,7 @@ async fn test_search(state: &WebState) -> ProbeOutcome {
 // ────────────────── Helpers dùng chung ──────────────────
 
 /// Gate admin cho mọi mutation — cùng quy tắc với toggle tool (mẫu `rest_audit_tools`).
-fn require_admin(state: &WebState, user_id: &str) -> Result<(), ApiFailure> {
+pub(super) fn require_admin(state: &WebState, user_id: &str) -> Result<(), ApiFailure> {
     let permissions = state.config.permissions_for(user_id);
     if state.config.rbac_enabled() && permissions.role != "admin" {
         return Err(ApiFailure::new(
@@ -347,7 +347,7 @@ fn require_admin(state: &WebState, user_id: &str) -> Result<(), ApiFailure> {
 
 /// IP thật từ `ConnectInfo` (không tin header `X-Forwarded-For`) — fallback loopback
 /// cho test `oneshot`, cùng mẫu với `login`.
-fn peer_ip(peer: &Option<Extension<ConnectInfo<SocketAddr>>>) -> IpAddr {
+pub(super) fn peer_ip(peer: &Option<Extension<ConnectInfo<SocketAddr>>>) -> IpAddr {
     peer.as_ref().map_or(
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         |Extension(ConnectInfo(peer))| peer.ip(),
@@ -355,7 +355,7 @@ fn peer_ip(peer: &Option<Extension<ConnectInfo<SocketAddr>>>) -> IpAddr {
 }
 
 /// Step-up mật khẩu; lỗi ánh xạ thẳng sang HTTP, chi tiết lỗi auth giữ kín.
-fn step_up(state: &WebState, password: &str, ip: IpAddr) -> Result<(), ApiFailure> {
+pub(super) fn step_up(state: &WebState, password: &str, ip: IpAddr) -> Result<(), ApiFailure> {
     state
         .auth
         .verify_step_up(password, ip, state.audit.as_deref())
@@ -402,7 +402,7 @@ fn secret_store_of(state: &WebState) -> Result<Arc<bean_settings::SecretStore>, 
 /// Audit log **bắt buộc** cho mutation: dùng log của state, hoặc tự mở từ đĩa
 /// (`data.dir/audit` — cùng vị trí `serve` đã mở); không có gì cả ⇒ 503, không ghi
 /// âm thầm (M29 mục 4.3).
-fn required_audit(state: &WebState) -> Result<Arc<AuditLog>, ApiFailure> {
+pub(super) fn required_audit(state: &WebState) -> Result<Arc<AuditLog>, ApiFailure> {
     if let Some(audit) = state.audit.as_ref() {
         return Ok(Arc::clone(audit));
     }
@@ -431,7 +431,7 @@ fn record_secret_audit(audit: &AuditLog, user_id: &str, event: &'static str, nam
 }
 
 /// Từ chối khoá lạ với đúng gợi ý của CLI `bean config set` (mẫu `config_cmd`).
-fn unknown_setting_failure(key: &str) -> ApiFailure {
+pub(super) fn unknown_setting_failure(key: &str) -> ApiFailure {
     let looks_like_env_name = !key.contains('.')
         && key.chars().next().is_some_and(|c| c.is_ascii_uppercase())
         && key
@@ -454,7 +454,7 @@ fn unknown_setting_failure(key: &str) -> ApiFailure {
 
 /// Lỗi `SettingsError` → HTTP: sai tham số/cấu hình bị từ chối là 422 kèm lý do;
 /// lỗi đĩa/audit là 500 (thông điệp chỉ vào log, không lộ đường dẫn hệ thống).
-fn map_settings_error(error: SettingsError) -> ApiFailure {
+pub(super) fn map_settings_error(error: SettingsError) -> ApiFailure {
     match &error {
         SettingsError::UnknownSetting { .. }
         | SettingsError::InvalidSetting { .. }
@@ -472,7 +472,7 @@ fn map_settings_error(error: SettingsError) -> ApiFailure {
     }
 }
 
-fn config_readonly() -> ApiFailure {
+pub(super) fn config_readonly() -> ApiFailure {
     ApiFailure::new(
         StatusCode::SERVICE_UNAVAILABLE,
         "config_readonly",

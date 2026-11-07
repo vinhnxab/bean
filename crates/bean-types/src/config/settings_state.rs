@@ -351,7 +351,7 @@ mod tests {
         let merged = SettingsState::load(&target).unwrap();
         assert_eq!(merged.llm_profile, "nvidia");
         assert_eq!(merged.llm_model, "z-ai/glm-5.3-flash");
-        assert_eq!(merged.voice_enabled, true);
+        assert!(merged.voice_enabled);
         assert_eq!(merged.voice_provider, Some(SpeechProviderKind::Api));
         assert_eq!(merged.voice_language.as_deref(), Some("vi"));
         assert_eq!(merged.voice_tts_voice_id.as_deref(), Some("voice-1"));

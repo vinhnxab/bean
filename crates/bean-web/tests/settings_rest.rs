@@ -707,3 +707,219 @@ async fn settings_test_requires_admin_under_rbac() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(code_of(&json), "admin_required");
 }
+
+// ────────────────── /api/settings/lan-access (D21.x) ──────────────────
+
+const BEAN_TOML_LAN: &str = concat!(
+    "[agent]\nworkspace = \"./workspace\"\n\n",
+    "[web]\nbind = \"0.0.0.0:7878\"\nallow_remote = true\n",
+    "public_origin = \"http://192.168.1.29:7878\"\n"
+);
+
+/// Cùng thuật toán dò IP LAN với handler — để test quyết định kỳ vọng theo máy
+/// chạy (có đường ra ⇒ bật LAN được; không ⇒ server phải trả 422 fail-closed).
+fn probe_lan_ipv4() -> Option<std::net::Ipv4Addr> {
+    for probe in ["8.8.8.8:80", "1.1.1.1:443"] {
+        let Ok(socket) = std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)) else {
+            continue;
+        };
+        if socket.connect(probe).is_err() {
+            continue;
+        }
+        let Ok(local) = socket.local_addr() else {
+            continue;
+        };
+        if let std::net::IpAddr::V4(ip) = local.ip()
+            && !ip.is_loopback()
+        {
+            return Some(ip);
+        }
+    }
+    None
+}
+
+#[tokio::test]
+async fn lan_access_requires_login() {
+    let (_dir, _toml, app) = fixture(None);
+    let (status, _) = request_json(&app, "GET", "/api/settings/lan-access", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        None,
+        Some(r#"{"enabled":true,"password":"x"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn lan_access_requires_admin_under_rbac() {
+    let (_dir, _toml, app) = fixture(Some(("dev", "dev")));
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":false,"password":"irrelevant"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(code_of(&json), "admin_required");
+    // GET vẫn được — chỉ đọc.
+    let (status, _) =
+        request_json(&app, "GET", "/api/settings/lan-access", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn lan_access_rejects_wrong_password() {
+    let (_dir, config_toml, app) = fixture(None);
+    std::fs::write(&config_toml, BEAN_TOML_LAN).unwrap();
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":false,"password":"wrong password entirely"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(code_of(&json), "invalid_password");
+    // File không được đụng.
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(
+        written.contains("0.0.0.0:7878"),
+        "file phải còn nguyên: {written}"
+    );
+}
+
+#[tokio::test]
+async fn lan_access_disable_writes_loopback_atomically_and_audits() {
+    let (dir, config_toml, app) = fixture(None);
+    std::fs::write(&config_toml, BEAN_TOML_LAN).unwrap();
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":false,"password":"correct horse battery staple"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json.get("restart_required"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    let access = json.get("access").unwrap();
+    assert_eq!(
+        access.get("mode").and_then(serde_json::Value::as_str),
+        Some("loopback")
+    );
+    assert_eq!(access.get("port"), Some(&serde_json::json!(7878)));
+    assert_eq!(access.get("url"), Some(&serde_json::Value::Null));
+
+    // Cả ba khoá phải đổi cùng lúc trong file.
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(
+        written.contains("127.0.0.1:7878"),
+        "bind phải về loopback: {written}"
+    );
+    assert!(
+        written.contains("allow_remote = false"),
+        "phải tắt remote: {written}"
+    );
+    assert!(
+        written.contains("http://127.0.0.1:7878"),
+        "public_origin phải về loopback: {written}"
+    );
+
+    // Audit: một event `config.set` cho mỗi khoá, không chứa giá trị.
+    let data = dir.path().join("data");
+    let audit = AuditLog::open(&data.join("audit")).unwrap();
+    let entries = audit.read_recent(None, 100);
+    let config_sets = entries
+        .iter()
+        .filter(|entry| entry.get("tool").and_then(serde_json::Value::as_str) == Some("config.set"))
+        .count();
+    assert_eq!(config_sets, 3, "mỗi khoá một event: {entries:?}");
+    let raw = serde_json::to_string(&entries).unwrap();
+    assert!(
+        !raw.contains("192.168"),
+        "audit không được chứa giá trị: {raw}"
+    );
+}
+
+#[tokio::test]
+async fn lan_access_enable_uses_detected_lan_or_fails_closed() {
+    let (_dir, config_toml, app) = fixture(None);
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":true,"password":"correct horse battery staple"}"#),
+    )
+    .await;
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    match probe_lan_ipv4() {
+        None => {
+            // Không có đường ra — server phải từ chối bật (fail-closed), không ghi.
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(code_of(&json), "lan_ip_unavailable");
+            assert!(
+                !written.contains("0.0.0.0"),
+                "không được ghi bind LAN khi không dò được IP: {written}"
+            );
+        }
+        Some(ip) => {
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(
+                json.get("access")
+                    .and_then(|a| a.get("mode"))
+                    .and_then(serde_json::Value::as_str),
+                Some("lan")
+            );
+            assert!(
+                written.contains("0.0.0.0:7878"),
+                "bind phải mở LAN: {written}"
+            );
+            assert!(
+                written.contains("allow_remote = true"),
+                "phải bật remote: {written}"
+            );
+            let expected = format!("http://{ip}:7878");
+            assert!(
+                written.contains(&expected),
+                "public_origin phải theo IP LAN {ip}: {written}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn lan_access_is_readonly_without_config_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config = config_for(&data, &workspace, None);
+    let app = build(config, None);
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":true,"password":"correct horse battery staple"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(code_of(&json), "config_readonly");
+}

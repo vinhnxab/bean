@@ -491,6 +491,7 @@ Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thự
 | `PUT /api/secrets/:name` | `{value, password}` — step-up D19.5 (M29) |
 | `DELETE /api/secrets/:name` | `{password}` (M29) |
 | `POST /api/settings/test/:target` | `llm` \| `voice` \| `telegram` \| `search`: kiểm tra kết nối, lỗi đã redact (M29) |
+| `GET/POST /api/settings/lan-access` | Bật/tắt truy cập mạng LAN: tự dò IP LAN, ghi atomic 3 khoá tầng B `web.*` qua `set_many` — admin + step-up mật khẩu, hiệu lực sau restart (D21.x) |
 | `POST /api/auth/change-password` | `{current, new}`; huỷ các phiên web khác (M29 Q1) |
 
 ### 11.2 WebSocket `/api/ws`

@@ -1075,37 +1075,95 @@ impl SettingsService {
         entry: &SettingEntry,
         value: &SettingValue,
     ) -> Result<(), SettingsError> {
-        let mut doc = self.load_doc()?;
-        let mut parts: Vec<&str> = entry.path.split('.').collect();
-        let Some(key) = parts.pop() else {
-            return Err(SettingsError::InvalidSetting {
-                key: entry.path.to_string(),
-                reason: "đường dẫn khoá rỗng".to_string(),
-            });
-        };
-        let table =
-            nested_table(doc.as_table_mut(), &parts).ok_or_else(|| SettingsError::Toml {
-                path: self.config_path.clone(),
-                reason: format!("không tạo được bảng cho `{}`", parts.join(".")),
-            })?;
-        if let Some(mut new_item) = toml_item(value) {
-            // `insert` thay cả item — chuyển decor của giá trị cũ (khoảng trắng và
-            // comment cuối dòng) sang giá trị mới, nếu không người dùng mất comment
-            // ngay trên dòng bị sửa. Decor của key (comment đứng trên) không đụng tới.
-            if let Some(new_value) = new_item.as_value_mut()
-                && let Some(old_value) = table.get(key).and_then(toml_edit::Item::as_value)
-            {
-                let old_decor = old_value.decor();
-                if let Some(prefix) = old_decor.prefix() {
-                    new_value.decor_mut().set_prefix(prefix.clone());
-                }
-                if let Some(suffix) = old_decor.suffix() {
-                    new_value.decor_mut().set_suffix(suffix.clone());
-                }
+        self.apply_toml_writes(std::slice::from_ref(&(entry, value)))
+    }
+
+    /// Ghi nhiều khoá `bean.toml` trong **một** lượt đụng đĩa, validate **một** lần
+    /// sau khi sửa xong — toàn bộ hoặc không khoá nào. Cần cho các chuyển đổi mà
+    /// từng khoá riêng lẻ đều rơi vào trạng thái nửa chừng bị `validate()` từ chối
+    /// (ví dụ bật LAN: `allow_remote = true` khi bind còn loopback là lỗi, và
+    /// `bind = 0.0.0.0` khi `allow_remote` còn false cũng là lỗi).
+    ///
+    /// # Errors
+    /// Khoá không thuộc `bean.toml` (state) → [`SettingsError::InvalidSetting`]
+    /// (khoá state không cần atomic, không đưa vào đây); giá trị/file sai hoặc
+    /// cấu hình mới không đạt validate → như [`Self::set`]; đĩa lỗi → `Io`/`Toml`.
+    pub fn set_many(
+        &self,
+        writes: &[(&SettingEntry, SettingValue)],
+        audit: &AuditLog,
+        actor: &str,
+    ) -> Result<(), SettingsError> {
+        if writes.is_empty() {
+            return Ok(());
+        }
+        for (entry, _) in writes {
+            if entry.store != SettingStore::BeanToml {
+                return Err(SettingsError::InvalidSetting {
+                    key: entry.path.to_string(),
+                    reason: "set_many chỉ ghi khoá bean.toml — khoá state không cần atomic"
+                        .to_string(),
+                });
             }
-            table.insert(key, new_item);
-        } else {
-            table.remove(key);
+        }
+        let old_sources: Vec<SettingSource> = writes
+            .iter()
+            .map(|(entry, _)| self.source_of(entry))
+            .collect();
+        let borrowed: Vec<(&SettingEntry, &SettingValue)> = writes
+            .iter()
+            .map(|(entry, value)| (*entry, value))
+            .collect();
+        self.apply_toml_writes(&borrowed)?;
+        // File đã ghi thành công — giờ mới audit, một event cho mỗi khoá để giữ
+        // đúng định dạng `config.set` như khi ghi lẻ.
+        for ((entry, _), old_source) in writes.iter().zip(old_sources) {
+            let new_source = self.source_of(entry);
+            self.write_audit(audit, actor, entry, "config.set", old_source, new_source)?;
+        }
+        Ok(())
+    }
+
+    /// Cốt lõi ghi `bean.toml` cho một hoặc nhiều khoá: sửa bằng `toml_edit` (giữ
+    /// decor của giá trị cũ), parse lại toàn bộ file thành `Config` + `validate()`
+    /// một lần — chỉ ghi đĩa khi hợp lệ.
+    fn apply_toml_writes(
+        &self,
+        writes: &[(&SettingEntry, &SettingValue)],
+    ) -> Result<(), SettingsError> {
+        let mut doc = self.load_doc()?;
+        for (entry, value) in writes {
+            let mut parts: Vec<&str> = entry.path.split('.').collect();
+            let Some(key) = parts.pop() else {
+                return Err(SettingsError::InvalidSetting {
+                    key: entry.path.to_string(),
+                    reason: "đường dẫn khoá rỗng".to_string(),
+                });
+            };
+            let table =
+                nested_table(doc.as_table_mut(), &parts).ok_or_else(|| SettingsError::Toml {
+                    path: self.config_path.clone(),
+                    reason: format!("không tạo được bảng cho `{}`", parts.join(".")),
+                })?;
+            if let Some(mut new_item) = toml_item(value) {
+                // `insert` thay cả item — chuyển decor của giá trị cũ (khoảng trắng và
+                // comment cuối dòng) sang giá trị mới, nếu không người dùng mất comment
+                // ngay trên dòng bị sửa. Decor của key (comment đứng trên) không đụng tới.
+                if let Some(new_value) = new_item.as_value_mut()
+                    && let Some(old_value) = table.get(key).and_then(toml_edit::Item::as_value)
+                {
+                    let old_decor = old_value.decor();
+                    if let Some(prefix) = old_decor.prefix() {
+                        new_value.decor_mut().set_prefix(prefix.clone());
+                    }
+                    if let Some(suffix) = old_decor.suffix() {
+                        new_value.decor_mut().set_suffix(suffix.clone());
+                    }
+                }
+                table.insert(key, new_item);
+            } else {
+                table.remove(key);
+            }
         }
         // Validate file sau khi sửa — cấu hình sai bị từ chối ngay, không đợi lần
         // khởi động sau mới chết (M29 mục 4.3).
@@ -1650,6 +1708,135 @@ mod tests {
         let value = parse_value(entry, "khong-phai-socket-addr").unwrap();
         assert!(store.set(entry, value, &audit, "test:actor").is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn set_many_enables_lan_in_one_validate_where_single_sets_are_rejected() {
+        // Từng khoá riêng lẻ đều rơi vào trạng thái nửa chừng bị validate từ chối:
+        // bind ngoài loopback + allow_remote=false là lỗi thật (allow_remote=true khi
+        // bind còn loopback chỉ là warning), nên một lượt set lẻ không đủ — chỉ
+        // set_many (atomic) chuyển đổi gọn gàng cả hai chiều.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(&dir, "[agent]\nworkspace = \"./workspace\"\n");
+        let initial = std::fs::read_to_string(&path).unwrap();
+        let store = service(&path);
+        let audit = AuditLog::open(dir.path()).unwrap();
+        let bind = lookup("web.bind").unwrap();
+        let allow_remote = lookup("web.allow_remote").unwrap();
+        let public_origin = lookup("web.public_origin").unwrap();
+
+        let bind_lan = parse_value(bind, "0.0.0.0:7878").unwrap();
+        assert!(
+            store
+                .set(bind, bind_lan.clone(), &audit, "test:actor")
+                .is_err(),
+            "bind ngoài loopback khi allow_remote=false phải bị từ chối"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            initial,
+            "set bị từ chối không được đụng file"
+        );
+
+        let remote_on = parse_value(allow_remote, "true").unwrap();
+        store
+            .set_many(
+                &[
+                    (allow_remote, remote_on),
+                    (bind, bind_lan),
+                    (
+                        public_origin,
+                        parse_value(public_origin, "http://192.168.1.29:7878").unwrap(),
+                    ),
+                ],
+                &audit,
+                "test:actor",
+            )
+            .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("0.0.0.0:7878"),
+            "thiếu bind LAN: {written}"
+        );
+        assert!(
+            written.contains("allow_remote = true"),
+            "thiếu allow_remote: {written}"
+        );
+        assert!(
+            written.contains("http://192.168.1.29:7878"),
+            "thiếu public_origin: {written}"
+        );
+
+        // Đường về lại loopback cũng phải atomic: bind về loopback khi
+        // allow_remote còn true là trạng thái nửa chừng bị từ chối.
+        store
+            .set_many(
+                &[
+                    (
+                        public_origin,
+                        parse_value(public_origin, "http://127.0.0.1:7878").unwrap(),
+                    ),
+                    (bind, parse_value(bind, "127.0.0.1:7878").unwrap()),
+                    (allow_remote, parse_value(allow_remote, "false").unwrap()),
+                ],
+                &audit,
+                "test:actor",
+            )
+            .unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("127.0.0.1:7878"),
+            "phải về loopback: {written}"
+        );
+        assert!(
+            written.contains("allow_remote = false"),
+            "phải tắt remote: {written}"
+        );
+
+        // Audit: một event `config.set` cho mỗi khoá đã ghi, không chứa giá trị.
+        let entries = audit.read_recent(None, 100);
+        let config_sets = entries
+            .iter()
+            .filter(|entry| {
+                entry.get("tool").and_then(serde_json::Value::as_str) == Some("config.set")
+            })
+            .count();
+        assert_eq!(
+            config_sets, 6,
+            "mỗi khoá mỗi lần set_many một event: {entries:?}"
+        );
+        let raw = serde_json::to_string(&entries).unwrap();
+        assert!(
+            !raw.contains("192.168"),
+            "audit không được chứa giá trị: {raw}"
+        );
+    }
+
+    #[test]
+    fn set_many_rejects_state_keys_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(&dir, "[agent]\nworkspace = \"./workspace\"\n");
+        let before = std::fs::read_to_string(&path).unwrap();
+        let store = service(&path);
+        let audit = AuditLog::open(dir.path()).unwrap();
+
+        // llm.model là khoá SettingsState — set_many từ chối, file nguyên vẹn.
+        let model = lookup("llm.model").unwrap();
+        let bind = lookup("web.bind").unwrap();
+        let result = store.set_many(
+            &[
+                (bind, parse_value(bind, "127.0.0.1:7878").unwrap()),
+                (model, parse_value(model, "m2").unwrap()),
+            ],
+            &audit,
+            "test:actor",
+        );
+        assert!(result.is_err(), "khoá state không được phép vào set_many");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        assert!(
+            audit.read_recent(None, 100).is_empty(),
+            "không được ghi audit"
+        );
     }
 
     #[test]

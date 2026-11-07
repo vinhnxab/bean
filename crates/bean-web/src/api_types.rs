@@ -1322,3 +1322,40 @@ pub struct SettingsTestResponse {
     /// Gợi ý xử lý khi có vấn đề.
     pub hint: Option<String>,
 }
+
+/// `GET /api/settings/lan-access` — trạng thái truy cập mạng LAN (D21.x).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct LanAccessDto {
+    /// `"loopback"` (mặc định, chỉ máy local) hoặc `"lan"` (mở cho mạng nội bộ).
+    pub mode: String,
+    /// IPv4 LAN dò được trên máy server (UDP connect, không gửi packet), nếu có.
+    pub lan_ip: Option<String>,
+    /// Cổng HTTP hiện hành của server.
+    pub port: u16,
+    /// URL dùng khi bật LAN (`http://{lan_ip}:{port}`); `None` ở chế độ loopback.
+    pub url: Option<String>,
+}
+
+/// `POST /api/settings/lan-access` — bật/tắt truy cập LAN (D21.x): yêu cầu mật
+/// khẩu hiện tại (step-up như secrets D19.5).
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct LanAccessRequest {
+    /// `true` = mở bind `0.0.0.0` + `public_origin` theo IP LAN; `false` = về loopback.
+    pub enabled: bool,
+    /// Mật khẩu hiện tại để xác minh step-up.
+    pub password: String,
+}
+
+/// Kết quả ghi LAN access — trạng thái sau ghi (như GET) + cờ restart.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct LanAccessMutateResponse {
+    /// Trạng thái LAN access sau khi ghi.
+    pub access: LanAccessDto,
+    /// Luôn `true` — cả ba khoá `web.*` đều `apply = restart`, phải
+    /// `scripts/beanctl restart` mới có hiệu lực.
+    pub restart_required: bool,
+}

@@ -6,6 +6,9 @@ import type {
   ChangePasswordResponse,
   CreateSessionRequest,
   DeleteResponse,
+  LanAccessDto,
+  LanAccessMutateResponse,
+  LanAccessRequest,
   LlmConfigResponse,
   LlmModelUpdateRequest,
   LlmModelUpdateResponse,
@@ -379,6 +382,24 @@ export const api = {
    */
   patchSetting: (request: SettingsPatchRequest) =>
     requestJson<SettingsPatchResponse>("/api/settings", { method: "PATCH", body: request }),
+
+  /**
+   * Trạng thái truy cập LAN (D21.x): chế độ hiện hành, IP LAN dò được trên server,
+   * cổng và URL. Chỉ đọc, mọi user đã đăng nhập.
+   */
+  lanAccess: (signal?: AbortSignal) => requestJson<LanAccessDto>("/api/settings/lan-access", { signal }),
+
+  /**
+   * Bật/tắt truy cập LAN (D21.x): ghi atomic 3 khoá tầng B `web.*` — cần mật khẩu
+   * (step-up) và chỉ admin. Hiệu lực sau `scripts/beanctl restart`. Lỗi: 401
+   * `invalid_password`, 403 `admin_required`, 422 `lan_ip_unavailable`,
+   * 503 `config_readonly`/`audit_unavailable`.
+   */
+  setLanAccess: (request: LanAccessRequest) =>
+    requestJson<LanAccessMutateResponse>("/api/settings/lan-access", {
+      method: "POST",
+      body: request,
+    }),
 
   /**
    * Secret slot: **không bao giờ** có giá trị — chỉ `set`/`source` và cờ bị env che.

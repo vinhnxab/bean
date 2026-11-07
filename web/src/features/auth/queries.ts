@@ -41,6 +41,8 @@ export const queryKeys = {
   llmConfig: ["llm-config"] as const,
   /** Bảng thiết lập thống nhất (M29) — schema + giá trị hiệu lực, không secret. */
   settings: ["settings"] as const,
+  /** Trạng thái LAN access (D21.x) — chế độ, IP LAN dò được, cổng, URL. */
+  lanAccess: ["lan-access"] as const,
   /** Secret slot (M29) — chỉ cờ `set`/`source`, không giá trị nên cache được. */
   secrets: ["secrets"] as const,
 };
