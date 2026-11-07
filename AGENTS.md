@@ -532,7 +532,7 @@ Quy tắc:
 ### 11.3 Phục vụ UI
 
 - Đường dẫn không bắt đầu bằng `/api` trả file tĩnh nhúng; không tìm thấy thì trả `index.html` (SPA fallback) **nhưng `/api/*` không tồn tại phải trả 404 JSON**, không được rơi vào fallback.
-- File có hash trong tên (`assets/*`) cache lâu; `index.html` `no-cache`.
+- Toàn bộ file UI (kể cả `assets/*`) trả `no-cache`: tên asset **không còn hash** (xem `web/vite.config.ts`), nên cache dài hạn sẽ giữ bản cũ trong trình duyệt mãi dù `pnpm build` đã chạy. `ServeDir`/`rust-embed` gắn ETag nên revalidate không đổi thì 304 — luôn tươi mà gần như không tốn (lỗi thật đã gặp: mục 22.27).
 - Header bảo mật ở mục 15.7.
 
 ---
@@ -871,6 +871,7 @@ Trạng thái chi tiết, commit và phần còn thiếu của từng milestone:
 24. **Model được quyết định ở ba nơi:** `[llm].model`, profile trong `[[llm.providers]]` và `llm-state.json` — file cuối **thắng** lúc khởi động (log: `áp lựa chọn provider đã lưu từ phiên trước`). Sửa `bean.toml` mà model không đổi thì xoá hoặc sửa `llm-state.json`.
 25. **OpenRouter `:free` hay trả `503 Provider returned error`** khi model upstream quá tải: không phải lỗi cấu hình hay key. Đổi sang model khác trong `allowed_models`.
 26. **Secret nằm ở `secrets.env` (`0600`), không trong `bean.toml`/`voice-state.json`.** Đổi env mà không có tác dụng có thể do key đang bị `secrets.env` che (thứ tự: env > `secrets.env` > chưa đặt). Kiểm tra bằng `bean secret list`.
+27. **UI build xong nhưng trình duyệt vẫn hiện bản cũ:** từ khi tên asset không còn hash (quyết định "build UI không hash tên file để ghi đè không rebuild backend"), header `max-age=31536000, immutable` trên `assets/*` khiến trình duyệt giữ bản cũ mãi dù `pnpm build` đã chạy — `index.html` là `no-cache` nhưng nó tham chiếu cùng URL cũ nên vẫn lấy JS/CSS từ cache. Đã sửa (2026-11-07): cả `ui_dir` lẫn bản nhúng trả `no-cache` cho mọi file UI, revalidate qua ETag của `ServeDir` (không đổi thì 304). Ai đã dính cache immutable cũ thì hard reload `Ctrl+Shift+R` **một lần**; sau đó F5 thường luôn nhận bản mới. Xem mục 11.3.
 
 ---
 

@@ -2005,8 +2005,8 @@ fn write_fake_dist(dir: &Path) {
     std::fs::write(dir.join("assets/app-a1b2.js"), "console.log(1);\n").unwrap();
 }
 
-/// UI từ đĩa: `/` và SPA fallback trả `index.html` (no-cache), `assets/*` trả
-/// file thật (cache dài hạn, immutable) — cùng bất biến với bản nhúng (mục 11.3).
+/// UI từ đĩa: `/`, SPA fallback và `assets/*` đều `no-cache` — tên asset không
+/// còn hash nên phải revalidate (ETag) để bản build mới luôn được nhận (11.3).
 #[tokio::test]
 async fn ui_dir_serves_disk_files_with_spa_fallback_and_cache_rules() {
     use http_body_util::BodyExt;
@@ -2050,7 +2050,7 @@ async fn ui_dir_serves_disk_files_with_spa_fallback_and_cache_rules() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     assert!(std::str::from_utf8(&body).unwrap().contains("disk-ui"));
 
-    // Asset có hash: nội dung thật, content-type đúng, cache dài hạn.
+    // Asset (tên không hash): nội dung thật, content-type đúng, no-cache.
     let response = app
         .clone()
         .oneshot(get_request("/assets/app-a1b2.js", origin, None))
@@ -2059,7 +2059,7 @@ async fn ui_dir_serves_disk_files_with_spa_fallback_and_cache_rules() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(header::CACHE_CONTROL).unwrap(),
-        "public, max-age=31536000, immutable"
+        "no-cache"
     );
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE).unwrap(),

@@ -2,8 +2,10 @@
 //!
 //! # Bat bien
 //!
-//! File co hash trong ten (`assets/*`) cache lau; `index.html` `no-cache` (muc 11.3).
-//! Va nhu `routes.rs`: `/api/*` khong ton tai phai tra 404 JSON chu khong phai HTML.
+//! Ten asset KHONG con hash (vite.config.ts) nen ca `assets/*` deu `no-cache` —
+//! trinh duyet revalidate qua ETag (ServeDir tu gan), ban build moi luon duoc
+//! nhan; `index.html` `no-cache` (muc 11.3). Va nhu `routes.rs`: `/api/*`
+//! khong ton tai phai tra 404 JSON chu khong phai HTML.
 
 use std::path::PathBuf;
 
@@ -61,12 +63,10 @@ impl StaticRoot {
 
 /// Layer gắn `Cache-Control` cố định — dùng cho UI phục vụ từ `[web].ui_dir`.
 ///
-/// Giữ cùng bất biến với bản nhúng (mục 11.3): `index.html` phải `no-cache`
-/// để trình duyệt tải lại bản mới sau khi người dùng chép `web/dist` mới vào
-/// `[web].ui_dir`. Các file `assets/*` trong bản build hiện tại không còn hash
-/// trong tên (xem `web/vite.config.ts`), nên nếu phục vụ từ đĩa hãy xem xét
-/// giảm thời gian cache cho `assets/*` thay vì `immutable` để tránh trình duyệt
-/// giữ bản cũ khi tên file không đổi.
+/// Toàn bộ UI (kể cả `assets/*`) là `no-cache`: tên asset không còn hash
+/// (xem `web/vite.config.ts`), nên cache dài hạn sẽ giữ bản cũ trong trình
+/// duyệt mãi dù `pnpm build` đã chạy. `ServeDir` gắn ETag theo mtime nên
+/// revalidate là 304 rẻ — tươi mà không tốn.
 pub(super) fn cache_control_layer(value: &'static str) -> SetResponseHeaderLayer<HeaderValue> {
     SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static(value))
 }
@@ -130,11 +130,10 @@ fn embedded_response(path: &str) -> Response {
     let mime = mime_guess::from_path(served_path)
         .first_raw()
         .unwrap_or("application/octet-stream");
-    let cache = if served_path.starts_with("assets/") {
-        "public, max-age=31536000, immutable"
-    } else {
-        "no-cache"
-    };
+    // Bản nhúng cũng `no-cache` cho toàn bộ: tên file không hash nên trình
+    // duyệt phải revalidate bằng ETag, nếu không bản UI mới sau build lại
+    // không bao giờ được nhận (immutable một năm + URL cố định = bản cũ mãi).
+    let cache = "no-cache";
     (
         [(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, cache)],
         file.data,
