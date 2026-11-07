@@ -99,4 +99,25 @@ describe("ThemeToggle", () => {
     expect(button.textContent).toBe("");
     expect(button).toHaveAccessibleName("Switch to light appearance");
   });
+
+  // PWA cài lên màn hình chính: thanh trạng thái/nav của hệ điều hành lấy màu
+  // từ meta theme-color (index.html). applyTheme phải cập nhật nó cùng lúc với
+  // class trên <html>, nếu không cài PWA xong thanh hệ thống cứ màu tối dù app sáng.
+  it("cập nhật meta theme-color theo chủ đề", async () => {
+    const meta = document.createElement("meta");
+    meta.name = "theme-color";
+    meta.content = "#123456"; // giá trị sai chủ ý: render phải sửa ngay
+    document.head.appendChild(meta);
+    try {
+      const user = userEvent.setup();
+      renderToggle();
+      expect(meta.getAttribute("content")).toBe("#000000");
+
+      await user.click(screen.getByRole("button"));
+
+      expect(meta.getAttribute("content")).toBe("#f2f2f7");
+    } finally {
+      meta.remove();
+    }
+  });
 });

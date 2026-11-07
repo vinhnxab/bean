@@ -17,6 +17,9 @@ function isTheme(value: unknown): value is Theme {
   return value === "dark" || value === "light";
 }
 
+/** Màu thanh hệ thống (theme-color) theo chủ đề — trùng `--surface` trong index.css. */
+const THEME_COLOR: Record<Theme, string> = { dark: "#000000", light: "#f2f2f7" };
+
 /** Bơm class vào `<html>` — nơi duy nhất CSS `:root` / `.light` nhìn thấy. */
 export function applyTheme(theme: Theme): void {
   const root = document.documentElement;
@@ -25,6 +28,9 @@ export function applyTheme(theme: Theme): void {
   // Trùng với `color-scheme` trong index.css, nhưng set ở đây giúp các
   // thành phần native (cuộn, form control, scrollbar) đổi màu ngay.
   root.style.colorScheme = theme;
+  // PWA cài lên màn hình chính: thanh trạng thái/nav của hệ điều hành theo
+  // chủ đề người dùng (meta có sẵn trong index.html, không có thì bỏ qua).
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLOR[theme]);
 }
 
 type ThemeValue = {

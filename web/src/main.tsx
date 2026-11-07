@@ -10,6 +10,7 @@ import App from "@/App";
 import "@/index.css";
 import { I18nProvider } from "@/i18n";
 import { ThemeProvider } from "@/lib/theme";
+import { registerServiceWorker } from "@/pwa";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,3 +39,6 @@ if (container) {
   // Không ném lỗi (mục 0.8: không panic trong code sản phẩm) — chỉ báo rõ để dễ sửa index.html.
   console.error("Bean: không tìm thấy phần tử #root trong index.html");
 }
+
+// PWA: đăng ký sau khi render — lỗi của nó không được chạm vào chat.
+registerServiceWorker();

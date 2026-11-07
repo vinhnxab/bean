@@ -13,6 +13,16 @@
          chặn render, nên chắc chắn chạy xong trước lần vẽ đầu.
          Hằng số phải khớp THEME_STORAGE_KEY / DEFAULT_THEME ở src/lib/theme.tsx. -->
     <script src="/theme-init.js"></script>
+    <!-- PWA (docs/decisions.md mục "PWA"): manifest + sw.js cùng là file tĩnh
+         thường trong public/, phục vụ đúng quy tắc no-cache của mục 11.3.
+         theme-color mặc định khớp --surface tối; lib/theme.tsx đổi theo chủ đề
+         ngay khi người dùng bấm chuyển sáng/tối. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Bean" />
     <!-- Favicon là **ảnh badge PNG** (`bean-avatar-sm.png`, sinh từ `brand/bean.png`
          bằng `pnpm brand`) — đúng hình với avatar trong app, không có bản vector
          riêng để lệch. Icon màn hình chính iOS cần đúng 180×180 nên khai riêng. -->

@@ -687,3 +687,26 @@ trước khi coi dự án là production — không để lại giai đoạn "đ
 `grep -rln "BeanAgent\|beanagent" *.md docs/*.md` chỉ còn khớp trong các khối bằng chứng
 đã liệt kê ở mục "Ngoại lệ cố ý giữ" của báo cáo milestone M28.
 
+
+
+## 20. PWA — cài Bean lên màn hình chính (D20.x — 2026-11-07)
+
+Bean thêm PWA tối thiểu: `manifest.webmanifest` + service worker + icon sinh từ
+`brand/bean.png` — người dùng cài app lên desktop (Chrome/Edge) và điện thoại
+(Android; iOS qua "Add to Home Screen"). Không có bản offline cho dữ liệu: agent
+chạy trên server, chat không có nghĩa khi Bean tắt — offline chỉ giữ đủ shell để
+báo lỗi rõ ràng thay vì trang lỗi trắng của trình duyệt.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D20.1 | **Service worker network-first cho mọi GET cùng nguồn gốc, cache chỉ là phương án offline; CẤM cache-first/stale-while-revalidate** | Tên asset không hash (vite.config.ts) và server trả `no-cache` + ETag (mục 11.3, lỗi thật 22.27). Cache-first sẽ giữ bản UI cũ mãi phía client — tái diễn đúng lỗi đó ở tầng mới. Network-first vẫn revalidate 304 rẻ như thường, chỉ dùng cache khi mạng hỏng. | Offline luôn hiển thị bản UI cũ hơn một phiên nếu server vừa đổi — chấp nhận được vì offline vốn không gọi được API. `sw.test.ts` khoá bất biến này. |
+| D20.2 | SW **không chạm `/api`** (REST + WebSocket đi mạng trực tiếp); bỏ qua cả range request và request ngoài nguồn gốc | Chat phải đi mạng thật; SW chặn được REST nhưng không chặn WebSocket — tách hẳn hai lớp để không ai "cache giúp" dữ liệu hội thoại. | Không có offline queue cho tin nhắn gửi lúc mất mạng. |
+| D20.3 | Không dùng `vite-plugin-pwa`/Workbox — viết tay `public/sw.js` (~60 dòng) + manifest tĩnh | Quy tắc 15.10: không thêm dependency không cần thiết. Plugin kéo cả Workbox runtime chỉ để làm network-first; file tay có test riêng bọc mọi nhánh. | Tự bảo trì chiến lược SW: mọi thay đổi phải qua `src/lib/service-worker.test.ts`. |
+| D20.4 | Icon PWA sinh từ **cùng nguồn** `brand/bean.png` qua `gen-brand-assets.ts` (thêm `scale` cho maskable 75%) | Huy hiệu mascot là nguồn duy nhất của nhận diện; sinh thêm `pwa-192/512` (purpose `any`, nền be đặc) và `pwa-maskable-512` (nằm gọn vòng an toàn 80% của launcher Android). | Đổi mascot phải chạy lại `pnpm brand` — đã là luồng hiện có. Node distro không có strip-types nên script được chạy qua bản transpile `tsc` vào `node_modules/.cache`. |
+| D20.5 | Đăng ký SW chỉ ở bản production (`import.meta.env.PROD`), sau `load`, lỗi nuốt thành `console.warn` | Dev server Vite không phục vụ `dist/sw.js`, và SW cache ở dev phá HMR; đăng ký lỗi (LAN http không secure context) không được làm sập chat. | Truy cập qua LAN IP bằng http sẽ không có PWA — cần TLS (reverse proxy) hoặc Tailscale, trùng khuyến nghị mục 23. |
+| D20.6 | Precache đúng một file: `index.html` (shell) | Offline navigation phải nhận shell (app hiện lỗi API rõ ràng) thay vì trang lỗi trình duyệt. Asset/font vào cache runtime theo lượt dùng. | Lần offline đầu sau khi cài (chưa duyệt trang nào) có thể thiếu asset — shell vẫn hiện, font rơi về hệ thống. |
+
+**Kiểm chứng:** `pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run`
+(212 test, gồm 9 test chiến lược SW và 5 test đăng ký) + `pnpm build` xanh;
+`curl` server thật xác nhận `/manifest.webmanifest` trả
+`application/manifest+json`, mọi file PWA `no-cache`, `/api/*` vẫn 404 JSON.

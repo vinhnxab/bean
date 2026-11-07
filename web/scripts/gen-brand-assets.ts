@@ -16,6 +16,7 @@
  *
  * Chạy: `node --experimental-strip-types scripts/gen-brand-assets.ts`
  */
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +24,17 @@ import puppeteer from "puppeteer-core";
 
 import { BADGE_BG, BG_PROBE_POINTS, BG_TOLERANCE, SOURCE_EDGE } from "../src/components/brand/badge.ts";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Gốc `web/`: script chạy được cả từ TS (web/scripts) lẫn bản đã transpile sang
+// JS chỗ khác (node_modules/.cache — node của distro không có strip-types), nên
+// tự đi lên tìm `brand/bean.png` thay vì giả định vị trí thư mục.
+const ROOT = (() => {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (existsSync(resolve(dir, "brand/bean.png"))) return dir;
+    dir = dirname(dir);
+  }
+  throw new Error(`Không tìm thấy web/ (brand/bean.png) tính từ ${import.meta.url}`);
+})();
 const SOURCE = resolve(ROOT, "brand/bean.png");
 
 /**
@@ -36,10 +47,21 @@ const SOURCE = resolve(ROOT, "brand/bean.png");
  * alpha=0) nên ảnh giữ nguyên hình tròn của huy hiệu mà **không cần mặt nạ**.
  * Trước đây avatar cắt cúp vào mặt; bản này bỏ hẳn bước crop.
  *
- * `fill: true` (chỉ `apple-touch-icon`) lót kín nền be: iOS đổ nền trong suốt
- * thành đen, mà icon màn hình chính cần nền đặc, không thể trong suốt.
+ * `fill: true` lót kín nền be trước khi vẽ: iOS/Android đổ nền trong suốt thành
+ * đen, mà icon màn hình chính cần nền đặc, không thể trong suốt.
+ *
+ * `scale` thu nhỏ mascot trong khung (mặc định 1 — trọn khung). Chỉ dùng cho
+ * icon **maskable** của PWA: launcher Android đè mặt nạ tròn, nội dung phải nằm
+ * trong vòng an toàn 80% đường kính — mascot 75% là còn dư biên.
  */
-const TARGETS = [
+type BrandTarget = {
+  file: string;
+  size: number;
+  fill: boolean;
+  scale?: number;
+};
+
+const TARGETS: readonly BrandTarget[] = [
   // Avatar: màn đăng nhập (56px), logo HUB (44px), tin nhắn trong chat (28–32px).
   // Bản lớn 128×128 (×2 cho Retina) dùng cho avatar ≥ 44px.
   { file: "bean-avatar.png", size: 128, fill: false },
@@ -52,7 +74,14 @@ const TARGETS = [
   // 180, và **nền trong suốt bị đổ thành đen** — icon sẽ là huy hiệu tròn trên ô
   // vuông đen. Nên phải lót kín bằng màu nền của chính huy hiệu.
   { file: "apple-touch-icon.png", size: 180, fill: true },
-] as const;
+  // PWA (manifest.webmanifest): icon "any" cho hộp thoại cài đặt desktop và
+  // Android — nền be đặc, mascot trọn khung như apple-touch-icon.
+  { file: "pwa-192.png", size: 192, fill: true },
+  { file: "pwa-512.png", size: 512, fill: true },
+  // purpose "maskable": mascot thu về 75% để nằm gọn trong vòng an toàn 80%
+  // của mặt nạ launcher (tròn/bo góc theo từng hãng), nền be tràn viền đầy.
+  { file: "pwa-maskable-512.png", size: 512, fill: true, scale: 0.75 },
+];
 
 const CHROME = "/usr/bin/google-chrome";
 
@@ -75,6 +104,7 @@ async function main(): Promise<void> {
           edge: number,
           fileName: string,
           fill: boolean,
+          scale: number,
           probePoints: readonly (readonly [number, number])[],
           expectedBg: { r: number; g: number; b: number },
           tolerance: number,
@@ -133,7 +163,7 @@ async function main(): Promise<void> {
               // So với hằng số đã khai: thay ảnh là lệch, và lệch thì phải báo
               // chứ không lặng lẽ đổi màu nền dưới chân component.
               const drift = Math.max(
-                ...rgb.map((v, i) => Math.abs(v - [expectedBg.r, expectedBg.g, expectedBg.b][i] ?? 0)),
+                ...rgb.map((v, i) => Math.abs(v - [expectedBg.r, expectedBg.g, expectedBg.b][i])),
               );
               if (drift > tolerance) {
                 throw new Error(
@@ -149,8 +179,11 @@ async function main(): Promise<void> {
 
           // Thu nhỏ **trọn** ảnh gốc: không cắt, chỉ scale. Không cần mặt nạ bo
           // tròn — huy hiệu vốn là hình tròn trên nền trong suốt, nên chỉ scale
-          // là giữ nguyên hình dạng.
-          ctx.drawImage(image, 0, 0, edge, edge, 0, 0, size, size);
+          // là giữ nguyên hình dạng. `scale < 1` (icon maskable) đặt mascot
+          // giữa khung, nền be lót sẵn tràn viền.
+          const inset = (size * (1 - scale)) / 2;
+          const drawn = size * scale;
+          ctx.drawImage(image, 0, 0, edge, edge, inset, inset, drawn, drawn);
 
           // Tự kiểm tra kết quả: đọc alpha ở 4 góc **từ chính ảnh vừa xuất**.
           // Sai ở đây không hề báo lỗi — generator vẫn chạy, file vẫn sinh ra,
@@ -185,6 +218,7 @@ async function main(): Promise<void> {
         SOURCE_EDGE,
         target.file,
         target.fill,
+        target.scale ?? 1,
         BG_PROBE_POINTS,
         BADGE_BG,
         BG_TOLERANCE,
