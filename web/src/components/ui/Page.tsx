@@ -10,10 +10,13 @@ export function PageShell({
   title,
   description,
   children,
+  className,
 }: {
   title: string;
   description: string;
   children: ReactNode;
+  /** Thêm class ghi đè lên layout mặc định (ví dụ `max-w-none` cho trang cần full width). */
+  className?: string;
 }) {
   const ref = useRef<HTMLElement>(null);
   // Trang management vào theo nhịp: tiêu đề trước, các khối nội dung lần lượt
@@ -34,7 +37,7 @@ export function PageShell({
   return (
     <section
       ref={ref}
-      className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 pt-20 sm:px-6 md:pb-10 md:pt-8"
+      className={`mx-auto w-full flex-1 px-4 py-6 pb-24 pt-20 sm:px-6 md:pb-10 md:pt-8 ${className ?? "max-w-7xl"}`}
       aria-labelledby="page-title"
     >
       <header className="mb-6">

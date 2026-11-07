@@ -50,7 +50,7 @@ export function SettingsPage() {
   );
 
   return (
-    <PageShell title={t("settings.title")} description={t("settings.description")}>
+    <PageShell title={t("settings.title")} description={t("settings.description")} className="max-w-none">
       {pendingRestart.length > 0 ? <RestartBanner keys={pendingRestart.map((row) => row.key)} /> : null}
       {section === "voice" ? (
         <VoicePanel />
