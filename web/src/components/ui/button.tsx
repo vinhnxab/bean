@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * đó là phép phân biệt giữa "bản vẽ kỹ thuật" và "thẻ SaaS".
  */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -28,14 +28,14 @@ const buttonVariants = cva(
         link: "text-ink underline underline-offset-4 hover:opacity-80",
       },
       size: {
-        sm: "h-8 px-3 text-sm",
-        default: "h-9 px-4",
-        lg: "h-10 px-5",
+        sm: "h-8 px-3 text-sm min-w-[80px]",
+        default: "h-9 px-4 min-w-[90px]",
+        lg: "h-10 px-5 min-w-[100px]",
         icon: "size-9",
       },
     },
     defaultVariants: { variant: "default", size: "default" },
-  },
+  }
 );
 
 function Button({

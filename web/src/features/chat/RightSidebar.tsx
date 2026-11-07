@@ -83,7 +83,7 @@ export function RightSidebar({
             onClick={onNewSession}
             disabled={creating}
             aria-label={t("chat.newChat")}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2.5 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-brand px-3 py-2.5 text-sm font-semibold text-brand-ink hover:bg-brand-strong disabled:opacity-50 min-w-[90px]"
           >
             <PlusIcon className="size-4 shrink-0" aria-hidden="true" />
             {creating ? t("common.loading") : t("chat.newChat")}

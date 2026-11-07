@@ -30,7 +30,7 @@ export function ChatIndexPage() {
           type="button"
           onClick={() => void createAndOpen()}
           disabled={createSession.isPending}
-          className="mt-5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-ink disabled:opacity-50"
+          className="mt-5 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-ink disabled:opacity-50 min-w-[90px]"
         >
           {createSession.isPending ? t("common.loading") : t("chat.newChat")}
         </button>

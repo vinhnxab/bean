@@ -13,7 +13,7 @@ export type Lang = "vi" | "en";
 export const DICTIONARIES: Record<Lang, Dictionary> = { vi, en };
 
 /** Ngôn ngữ mặc định của ứng dụng. */
-export const DEFAULT_LANG: Lang = "vi";
+export const DEFAULT_LANG: Lang = "en";
 
 type I18nValue = {
   lang: Lang;

@@ -13,10 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useLogout } from "@/features/auth/queries";
 import { type Lang, useI18n } from "@/i18n";
 
-/** Ngôn ngữ hỗ trợ, kèm tên hiển thị **tự thân** — không dịch. */
+/** Ngôn ngữ hỗ trợ, kèm tên hiển thị **viết tắt** — không dịch. */
 const LANGUAGES: { code: Lang; label: string }[] = [
-  { code: "vi", label: "Tiếng Việt" },
-  { code: "en", label: "English" },
+  { code: "vi", label: "VI" },
+  { code: "en", label: "EN" },
 ];
 
 /**

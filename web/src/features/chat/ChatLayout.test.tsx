@@ -54,8 +54,8 @@ describe("ChatLayout sidebar", () => {
     );
     const user = renderSidebar();
     await screen.findByText("Ke hoach hom nay");
-    await user.type(screen.getByLabelText("Tìm hội thoại"), "khong co");
-    await screen.findByText("Không tìm thấy hội thoại.");
+    await user.type(screen.getByLabelText("Search conversations"), "khong co");
+    await screen.findByText("No conversations found.");
   }, 15000);
 
   it("gom hoi thoai theo moc thoi gian", async () => {
@@ -74,8 +74,8 @@ describe("ChatLayout sidebar", () => {
     renderSidebar();
     await screen.findByText("Ke hoach buoi sang");
     await screen.findByText("Du an cu");
-    expect(screen.getByRole("heading", { name: "Hôm nay" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "30 ngày trước" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Today" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Previous 30 days" })).toBeInTheDocument();
   }, 15000);
 
   it("điều hướng tới màn Tools và MCP", async () => {
@@ -88,10 +88,10 @@ describe("ChatLayout sidebar", () => {
   // chính — chat thường xuyên dùng nhất, cài đặt chỉ cần luôn biết tìm ở đáy.
   it("Cài đặt nằm ở footer sidebar và trỏ /settings", async () => {
     renderSidebar();
-    const settings = await screen.findByRole("link", { name: "Cài đặt" });
+    const settings = await screen.findByRole("link", { name: "Settings" });
     expect(settings).toHaveAttribute("href", "/settings");
     // Footer nằm sau nav chính trong DOM (tách khỏi NAV_ITEMS).
-    const nav = screen.getByRole("navigation", { name: "Điều hướng chính" });
+    const nav = screen.getByRole("navigation", { name: "Main navigation" });
     expect(nav.contains(settings)).toBe(false);
   });
 
@@ -110,7 +110,7 @@ describe("ChatLayout sidebar", () => {
     await screen.findByText("providers");
     expect(screen.getByTestId("settings-sidebar")).toBeInTheDocument();
     expect(screen.queryByTestId("chat-sidebar")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Nhà cung cấp/ })).toHaveAttribute("href", "/settings/providers");
+    expect(screen.getByRole("link", { name: /Providers/ })).toHaveAttribute("href", "/settings/providers");
   }, 15000);
 
   it("trang chu HUB khong loi danh sach hoi thoai vao", async () => {
@@ -123,11 +123,11 @@ describe("ChatLayout sidebar", () => {
       </Routes>,
     );
     await screen.findByText("hub");
-    expect(screen.queryByLabelText("Tìm hội thoại")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
     // HUB không có ngữ cảnh hội thoại: sidebar phải không render, và TopNav
     // không có nút mở ngăn kéo hội thoại.
     expect(screen.queryByTestId("chat-sidebar")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Mở danh sách hội thoại" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open conversation list" })).not.toBeInTheDocument();
   }, 15000);
 
   // Mở bằng **bàn phím** chứ không bằng `user.click`: Radix bọc nội dung trong
@@ -139,7 +139,8 @@ describe("ChatLayout sidebar", () => {
     renderSidebar();
 
     // Nút cho biết ngôn ngữ đang dùng ngay, không bắt mở ra mới biết.
-    const trigger = await screen.findByRole("combobox", { name: "Ngôn ngữ: Tiếng Việt" });
+    // Mặc định là tiếng Anh nên nhãn là "Language: EN".
+    const trigger = await screen.findByRole("combobox", { name: "Language: EN" });
     // `<select>` native mở ra là giao diện của hệ điều hành: không nhận token màu
     // của app. Đây là lý do nó không được dùng ở bất kỳ đâu trong UI.
     expect(document.querySelector("select")).toBeNull();
@@ -150,15 +151,15 @@ describe("ChatLayout sidebar", () => {
     // hình đọc được *đang chọn* chứ không chỉ biết có một mục tên như vậy.
     // `DropdownMenu` (`menuitemradio`) là sai ở đây: ngôn ngữ là trạng thái,
     // không phải hành động.
-    const viOption = await screen.findByRole("option", { name: "Tiếng Việt" });
-    expect(viOption).toHaveAttribute("aria-selected", "true");
+    const enOption = await screen.findByRole("option", { name: "EN" });
+    expect(enOption).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("menuitemradio")).not.toBeInTheDocument();
 
-    screen.getByRole("option", { name: "English" }).focus();
+    screen.getByRole("option", { name: "VI" }).focus();
     await user.keyboard("{Enter}");
     // Chọn xong danh sách đóng và nút cập nật nhãn.
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(await screen.findByRole("combobox", { name: "Language: English" })).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Ngôn ngữ: VI" })).toBeInTheDocument();
   }, 15000);
 
   // `Suspense` nằm quanh `<Outlet />` chứ không quanh cả `ChatLayout` (xem `App.tsx`).
@@ -185,7 +186,7 @@ describe("ChatLayout sidebar", () => {
     // nằm trong menu tài khoản của TopNav, chưa mở menu thì chỉ có nút avatar.
     expect(screen.getByRole("link", { name: /Tools/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /MCP/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Tài khoản" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
   });
 
   // Ba tính năng sidebar thêm ở đợt sửa giao diện: thu gọn được, mục điều
@@ -194,7 +195,7 @@ describe("ChatLayout sidebar", () => {
     // `localStorage` đã được xoá ở `beforeEach` cấp `describe` cha.
     it("mặc định mở rộng, bấm nút thì thu gọn và nhớ lựa chọn", async () => {
       const user = renderSidebar();
-      const toggle = await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" });
+      const toggle = await screen.findByRole("button", { name: "Collapse sidebar" });
       // Nhãn mô tả hành động **sắp làm**; `aria-expanded` mô tả trạng thái hiện tại.
       expect(toggle).toHaveAttribute("aria-expanded", "true");
 
@@ -202,7 +203,7 @@ describe("ChatLayout sidebar", () => {
 
       // Sau khi thu gọn: nhãn đảo chiều (giờ hành động là mở rộng) và
       // `aria-expanded` thành false.
-      const expand = screen.getByRole("button", { name: "Mở rộng thanh điều hướng" });
+      const expand = screen.getByRole("button", { name: "Expand sidebar" });
       expect(expand).toHaveAttribute("aria-expanded", "false");
       expect(screen.getByTestId("sidebar-shell")).toHaveClass("md:w-20");
 
@@ -210,7 +211,7 @@ describe("ChatLayout sidebar", () => {
       expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("1");
 
       await user.click(expand);
-      expect(screen.getByRole("button", { name: "Thu gọn thanh điều hướng" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute(
         "aria-expanded",
         "true",
       );
@@ -219,24 +220,24 @@ describe("ChatLayout sidebar", () => {
 
     it("khi thu gọn, nhãn mục điều hướng vẫn còn cho trình đọc màn hình", async () => {
       const user = renderSidebar();
-      await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
+      await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
 
       // Nhãn chuyển sang `sr-only` chứ không bị xoá: mục điều hướng trong rail
       // phải vẫn tên cho người dùng đọc bằng trình đọc màn hình, nếu không rail
       // chỉ là một đống icon vô danh.
-      const link = screen.getByRole("link", { name: "Trò chuyện" });
+      const link = screen.getByRole("link", { name: "Chat" });
       expect(link).toHaveAttribute("href", "/chat");
       // Tooltip là gợi ý cho con trỏ, nên nhãn phải nằm trong chính link.
-      expect(link.querySelector(".sr-only")).toHaveTextContent("Trò chuyện");
+      expect(link.querySelector(".sr-only")).toHaveTextContent("Chat");
     }, 15000);
 
     it("nút hội thoại mới nằm ở sidebar phải, không phụ thuộc rail trái", async () => {
       const user = renderSidebar();
-      await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
+      await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
 
       // Việc tạo hội thoại thuộc sidebar phải; rail trái thu gọn không có nghĩa
       // là mất nút — hai sidebar độc lập với nhau.
-      expect(screen.getByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "New conversation" })).toBeInTheDocument();
     }, 15000);
 
     // Ngăn kéo hội thoại là câu trả lời cho "trên điện thoại thì đổi hội thoại
@@ -247,7 +248,7 @@ describe("ChatLayout sidebar", () => {
       it("bấm icon trên TopNav thì danh sách hiện ra kèm overlay", async () => {
         testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
         const user = renderSidebar();
-        const toggle = await screen.findByRole("button", { name: "Mở danh sách hội thoại" });
+        const toggle = await screen.findByRole("button", { name: "Open conversation list" });
         // Chưa mở: ngăn kéo không mang cờ mở (desktop thì luôn mở, không cần cờ).
         expect(drawer()).not.toHaveAttribute("data-open");
 
@@ -256,22 +257,22 @@ describe("ChatLayout sidebar", () => {
         expect(drawer()).toHaveAttribute("data-open");
         expect(await screen.findByText("Ke hoach hom nay")).toBeInTheDocument();
         // Ô tìm kiếm phải có thật: cần lọc danh sách dài ngay trong ngăn kéo.
-        expect(screen.getByLabelText("Tìm hội thoại")).toBeInTheDocument();
+        expect(screen.getByLabelText("Search conversations")).toBeInTheDocument();
         // Overlay mờ nằm ngay trước ngăn kéo trong DOM, là `<button>` để bấm ra
         // ngoài đóng được bằng bàn phím.
         const overlay = drawer().previousElementSibling;
-        expect(overlay).toHaveAttribute("aria-label", "Đóng");
+        expect(overlay).toHaveAttribute("aria-label", "Close");
       }, 15000);
 
       it("đóng bằng nút X trong đầu ngăn kéo", async () => {
         testServer.use(http.get("/api/sessions", () => HttpResponse.json({ sessions: [session] })));
         const user = renderSidebar();
-        await user.click(await screen.findByRole("button", { name: "Mở danh sách hội thoại" }));
+        await user.click(await screen.findByRole("button", { name: "Open conversation list" }));
         await screen.findByText("Ke hoach hom nay");
 
         // Nút X nằm trong chính ngăn kéo — `within` để không bấm nhầm nút "Đóng"
         // của ngăn kéo điều hướng bên trái hay của overlay.
-        await user.click(within(drawer()).getByRole("button", { name: "Đóng" }));
+        await user.click(within(drawer()).getByRole("button", { name: "Close" }));
 
         await waitFor(() => expect(drawer()).not.toHaveAttribute("data-open"));
         // Overlay biến mất theo ngăn kéo.
@@ -287,25 +288,26 @@ describe("ChatLayout sidebar", () => {
     renderSidebar();
 
     // Nút chủ đề là icon trơn: tên trợ năng là toàn bộ hành động, không có nhãn chữ.
-    const theme = screen.getByRole("button", { name: /Chuyển sang giao diện/ });
-    expect(theme).toHaveAccessibleName(/Chuyển sang giao diện/);
+    // Mặc định là tối nên hành động là chuyển sang sáng.
+    const theme = screen.getByRole("button", { name: /Switch to light/ });
+    expect(theme).toHaveAccessibleName(/Switch to light/);
 
     // Chưa mở menu thì không có nút đăng xuất nào ngoài đó. Mở bằng bàn phím:
     // giống test ngôn ngữ ở trên, cú click chuỗi-pointer trong file dài có thể
     // bị bỏ qua (xem `SessionRow.test.tsx`), còn `focus` + `Enter` là đường
     // ký tự mà Radix luôn lắng nghe.
-    expect(screen.queryByRole("button", { name: "Đăng xuất" })).not.toBeInTheDocument();
-    const account = await screen.findByRole("button", { name: "Tài khoản" });
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+    const account = await screen.findByRole("button", { name: "Account" });
     account.focus();
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("menuitem", { name: "Đăng xuất" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
   }, 15000);
 
   it("thu gọn: nút mở rộng sidebar nằm giữa rail", async () => {
     const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
+    await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
 
-    const expand = screen.getByRole("button", { name: "Mở rộng thanh điều hướng" });
+    const expand = screen.getByRole("button", { name: "Expand sidebar" });
     // Header chỉ còn một nút khi brand chuyển lên TopNav; rail phải giữ cảm giác
     // cột icon nên nút nằm giữa.
     expect(expand.parentElement).toHaveClass("justify-center");
@@ -313,7 +315,7 @@ describe("ChatLayout sidebar", () => {
 
   it("mục điều hướng dùng icon vector thay cho ký tự Unicode", async () => {
     renderSidebar();
-    const link = await screen.findByRole("link", { name: "Trò chuyện" });
+    const link = await screen.findByRole("link", { name: "Chat" });
 
     // Icon `<svg>` của lucide, không phải ký tự kiểu cũ (`◌`): ký tự Unicode đổi
     // hình dáng theo font của hệ điều hành, còn SVG vẽ bằng `currentColor`.
@@ -321,7 +323,7 @@ describe("ChatLayout sidebar", () => {
     expect(icon).not.toBeNull();
     expect(icon).toHaveAttribute("aria-hidden", "true");
     // Nhãn chữ vẫn là văn bản thật bên cạnh icon, không nằm trong `<title>`.
-    expect(link.querySelector("span")).toHaveTextContent("Trò chuyện");
+    expect(link.querySelector("span")).toHaveTextContent("Chat");
   }, 15000);
 
   // Hồi quy: `<TooltipTrigger asChild>` **clone** con rồi đè `className` của
@@ -330,9 +332,9 @@ describe("ChatLayout sidebar", () => {
   // và `size-9` mất sạch mà không có lỗi console nào.
   it("class của mục điều hướng được áp dụng thật khi thu gọn", async () => {
     const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
+    await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
 
-    const link = screen.getByRole("link", { name: "Trò chuyện" });
+    const link = screen.getByRole("link", { name: "Chat" });
     const className = link.getAttribute("class") ?? "";
 
     // Chuỗi chứa `=>` nghĩa là `className` dạng hàm chưa được React gọi — đúng
@@ -348,9 +350,9 @@ describe("ChatLayout sidebar", () => {
   // và nếu hai bên rời nhau, class thừa sẽ thắng class đúng.
   it("class của mục không bị nhân đôi khi có tooltip", async () => {
     const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
+    await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
 
-    const link = screen.getByRole("link", { name: "Trò chuyện" });
+    const link = screen.getByRole("link", { name: "Chat" });
     const matches = link.getAttribute("class")?.match(/size-9/g) ?? [];
     expect(matches).toHaveLength(1);
   }, 15000);
@@ -359,12 +361,12 @@ describe("ChatLayout sidebar", () => {
   // giờ do `useMatch` tính, nên phải chốt lại để không mất dấu hiệu này vô hình.
   it("mục đang active vẫn được đánh dấu", async () => {
     const user = renderSidebar();
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
+    await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
 
     // `renderSidebar()` mở route `/sessions/4`, nên **không** có mục nào active
     // với `end` — mọi mục phải mang class của trạng thái không active. Điều này
     // bắt được lỗi ngược lại: `isActive` luôn `true` sẽ làm mọi mục nổi bật.
-    const chat = screen.getByRole("link", { name: "Trò chuyện" });
+    const chat = screen.getByRole("link", { name: "Chat" });
     expect(chat.className).not.toContain("bg-accent");
     expect(chat.className).toContain("text-muted-foreground");
   }, 15000);
@@ -382,8 +384,8 @@ describe("ChatLayout sidebar", () => {
       ["/status"],
     );
 
-    await user.click(await screen.findByRole("button", { name: "Thu gọn thanh điều hướng" }));
-    expect(screen.getByRole("link", { name: "Trạng thái" }).className).toContain("bg-accent");
-    expect(screen.getByRole("link", { name: "Trung tâm" }).className).not.toContain("bg-accent");
+    await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByRole("link", { name: "Status" }).className).toContain("bg-accent");
+    expect(screen.getByRole("link", { name: "Hub" }).className).not.toContain("bg-accent");
   }, 15000);
 });

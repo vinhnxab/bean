@@ -50,7 +50,7 @@ export function ChannelsPanel() {
         <h2 className="font-semibold">{t("settings.section.channels")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.channelsDescription")}</p>
 
-        <form className="mt-5 grid gap-4 border-t border-border pt-4">
+        <form className="mt-4 grid gap-4 border-t border-border pt-4">
           <div className="grid items-center gap-3">
             <label htmlFor="telegram-enabled" className="text-sm font-medium">
               {t("channels.enabled")}

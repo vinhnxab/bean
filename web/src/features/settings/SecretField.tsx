@@ -89,7 +89,7 @@ export function SecretField({ slot, disabled = false }: { slot: SecretSlotDto; d
   const sourceLabel = t(sourceKey);
 
   return (
-    <div className="grid items-center gap-3 border rounded-lg p-4 sm:grid-cols-[1fr,auto]">
+    <div className="mt-4 grid items-center gap-3 border rounded-lg p-4 sm:grid-cols-[1fr,auto]">
       <div className="min-w-0">
         <p className="text-sm font-medium">{slot.name}</p>
         <p className="mt-0.5 text-xs text-muted-foreground truncate">{slot.label}</p>
