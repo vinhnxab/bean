@@ -37,6 +37,18 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    // Không hash tên file đầu ra: index.html luôn trỏ tới /assets/index.js +
+    // /assets/index.css, nên việc chép web/dist mới vào [web].ui_dir (hoặc rebuild
+    // Rust nhúng) không phải đổi tên asset trong backend. Trade-off: các asset
+    // không còn hash nên browser có thể cache phiên bản cũ — khi cập nhật UI hãy
+    // xóa web/dist trước khi build, hoặc phục vụ UI từ đĩa và restart Bean.
+    rollupOptions: {
+      output: {
+        entryFileNames: "assets/index.js",
+        chunkFileNames: "assets/[name].js",
+        assetFileNames: "assets/[name][extname]",
+      },
+    },
   },
   test: {
     environment: "jsdom",

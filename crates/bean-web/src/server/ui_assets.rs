@@ -61,9 +61,12 @@ impl StaticRoot {
 
 /// Layer gắn `Cache-Control` cố định — dùng cho UI phục vụ từ `[web].ui_dir`.
 ///
-/// Giữ cùng bất biến với bản nhúng (mục 11.3): `assets/*` có hash trong tên nên
-/// cache vĩnh viễn an toàn; `index.html` phải `no-cache` để trỏ đúng hash mới
-/// sau khi người dùng chép `web/dist` mới vào `[web].ui_dir`.
+/// Giữ cùng bất biến với bản nhúng (mục 11.3): `index.html` phải `no-cache`
+/// để trình duyệt tải lại bản mới sau khi người dùng chép `web/dist` mới vào
+/// `[web].ui_dir`. Các file `assets/*` trong bản build hiện tại không còn hash
+/// trong tên (xem `web/vite.config.ts`), nên nếu phục vụ từ đĩa hãy xem xét
+/// giảm thời gian cache cho `assets/*` thay vì `immutable` để tránh trình duyệt
+/// giữ bản cũ khi tên file không đổi.
 pub(super) fn cache_control_layer(value: &'static str) -> SetResponseHeaderLayer<HeaderValue> {
     SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static(value))
 }
