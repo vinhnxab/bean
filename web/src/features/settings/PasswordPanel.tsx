@@ -100,8 +100,7 @@ export function PasswordPanel() {
   };
 
   return (
-    <div className="max-w-3xl">
-      <Panel>
+    <Panel>
         <h2 className="font-semibold">{t("password.panelTitle")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("password.panelHint")}</p>
 
@@ -177,6 +176,5 @@ export function PasswordPanel() {
           ) : null}
         </form>
       </Panel>
-    </div>
   );
 }

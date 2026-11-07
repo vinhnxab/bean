@@ -31,8 +31,7 @@ export function VoicePanel() {
   if (status.isError || !data) return <ErrorState onRetry={() => void status.refetch()} />;
 
   return (
-    <div className="max-w-3xl">
-      <Panel>
+    <Panel>
         <h2 className="font-semibold">{t("voice.panelTitle")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("voice.panelHint")}</p>
         <VoiceForm
@@ -49,7 +48,6 @@ export function VoicePanel() {
           <ConnectionTestButton target="voice" />
         </div>
       </Panel>
-    </div>
   );
 }
 

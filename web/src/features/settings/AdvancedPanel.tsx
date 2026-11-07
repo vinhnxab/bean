@@ -17,8 +17,7 @@ export function AdvancedPanel() {
   const pendingRestart = tierB.filter((row) => row.apply === "restart" && row.source !== "default");
 
   return (
-    <div className="max-w-3xl">
-      <Panel>
+    <Panel>
         <h2 className="font-semibold">{t("settings.section.advanced")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.advancedDescription")}</p>
 
@@ -63,6 +62,5 @@ export function AdvancedPanel() {
           </div>
         ) : null}
       </Panel>
-    </div>
   );
 }

@@ -45,7 +45,7 @@ export function ChannelsPanel() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <>
       <Panel>
         <h2 className="font-semibold">{t("settings.section.channels")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.channelsDescription")}</p>
@@ -88,6 +88,6 @@ export function ChannelsPanel() {
           <ConnectionTestButton target="telegram" disabled={!tokenSlot?.set} />
         </div>
       </Panel>
-    </div>
+    </>
   );
 }

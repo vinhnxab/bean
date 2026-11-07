@@ -43,7 +43,7 @@ export function SearchPanel() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <>
       <Panel>
         <h2 className="font-semibold">{t("settings.section.search")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.searchDescription")}</p>
@@ -89,6 +89,6 @@ export function SearchPanel() {
           <ConnectionTestButton target="search" />
         </div>
       </Panel>
-    </div>
+    </>
   );
 }

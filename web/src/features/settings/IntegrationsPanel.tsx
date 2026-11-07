@@ -17,8 +17,7 @@ export function IntegrationsPanel() {
   const marketingSlot = secrets?.slots.find((slot) => slot.name === "MARKETING_API_KEY");
 
   return (
-    <div className="max-w-3xl">
-      <Panel>
+    <Panel>
         <h2 className="font-semibold">{t("settings.section.integrations")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.integrationsDescription")}</p>
         <p className="mt-3 text-sm text-muted-foreground">{t("integrations.intro")}</p>
@@ -36,6 +35,5 @@ export function IntegrationsPanel() {
           </>
         ) : null}
       </Panel>
-    </div>
   );
 }
