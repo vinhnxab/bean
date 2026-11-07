@@ -173,7 +173,7 @@ export function SecretField({ slot, disabled = false }: { slot: SecretSlotDto; d
           className="grid col-span-full gap-3 sm:col-span-2 border-t border-border pt-3 sm:pt-0"
           onSubmit={handleSave}
         >
-          <div className="grid gap-1.5">
+          <div className="grid gap-1.5 mt-3">
             <label htmlFor={`secret-value-${slot.name}`} className="text-sm font-medium">
               {t("secret.enter")}
             </label>
