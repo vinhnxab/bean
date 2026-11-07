@@ -22,6 +22,7 @@ use std::time::Duration;
 use bean_types::config::{Config, SpeechProviderKind};
 use secrecy::SecretString;
 use thiserror::Error;
+use tracing::warn;
 
 mod api;
 mod local;
@@ -121,6 +122,10 @@ pub fn build_speech(
                     "chế độ `api` yêu cầu API key — đặt biến `voice.api_key_env`".into(),
                 )
             })?;
+            warn!(
+                provider = voice.provider.as_str(),
+                "voice chế độ `api`: audio người dùng sẽ được gửi tới nhà cung cấp bên thứ ba"
+            );
             Arc::new(ElevenLabsSpeech::from_config(voice, key)?)
         }
     };

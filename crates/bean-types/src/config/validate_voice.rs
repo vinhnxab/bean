@@ -106,10 +106,6 @@ impl Config {
                         )));
                     }
                 }
-                tracing::warn!(
-                    provider = voice.provider.as_str(),
-                    "voice chế độ `api`: audio người dùng sẽ được gửi tới nhà cung cấp bên thứ ba"
-                );
             }
         }
         Ok(())
