@@ -244,7 +244,7 @@ function ChatSession({ sessionId }: { sessionId: number }) {
           aria-live="polite"
           aria-relevant="additions text"
         >
-          <div className="mx-auto max-w-4xl">
+          <div className="max-w-none">
             {history.isPending ? (
               <p className="py-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
             ) : null}
