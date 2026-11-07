@@ -498,7 +498,7 @@ struct WireResponse {
     #[serde(default)]
     stop_reason: Option<String>,
     #[serde(default)]
-    usage: WireUsage,
+    usage: Option<WireUsage>,
 }
 
 #[derive(Deserialize)]
@@ -556,6 +556,7 @@ pub fn parse_response(text: &str) -> Result<LlmResponse, LlmError> {
         }
     }
 
+    let usage = wire.usage.unwrap_or_default();
     Ok(LlmResponse {
         text: if text_out.is_empty() {
             None
@@ -565,8 +566,8 @@ pub fn parse_response(text: &str) -> Result<LlmResponse, LlmError> {
         tool_calls,
         stop: map_stop_reason(wire.stop_reason.as_deref()),
         usage: Usage {
-            input_tokens: wire.usage.input_tokens,
-            output_tokens: wire.usage.output_tokens,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
         },
     })
 }

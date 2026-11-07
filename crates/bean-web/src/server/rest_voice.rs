@@ -65,8 +65,9 @@ fn saved_voice_state(state: &WebState) -> Option<VoiceState> {
 /// thắng seed `bean.toml`, "hành động mới nhất trên UI là ý cuối cùng".
 ///
 /// Đây là nền duy nhất cho cả `voice_status` lẫn gộp request PATCH: một hàm gộp thì
-/// hai handler không bao giờ trả lệch nhau về cấu hình hiệu lực. Cờ `enabled` **không**
-/// được gộp ở đây — nó thuộc [`voice_runtime_enabled`] (state file có thể chỉ lưu toggle).
+/// hai handler không bao giờ trả lệch nhau về cấu hình hiệu lực. Mọi trường runtime
+/// (bao gồm cả `enabled`) được gộp từ state file — "hành động mới nhất trên UI là ý
+/// cuối cùng", state file thắng seed `bean.toml`.
 ///
 /// `pub(super)` cho M29: `rest_settings::test_voice` probe đúng cấu hình hiệu lực này,
 /// không phải seed — probe một cấu hình mà UI đang hiển thị thì kết luận mới khớp.
@@ -88,6 +89,8 @@ pub(super) fn effective_voice_config(state: &WebState) -> VoiceConfig {
         if let Some(voice_vi) = &saved.tts_voice_vi {
             voice.tts_voice_vi = Some(voice_vi.clone());
         }
+        // enabled cũng 1 nơi: state file (UI) thắng seed bean.toml.
+        voice.enabled = saved.enabled;
     }
     voice
 }
@@ -155,6 +158,8 @@ pub(super) async fn voice_update(
 
     // Nền = seed + state file (lựa chọn cũ từ UI), rồi request thắng cả hai.
     let mut next = effective_voice_config(&state);
+    // enabled cũng được áp ngay từ request, như các trường cấu hình khác.
+    next.enabled = request.enabled;
     let mut config_changed = false;
     if let Some(provider) = request.provider.as_deref() {
         let parsed = SpeechProviderKind::from_config_str(provider).ok_or_else(|| {

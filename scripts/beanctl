@@ -18,7 +18,7 @@
 
 set -uo pipefail
 
-REPO="/home/vinhnx/dev/BeanAgent"
+REPO="/home/bean/dev/bean"
 BIN="$REPO/target/release/bean"
 CONFIG="$REPO/bean.toml"
 ENV_FILE="$HOME/.config/bean/env"
