@@ -101,80 +101,80 @@ export function PasswordPanel() {
 
   return (
     <Panel>
-        <h2 className="font-semibold">{t("password.panelTitle")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("password.panelHint")}</p>
+      <h2 className="font-semibold">{t("password.panelTitle")}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{t("password.panelHint")}</p>
 
-        <form className="mt-5 grid gap-4 border-t border-border pt-4" onSubmit={handleSubmit}>
-          {/* Mật khẩu hiện tại */}
-          <div className="grid gap-1.5">
-            <label htmlFor="pwd-current" className="text-sm font-medium">
-              {t("password.current")}
-            </label>
-            <PasswordInput
-              id="pwd-current"
-              value={current}
-              onChange={setCurrent}
-              autoComplete="current-password"
-              disabled={pending}
-            />
-          </div>
+      <form className="mt-5 grid gap-4 border-t border-border pt-4" onSubmit={handleSubmit}>
+        {/* Mật khẩu hiện tại */}
+        <div className="grid gap-1.5">
+          <label htmlFor="pwd-current" className="text-sm font-medium">
+            {t("password.current")}
+          </label>
+          <PasswordInput
+            id="pwd-current"
+            value={current}
+            onChange={setCurrent}
+            autoComplete="current-password"
+            disabled={pending}
+          />
+        </div>
 
-          {/* Mật khẩu mới */}
-          <div className="grid gap-1.5">
-            <label htmlFor="pwd-new" className="text-sm font-medium">
-              {t("password.new")}
-            </label>
-            <PasswordInput
-              id="pwd-new"
-              value={next}
-              onChange={setNext}
-              autoComplete="new-password"
-              disabled={pending}
-            />
-          </div>
+        {/* Mật khẩu mới */}
+        <div className="grid gap-1.5">
+          <label htmlFor="pwd-new" className="text-sm font-medium">
+            {t("password.new")}
+          </label>
+          <PasswordInput
+            id="pwd-new"
+            value={next}
+            onChange={setNext}
+            autoComplete="new-password"
+            disabled={pending}
+          />
+        </div>
 
-          {/* Xác nhận mật khẩu mới */}
-          <div className="grid gap-1.5">
-            <label htmlFor="pwd-confirm" className="text-sm font-medium">
-              {t("password.confirm")}
-            </label>
-            <PasswordInput
-              id="pwd-confirm"
-              value={confirm}
-              onChange={setConfirm}
-              autoComplete="new-password"
-              disabled={pending}
-            />
-          </div>
+        {/* Xác nhận mật khẩu mới */}
+        <div className="grid gap-1.5">
+          <label htmlFor="pwd-confirm" className="text-sm font-medium">
+            {t("password.confirm")}
+          </label>
+          <PasswordInput
+            id="pwd-confirm"
+            value={confirm}
+            onChange={setConfirm}
+            autoComplete="new-password"
+            disabled={pending}
+          />
+        </div>
 
-          {/* Nút submit + thông báo */}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" disabled={!canSubmit}>
-              {t("password.submit")}
-            </Button>
-            {changePassword.isSuccess ? (
-              <span role="status" className="text-xs text-muted-foreground">
-                {t("password.success")}
-              </span>
-            ) : null}
-          </div>
-
-          {/* Lỗi validation client */}
-          {validationError ? (
-            <p className="flex items-center gap-1.5 text-sm font-medium text-destructive" role="alert">
-              <CircleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-              {validationError}
-            </p>
+        {/* Nút submit + thông báo */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="submit" disabled={!canSubmit}>
+            {t("password.submit")}
+          </Button>
+          {changePassword.isSuccess ? (
+            <span role="status" className="text-xs text-muted-foreground">
+              {t("password.success")}
+            </span>
           ) : null}
+        </div>
 
-          {/* Lỗi server */}
-          {serverError ? (
-            <p className="flex items-center gap-1.5 text-sm font-medium text-destructive" role="alert">
-              <CircleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
-              {serverError}
-            </p>
-          ) : null}
-        </form>
-      </Panel>
+        {/* Lỗi validation client */}
+        {validationError ? (
+          <p className="flex items-center gap-1.5 text-sm font-medium text-destructive" role="alert">
+            <CircleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+            {validationError}
+          </p>
+        ) : null}
+
+        {/* Lỗi server */}
+        {serverError ? (
+          <p className="flex items-center gap-1.5 text-sm font-medium text-destructive" role="alert">
+            <CircleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />
+            {serverError}
+          </p>
+        ) : null}
+      </form>
+    </Panel>
   );
 }

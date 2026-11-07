@@ -32,22 +32,22 @@ export function VoicePanel() {
 
   return (
     <Panel>
-        <h2 className="font-semibold">{t("voice.panelTitle")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("voice.panelHint")}</p>
-        <VoiceForm
-          // Mount lại (reset bản nháp về snapshot) mỗi khi cấu hình hiệu lực trên
-          // server đổi — sau PATCH thành công. KHÔNG gồm `enabled`: toggle không
-          // đổi cấu hình, và remount giữa chừng sẽ xoá nội dung người dùng đang gõ.
-          key={`${data.provider}|${data.language}|${data.api_key_set}|${data.tts_voice_id}|${data.tts_voice_vi}`}
-          data={data}
-          // Mutation sống ở cha: form remount không được reset trạng thái
-          // thành công/lỗi của lần PATCH vừa rồi (thông báo "Đã lưu" phải còn).
-          updateVoice={updateVoice}
-        />
-        <div className="mt-4 flex gap-2">
-          <ConnectionTestButton target="voice" />
-        </div>
-      </Panel>
+      <h2 className="font-semibold">{t("voice.panelTitle")}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{t("voice.panelHint")}</p>
+      <VoiceForm
+        // Mount lại (reset bản nháp về snapshot) mỗi khi cấu hình hiệu lực trên
+        // server đổi — sau PATCH thành công. KHÔNG gồm `enabled`: toggle không
+        // đổi cấu hình, và remount giữa chừng sẽ xoá nội dung người dùng đang gõ.
+        key={`${data.provider}|${data.language}|${data.api_key_set}|${data.tts_voice_id}|${data.tts_voice_vi}`}
+        data={data}
+        // Mutation sống ở cha: form remount không được reset trạng thái
+        // thành công/lỗi của lần PATCH vừa rồi (thông báo "Đã lưu" phải còn).
+        updateVoice={updateVoice}
+      />
+      <div className="mt-4 flex gap-2">
+        <ConnectionTestButton target="voice" />
+      </div>
+    </Panel>
   );
 }
 
