@@ -91,7 +91,7 @@ impl Default for VoiceConfig {
             piper_command: "piper".to_string(),
             piper_model: String::new(),
             api_key: None,
-            api_key_env: "ELEVENLABS_API_KEY".to_string(),
+            api_key_env: "ELEVENLABS_KEY".to_string(),
             api_base_url: "https://api.elevenlabs.io".to_string(),
             stt_model: "scribe_v2".to_string(),
             tts_model: "eleven_multilingual_v2".to_string(),

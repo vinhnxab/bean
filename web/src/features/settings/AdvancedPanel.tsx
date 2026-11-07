@@ -58,7 +58,7 @@ export function AdvancedPanel() {
         <p className="mt-1 text-xs text-muted-foreground truncate">{t("advanced.cliHint")}</p>
 
         {pendingRestart.length > 0 ? (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-300">
+          <div className="my-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800 dark:border-amber-900/30 dark:bg-amber-900/20 dark:text-amber-300">
             {t("settings.restartBanner", { keys: pendingRestart.map((row) => row.key).join(", ") })}
           </div>
         ) : null}

@@ -81,7 +81,7 @@ Mọi nơi hiển thị giá trị phải là **giá trị hiệu lực + nguồ
 Mỗi secret có một slot: `{ name, nhãn, nhóm, dùng bởi }`. Slot **dẫn xuất từ cấu hình**, không hardcode
 rải rác: `llm.api_key_env`, `[[llm.providers]].api_key_env`, `tools.web_search.api_key_env`,
 `telegram.token_env`, `billing.api_key_env`, các biến credential của `[marketing]`,
-`ELEVENLABS_API_KEY` (voice). `validate()` hiện có (D13.2, D15.3) tiếp tục cấm trùng tên giữa
+`ELEVENLABS_KEY` (voice). `validate()` hiện có (D13.2, D15.3) tiếp tục cấm trùng tên giữa
 LLM/search/Telegram/billing/marketing/voice — **không được nới**.
 
 Khi người dùng dán key cho một profile LLM mới từ UI: dùng `api_key_env` của profile; nếu chưa có,

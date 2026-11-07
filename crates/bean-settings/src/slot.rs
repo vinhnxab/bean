@@ -205,7 +205,7 @@ mod tests {
                 .map(|slot| (slot.group, slot.used_by.clone()))
         };
         // Mặc định của bean-types: ANTHROPIC_API_KEY (llm), TAVILY_API_KEY (search),
-        // TELEGRAM_BOT_TOKEN (telegram), ELEVENLABS_API_KEY (voice)…
+        // TELEGRAM_BOT_TOKEN (telegram), ELEVENLABS_KEY (voice)…
         assert_eq!(
             find("ANTHROPIC_API_KEY").map(|(group, _)| group),
             Some(SlotGroup::Llm)
@@ -219,7 +219,7 @@ mod tests {
             Some(SlotGroup::Telegram)
         );
         assert_eq!(
-            find("ELEVENLABS_API_KEY").map(|(group, _)| group),
+            find("ELEVENLABS_KEY").map(|(group, _)| group),
             Some(SlotGroup::Voice)
         );
         // Slot sắp theo tên, không trùng.

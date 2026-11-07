@@ -50,7 +50,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
     // Mirror serve.rs: voice khai báo đủ + seed bật khi fixture dựng provider;
     // `None` = `[voice]` chưa cấu hình (không có model/key nào để dựng).
     config.voice.enabled = speech_enabled;
-    // Tên biến env riêng cho test: nếu dùng mặc định `ELEVENLABS_API_KEY` thì máy dev
+    // Tên biến env riêng cho test: nếu dùng mặc định `ELEVENLABS_KEY` thì máy dev
     // tình cờ có biến đó sẽ làm test "api thiếu key → 422" thất bại không xác định.
     config.voice.api_key_env = "BEAN_TEST_ELEVENLABS_KEY".to_string();
 

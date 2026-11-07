@@ -89,7 +89,7 @@ File mẫu đầy đủ là `bean.example.toml`. Các trường quan trọng:
 |---|---|---|
 | `bean.toml` | Cấu hình tĩnh; có thể chứa `api_key` do UI ghi | `.gitignore`; key tại đây **ưu tiên hơn** `api_key_env` |
 | `data.dir/llm-state.json` | Provider + model đang chọn trong UI | **Thắng** `[llm].model` lúc khởi động; không chứa key |
-| `data.dir/voice-state.json` | Voice bật/tắt, ngôn ngữ, key ElevenLabs nhập qua UI | Key tại đây ghi đè biến môi trường `ELEVENLABS_API_KEY` |
+| `data.dir/voice-state.json` | Voice bật/tắt, ngôn ngữ, key ElevenLabs nhập qua UI | Key tại đây ghi đè biến môi trường `ELEVENLABS_KEY` |
 | `~/.config/bean/env` | Biến môi trường mà `scripts/beanctl` nạp trước khi chạy | Quyền `0600`, nằm ngoài repo |
 | `data.dir/auth.toml` | Hash mật khẩu web | Quyền `0600` |
 
@@ -231,7 +231,7 @@ Giữ nút micro trong khung chat để nói thay vì gõ. Hai chế độ trong
   dùng được gửi tới nhà cung cấp bên thứ ba**; Bean cảnh báo điều này trong log lúc khởi động.
 
 Key ElevenLabs nhập trong màn Cài đặt (lưu `data.dir/voice-state.json`, quyền `0600`, thắng biến
-môi trường) hoặc đặt `ELEVENLABS_API_KEY`. Lượt chat bắt đầu bằng voice chỉ chạy được tool mức
+môi trường) hoặc đặt `ELEVENLABS_KEY`. Lượt chat bắt đầu bằng voice chỉ chạy được tool mức
 `Safe`. Lỗi hay gặp: transcribe trả `502` — kiểm tra Bean có kế thừa biến proxy
 (`ALL_PROXY`/`HTTPS_PROXY`) hỏng hay không, xem `docs/known-issues.md` K29.
 
