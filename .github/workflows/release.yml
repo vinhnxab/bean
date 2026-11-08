@@ -85,11 +85,12 @@ jobs:
       - name: Build binary (release, UI embedded)
         shell: bash
         run: |
+          set -o pipefail
           if [ "${{ matrix.cross }}" = "true" ]; then
             cargo install cross --locked
-            cross build --release --locked -p bean --features ui --target ${{ matrix.target }}
+            cross build --release --locked -p bean --features ui --target ${{ matrix.target }} 2>&1 | tee /tmp/build.log
           else
-            cargo build --release --locked -p bean --features ui --target ${{ matrix.target }}
+            cargo build --release --locked -p bean --features ui --target ${{ matrix.target }} 2>&1 | tee /tmp/build.log
           fi
 
       # Một định dạng `.tar.gz` cho mọi nền tảng (D23.2) — Windows runner có
@@ -99,6 +100,26 @@ jobs:
         run: |
           tar -czf "bean-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" "${{ matrix.bin }}"
           ls -la "bean-${{ matrix.target }}.tar.gz"
+
+      # Tạm thời (debug macOS x86_64): khi build fail, commit đuôi log lên
+      # branch `ci-debug` để xem lỗi không cần token. Bỏ sau khi sửa xong.
+      - name: Dump build log tail to ci-debug branch
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo "target=${{ matrix.target }}"
+            rustc --version; cargo --version
+          } > /tmp/build-tail.txt
+          tail -n 150 /tmp/build.log >> /tmp/build-tail.txt 2>/dev/null || true
+          git config user.name "ci-debug"
+          git config user.email "ci-debug@users.noreply.github.com"
+          git fetch origin ci-debug 2>/dev/null || true
+          git checkout -B ci-debug "$(git rev-parse origin/ci-debug 2>/dev/null || echo HEAD)"
+          cp /tmp/build-tail.txt "build-tail-${{ matrix.target }}.log"
+          git add "build-tail-${{ matrix.target }}.log"
+          git commit -m "ci-debug: build log ${{ matrix.target }}"
+          git push origin ci-debug
 
       - uses: actions/upload-artifact@v4
         with:
