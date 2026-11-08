@@ -855,6 +855,48 @@ async fn lan_access_disable_writes_loopback_atomically_and_audits() {
 }
 
 #[tokio::test]
+async fn lan_access_get_reflects_pending_state_before_and_after_apply() {
+    // Lỗi thật 2026-11-08: GET đọc snapshot in-memory lúc khởi động nên sau khi
+    // POST ghi file thành công, UI refetch GET thấy trạng thái cũ và công tắc
+    // bật lại vị trí cũ. GET phải đọc bean.toml trên đĩa (nguồn sự thật chờ
+    // restart, như GET /api/settings).
+    let (_dir, config_toml, app) = fixture(None);
+    std::fs::write(&config_toml, BEAN_TOML_LAN).unwrap();
+    let token = login(&app).await;
+
+    // Trước Apply: file khai LAN ⇒ GET phải thấy "lan" (chờ restart), dù tiến
+    // trình đang chạy vẫn bind theo snapshot cũ.
+    let (status, json) =
+        request_json(&app, "GET", "/api/settings/lan-access", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json.get("mode").and_then(serde_json::Value::as_str),
+        Some("lan"),
+        "GET phải phản ánh bean.toml trên đĩa: {json}"
+    );
+
+    // Sau Apply tắt LAN: GET phải thấy "loopback" (trạng thái ghi vào đĩa).
+    let (status, _) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":false,"password":"correct horse battery staple"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, json) =
+        request_json(&app, "GET", "/api/settings/lan-access", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json.get("mode").and_then(serde_json::Value::as_str),
+        Some("loopback"),
+        "sau Apply, GET phải thấy trạng thái chờ restart: {json}"
+    );
+    assert_eq!(json.get("url"), Some(&serde_json::Value::Null));
+}
+
+#[tokio::test]
 async fn lan_access_enable_uses_detected_lan_or_fails_closed() {
     let (_dir, config_toml, app) = fixture(None);
     let token = login(&app).await;

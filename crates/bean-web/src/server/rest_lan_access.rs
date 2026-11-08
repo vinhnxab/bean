@@ -77,18 +77,33 @@ fn lan_access_dto(bind: SocketAddr, allow_remote: bool, lan_ip: Option<Ipv4Addr>
     }
 }
 
-/// `GET /api/settings/lan-access` — mọi user đã đăng nhập, chỉ đọc: chế độ hiện
-/// hành, IP LAN dò được, cổng và URL tương ứng.
+/// Trạng thái LAN **sẽ hiệu lực sau restart** đọc qua `SettingsService` (nguồn sự
+/// thật trên đĩa, như `GET /api/settings`): nếu đọc `state.config` (snapshot lúc
+/// khởi động) thì ngay sau Apply, UI refetch GET sẽ thấy trạng thái cũ và công tắc
+/// bật lại vị trí cũ (lỗi thật 2026-11-08). Đĩa lỗi/parse lỗi ⇒ fallback snapshot.
+fn effective_lan_view(state: &WebState) -> (SocketAddr, bool) {
+    let service = bean_settings::SettingsService::new(&state.config, state.router.config_path());
+    let bind = bean_settings::lookup("web.bind")
+        .map(|entry| service.get(entry).value)
+        .and_then(|value| value.parse::<SocketAddr>().ok())
+        .unwrap_or(state.config.web.bind);
+    let allow_remote = bean_settings::lookup("web.allow_remote")
+        .map(|entry| service.get(entry).value == "true")
+        .unwrap_or(state.config.web.allow_remote);
+    (bind, allow_remote)
+}
+
+/// `GET /api/settings/lan-access` — mọi user đã đăng nhập, chỉ đọc: trạng thái sẽ
+/// hiệu lực sau restart (từ `bean.toml` trên đĩa), IP LAN dò được, cổng và URL.
+/// Đọc trạng thái chờ restart là chủ ý: banner pending restart của UI báo rằng
+/// server **đang chạy** vẫn theo cấu hình cũ cho đến khi `beanctl restart`.
 pub(super) async fn lan_access_status(
     State(state): State<WebState>,
     jar: CookieJar,
 ) -> ApiResult<Json<LanAccessDto>> {
     let _ = require_user(&state, &jar).await?;
-    Ok(Json(lan_access_dto(
-        state.config.web.bind,
-        state.config.web.allow_remote,
-        detect_lan_ipv4(),
-    )))
+    let (bind, allow_remote) = effective_lan_view(&state);
+    Ok(Json(lan_access_dto(bind, allow_remote, detect_lan_ipv4())))
 }
 
 /// `POST /api/settings/lan-access` — bật/tắt truy cập LAN (D21.x): ghi **atomic**
