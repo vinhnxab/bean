@@ -27,12 +27,15 @@
 //! `bean_osauth_win::verify_logon` — crate riêng vì workspace `forbid(unsafe_code)`).
 
 use std::process::{Command, Stdio};
+
+#[cfg(not(any(target_os = "macos", windows)))]
 use std::time::Duration;
 
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 
 /// Trần chờ mỗi lệnh xác minh — PAM treo không được phép treo request HTTP.
+#[cfg(not(any(target_os = "macos", windows)))]
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Tài khoản OS đang chạy tiến trình Bean.
@@ -270,12 +273,7 @@ fn verify_unix_linux(username: &str, password: &SecretString) -> Result<(), OsAu
 #[cfg(target_os = "macos")]
 fn verify_unix_macos(username: &str, password: &SecretString) -> Result<(), OsAuthError> {
     let output = Command::new("dscl")
-        .args([
-            ".",
-            "-authonly",
-            username,
-            password.expose_secret().as_str(),
-        ])
+        .args([".", "-authonly", username, password.expose_secret()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -302,6 +300,7 @@ fn verify_windows(username: &str, password: &SecretString) -> Result<(), OsAuthE
 
 /// Chờ tiến trình con với trần [`VERIFY_TIMEOUT`] — quá trần kill rồi trả lỗi
 /// hạ tầng (không phải sai mật khẩu).
+#[cfg(not(any(target_os = "macos", windows)))]
 fn wait_with_timeout(child: &mut std::process::Child) -> Result<std::process::Output, OsAuthError> {
     let deadline = std::time::Instant::now() + VERIFY_TIMEOUT;
     loop {
