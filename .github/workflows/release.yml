@@ -78,6 +78,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Cài std cho target tường minh — dtolnay/rust-toolchain không đảm bảo cài
+      # target khác host (x86_64-apple-darwin trên runner ARM đã dính E0463).
+      - name: Install rust target std
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
@@ -85,12 +91,11 @@ jobs:
       - name: Build binary (release, UI embedded)
         shell: bash
         run: |
-          set -o pipefail
           if [ "${{ matrix.cross }}" = "true" ]; then
             cargo install cross --locked
-            cross build --release --locked -p bean --features ui --target ${{ matrix.target }} 2>&1 | tee /tmp/build.log
+            cross build --release --locked -p bean --features ui --target ${{ matrix.target }}
           else
-            cargo build --release --locked -p bean --features ui --target ${{ matrix.target }} 2>&1 | tee /tmp/build.log
+            cargo build --release --locked -p bean --features ui --target ${{ matrix.target }}
           fi
 
       # Một định dạng `.tar.gz` cho mọi nền tảng (D23.2) — Windows runner có
@@ -101,24 +106,8 @@ jobs:
           tar -czf "bean-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" "${{ matrix.bin }}"
           ls -la "bean-${{ matrix.target }}.tar.gz"
 
-      # Tạm thời (debug macOS x86_64): khi build fail, bơm đuôi log vào
-      # annotations (::error::) — đọc được qua API check-runs không cần token.
-      # Bỏ sau khi sửa xong.
-      - name: Dump build log tail as annotations
-        if: failure()
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import sys
-          try:
-              log = open('/tmp/build.log', encoding='utf-8', errors='replace').read()
-          except Exception as e:
-              print(f"::error::khong doc duoc build.log: {e}")
-              sys.exit(0)
-          tail = log[-3000:].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print(f"::error::BUILD TAIL {tail}")
-          PY
-
+      # Một định dạng `.tar.gz` cho mọi nền tảng (D23.2) — Windows runner có
+      # bsdtar hỗ trợ `-czf`. Binary nằm ở cấp gốc của archive.
       - uses: actions/upload-artifact@v4
         with:
           name: bean-${{ matrix.target }}
