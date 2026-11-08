@@ -131,6 +131,8 @@ jobs:
         working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
+          # Job này không có actions/checkout — gh không tự dò repo được nếu thiếu.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "${{ github.ref_name }}" \
             --title "Bean ${{ github.ref_name }}" \
