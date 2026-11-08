@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod osauth;
 pub mod paths;
 pub mod policy;
 pub mod ratelimit;
@@ -23,6 +24,9 @@ pub mod untrusted;
 pub mod web;
 
 pub use audit::{AuditEntry, AuditLog, entry_now, redact_secrets, redact_text_secrets};
+pub use osauth::{
+    FakeOsAuth, OsAccount, OsAuth, OsAuthError, PasswordStatus, RealOsAuth, parse_passwd_status,
+};
 pub use paths::CapWorkspace;
 pub use policy::{DenyReason, PolicyDecision, SessionPolicy, decide, deny_list_reason};
 pub use ratelimit::{DEFAULT_MAX_LOCK, DEFAULT_THRESHOLD, DEFAULT_WINDOW, RateLimiter};

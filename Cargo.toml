@@ -18,6 +18,7 @@ members = [
   "crates/bean-tools",
   "crates/bean-types",
   "crates/bean-mcp-test-server",
+  "crates/bean-osauth-win",
   "crates/bean-web",
 ]
 # `default-members` để `cargo build --no-default-features` (bản headless, không UI)

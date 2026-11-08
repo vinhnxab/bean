@@ -46,7 +46,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bean_core::{Channel, Router};
 use bean_memory::Store;
-use bean_security::AuditLog;
+use bean_security::{AuditLog, OsAuth};
 use bean_skills::SkillCatalog;
 use bean_speech::SpeechProvider;
 use bean_tools::WorkspaceFs;
@@ -68,6 +68,7 @@ mod rebind;
 mod rest_audit_tools;
 mod rest_auth_status;
 mod rest_config;
+mod rest_host_mode;
 mod rest_lan_access;
 mod rest_memories;
 mod rest_sessions;
@@ -140,6 +141,8 @@ pub struct WebState {
     pub speech: Arc<RwLock<Option<Arc<dyn SpeechProvider>>>>,
     /// Broadcast notification từ scheduler/channel.
     pub notifications: broadcast::Sender<ServerMsg>,
+    /// Xác minh mật khẩu OS cho step-up host mode (D22.2).
+    pub os_auth: Arc<dyn OsAuth>,
     /// Thời điểm process bắt đầu.
     pub started_at: Instant,
     /// Tham số lắng nghe hiệu lực (D21.7) — guard/handler đọc nóng qua
@@ -187,6 +190,9 @@ pub struct WebStateDeps {
     /// Điểm áp rebind lúc nóng (D21.7); mặc định [`NoopRebind`] khi không có
     /// supervisor (test, nhúng khác).
     pub rebind: Arc<dyn WebRebind>,
+    /// Xác minh mật khẩu tài khoản OS cho step-up toggle host mode (D22.2).
+    /// `bean serve` cắm [`bean_security::RealOsAuth`], test cắm giả (hermetic).
+    pub os_auth: Arc<dyn OsAuth>,
 }
 
 impl WebState {
@@ -203,6 +209,7 @@ impl WebState {
             workspace,
             speech,
             rebind,
+            os_auth,
         } = deps;
         let web_listen = rebind::WebListen::from_config(&config)?;
         let (web_listen, _) = watch::channel(web_listen);
@@ -219,6 +226,7 @@ impl WebState {
             started_at: Instant::now(),
             web_listen: Arc::new(web_listen),
             rebind,
+            os_auth,
             ws_connections: Arc::new(Semaphore::new(MAX_WS_CONNECTIONS)),
             speech: Arc::new(RwLock::new(speech)),
         })

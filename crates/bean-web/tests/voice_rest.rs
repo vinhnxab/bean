@@ -97,6 +97,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
         workspace: Some(workspace_fs),
         speech,
         rebind: Arc::new(NoopRebind),
+        os_auth: Arc::new(bean_security::FakeOsAuth::default()),
     })
     .unwrap();
     (dir, build_router(state))

@@ -142,6 +142,7 @@ async fn make_state_with(
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        os_auth: Arc::new(bean_security::FakeOsAuth::default()),
     })
     .unwrap();
     (build_router(state.clone()), state)

@@ -200,6 +200,19 @@ export const testServer = setupServer(
       api_key_set: false,
     }),
   ),
+  // (D22.2) Card Host mode mount cạnh LAN access trong panel Advanced — mặc định
+  // trả sandbox docker, chưa pending, máy có mật khẩu (fail-closed như thật).
+  // Test riêng của card dùng `testServer.use(...)` ghi đè theo kịch bản; POST
+  // (mutation step-up) cố ý KHÔNG có handler mặc định — gọi ngoài ý muốn phải
+  // lỗi to, không được im lặng thành công.
+  http.get("/api/settings/host-mode", () =>
+    HttpResponse.json({
+      mode: "docker",
+      running_mode: "docker",
+      os_password_required: true,
+      pending: false,
+    }),
+  ),
 );
 
 /**

@@ -57,6 +57,9 @@ import type {
   VoiceUpdateRequest,
 } from "@/api/bindings";
 import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
+import type { HostModeDto } from "@/api/generated/HostModeDto";
+import type { HostModeMutateResponse } from "@/api/generated/HostModeMutateResponse";
+import type { HostModeRequest } from "@/api/generated/HostModeRequest";
 
 /** Lỗi HTTP có mã ổn định từ API. */
 export class ApiRequestError extends Error {
@@ -399,6 +402,28 @@ export const api = {
     requestJson<LanAccessMutateResponse>("/api/settings/lan-access", {
       method: "POST",
       body: request,
+    }),
+
+  /**
+   * Trạng thái host mode (D22.2): mode trên đĩa (sẽ hiệu lực) vs mode đang chạy,
+   * cần mật khẩu máy không (fail-closed) và cờ pending cho gợi ý restart. Chỉ
+   * đọc, mọi user đã đăng nhập.
+   */
+  hostMode: (signal?: AbortSignal) => requestJson<HostModeDto>("/api/settings/host-mode", { signal }),
+
+  /**
+   * Bật/tắt host mode (D22.2): ghi `security.sandbox.mode` (`host`/`docker`) —
+   * admin + step-up mật khẩu máy khi request ghi đĩa. Hiệu lực sau restart. Lỗi:
+   * 401 `os_password_required`/`invalid_os_password`, 429 `rate_limited`, 403
+   * `admin_required`, 503 `os_auth_unavailable`/`config_readonly`.
+   */
+  setHostMode: (request: HostModeRequest) =>
+    requestJson<HostModeMutateResponse>("/api/settings/host-mode", {
+      method: "POST",
+      body: request,
+      // 401 ở đây là step-up mật khẩu máy (thiếu/sai), không phải hết phiên —
+      // hiện lỗi tại form, không điều hướng về /login (như `login`).
+      redirectOnUnauthorized: false,
     }),
 
   /**

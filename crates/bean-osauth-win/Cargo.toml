@@ -1,0 +1,11 @@
+[package]
+name = "bean-osauth-win"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "FFI Win32 LogonUserW cho xác minh mật khẩu OS (D22.2) — crate riêng vì cần unsafe"
+
+[dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security"] }

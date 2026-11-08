@@ -11,6 +11,7 @@ import type {
   SettingsPatchRequest,
 } from "@/api/bindings";
 import { api, type SecretPutRequestPayload } from "@/api/client";
+import type { HostModeRequest } from "@/api/generated/HostModeRequest";
 import { queryKeys } from "@/features/auth/queries";
 
 export type { SecretSlotDto, SettingDto };
@@ -84,6 +85,31 @@ export function useSetLanAccess() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
       void queryClient.invalidateQueries({ queryKey: queryKeys.lanAccess });
+    },
+  });
+}
+
+/** Trạng thái host mode (D22.2) — mode trên đĩa vs đang chạy, cần mật khẩu OS không. */
+export function useHostMode() {
+  return useQuery({
+    queryKey: queryKeys.hostMode,
+    queryFn: ({ signal }) => api.hostMode(signal),
+  });
+}
+
+/**
+ * Bật/tắt host mode (D22.2): ghi `security.sandbox.mode` (tầng B) sau step-up
+ * mật khẩu máy. Vô hiệu cả `settings` — banner pending restart của panel
+ * Advanced đọc từ bảng thiết lập — và `hostMode` để switch/pending về đúng
+ * trạng thái server.
+ */
+export function useSetHostMode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: HostModeRequest) => api.setHostMode(request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hostMode });
     },
   });
 }

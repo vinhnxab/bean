@@ -1,6 +1,7 @@
 "use client";
 
 import { Panel } from "@/components/ui/Page";
+import { HostModeCard } from "@/features/settings/HostModeCard";
 import { LanAccessCard } from "@/features/settings/LanAccessCard";
 import { useSettings } from "@/features/settings/queries";
 import { useI18n } from "@/i18n";
@@ -22,6 +23,8 @@ export function AdvancedPanel() {
       <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.advancedDescription")}</p>
 
       <LanAccessCard />
+
+      <HostModeCard />
 
       <div className="mt-4 overflow-x-auto border border-border rounded-lg">
         <table className="w-full text-left text-sm">

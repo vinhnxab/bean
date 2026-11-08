@@ -7,8 +7,9 @@
 //!   `--memory`, `--cpus`, `--pids-limit`, `--cap-drop ALL`,
 //!   `--security-opt no-new-privileges`, container **có tên** (để `docker kill` khi
 //!   timeout), KHÔNG truyền biến môi trường của host (không `-e`, không env-file).
-//! * **`host`** — chạy `sh -c` trực tiếp trên host với cwd = workspace; **mọi lệnh là
+//! * **`host`** — chạy lệnh trực tiếp trên host với cwd = workspace; **mọi lệnh là
 //!   `Dangerous`** (xem [`Sandbox::base_risk`]) và phải bật tường minh trong cấu hình.
+//!   Shell theo nền tảng: `sh -c` trên Unix, `cmd /C` trên Windows (D22.1).
 //!
 //! Timeout: đua với `tokio::time::timeout`; docker mode gọi `docker kill <tên>`
 //! (host mode kill tiến trình con) rồi trả [`SandboxError::Timeout`]. Output cắt ở
@@ -476,32 +477,50 @@ async fn run_docker(
     result
 }
 
-/// Chế độ host: `sh -c <command>` với cwd = workspace. Timeout/cancel ⇒ kill tiến trình.
+/// Chọn shell cho chế độ host theo nền tảng (D22.1):
+///
+/// * Unix (Linux/macOS): `sh -c <command>` — POSIX shell luôn có mặt.
+/// * Windows: `cmd /C <command>` — `cmd.exe` luôn có mặt và truyền exit code của
+///   lệnh cuối ra đúng; Windows PowerShell 5.1 (`-Command`) thường trả 0 dù lệnh
+///   con thất bại, làm `run_shell` báo lỗi sai cho model.
+fn host_shell_args(command: &str) -> (&'static str, Vec<String>) {
+    #[cfg(windows)]
+    {
+        ("cmd", vec!["/C".to_string(), command.to_string()])
+    }
+    #[cfg(not(windows))]
+    {
+        ("sh", vec!["-c".to_string(), command.to_string()])
+    }
+}
+
+/// Chế độ host: chạy `<shell> -c <command>` (`sh` trên Unix, `cmd /C` trên Windows)
+/// với cwd = workspace. Timeout/cancel ⇒ kill tiến trình.
 async fn run_host(
     command: &str,
     workspace: PathBuf,
     timeout: Duration,
     cancel: &CancellationToken,
 ) -> Result<ShellOutcome, SandboxError> {
-    let child = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    let (program, args) = host_shell_args(command);
+    let child = tokio::process::Command::new(program)
+        .args(&args)
         .current_dir(&workspace)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| SandboxError::Launch(format!("không khởi động được sh: {e}")))?;
+        .map_err(|e| SandboxError::Launch(format!("không khởi động được {program}: {e}")))?;
 
     tokio::select! {
         biased;
-        // Huỷ future (cancel/timeout) → kill_on_drop tự kill tiến trình sh.
+        // Huỷ future (cancel/timeout) → kill_on_drop tự kill tiến trình shell.
         _ = cancel.cancelled() => Err(SandboxError::Cancelled),
         _ = tokio::time::sleep(timeout) => Err(SandboxError::Timeout(timeout.as_secs())),
         res = child.wait_with_output() => {
             let output =
-                res.map_err(|e| SandboxError::Launch(format!("sh lỗi: {e}")))?;
+                res.map_err(|e| SandboxError::Launch(format!("{program} lỗi: {e}")))?;
             Ok(ShellOutcome {
                 exit_code: output.status.code(),
                 stdout: cap_stream(String::from_utf8_lossy(&output.stdout).into_owned()),
@@ -548,6 +567,23 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use bean_types::config::{SandboxConfig, SandboxMode};
+
+    #[test]
+    fn host_shell_args_uses_platform_shell() {
+        // D22.1: Unix `sh -c`, Windows `cmd /C` — nhánh Windows chỉ compile-check
+        // trên Windows (CI Linux không chạy được).
+        let (program, args) = host_shell_args("ls -la");
+        #[cfg(windows)]
+        {
+            assert_eq!(program, "cmd");
+            assert_eq!(args, vec!["/C".to_string(), "ls -la".to_string()]);
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(program, "sh");
+            assert_eq!(args, vec!["-c".to_string(), "ls -la".to_string()]);
+        }
+    }
 
     fn docker_args(cmd: &str) -> Vec<String> {
         let ws = tempfile::tempdir().unwrap();

@@ -21,7 +21,7 @@ use axum::http::{Request, StatusCode, header};
 use bean_core::{Router, RouterDeps, RouterOptions};
 use bean_llm::FakeProvider;
 use bean_memory::{MemoryStore, Store};
-use bean_security::{AuditLog, CapWorkspace};
+use bean_security::{AuditLog, CapWorkspace, FakeOsAuth, OsAuth};
 use bean_skills::SkillCatalog;
 use bean_tools::{ToolRegistry, builtin::files::tool::read_file};
 use bean_types::config::RoleConfig;
@@ -86,6 +86,17 @@ fn build_with_rebind(
     config_toml: Option<&Path>,
     rebind: Arc<dyn WebRebind>,
 ) -> AxumRouter {
+    build_with_os_auth(config, config_toml, rebind, Arc::new(FakeOsAuth::default()))
+}
+
+/// Như [`build_with_rebind`] nhưng cắm [`OsAuth`] tuỳ ý — test step-up mật khẩu
+/// OS (D22.2) hermetic: máy chạy CI không bị đụng tới.
+fn build_with_os_auth(
+    config: Config,
+    config_toml: Option<&Path>,
+    rebind: Arc<dyn WebRebind>,
+    os_auth: Arc<dyn OsAuth>,
+) -> AxumRouter {
     set_password(&config.data.dir, PASSWORD, None).unwrap();
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
@@ -126,6 +137,7 @@ fn build_with_rebind(
         workspace: Some(workspace),
         speech: None,
         rebind,
+        os_auth,
     })
     .unwrap();
     build_router(state)
@@ -150,6 +162,28 @@ fn fixture_with_rebind(
     std::fs::write(&config_toml, BEAN_TOML).unwrap();
     let config = config_for(&data, &workspace, viewer);
     let app = build_with_rebind(config, Some(&config_toml), Arc::new(rebind));
+    (dir, config_toml, app)
+}
+
+/// Như [`fixture`] nhưng cắm [`FakeOsAuth`] tuỳ ý — test step-up mật khẩu OS.
+fn fixture_with_os_auth(
+    os_auth: FakeOsAuth,
+    viewer: Option<(&str, &str)>,
+) -> (tempfile::TempDir, PathBuf, AxumRouter) {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config_toml = dir.path().join("bean.toml");
+    std::fs::write(&config_toml, BEAN_TOML).unwrap();
+    let config = config_for(&data, &workspace, viewer);
+    let app = build_with_os_auth(
+        config,
+        Some(&config_toml),
+        Arc::new(NoopRebind),
+        Arc::new(os_auth),
+    );
     (dir, config_toml, app)
 }
 
@@ -1023,6 +1057,236 @@ async fn lan_access_is_readonly_without_config_path() {
         "/api/settings/lan-access",
         Some(&token),
         Some(r#"{"enabled":true,"password":"correct horse battery staple"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(code_of(&json), "config_readonly");
+}
+
+// ────────────────── /api/settings/host-mode (D22.2) ──────────────────
+
+#[tokio::test]
+async fn host_mode_requires_login() {
+    let (_dir, _toml, app) = fixture(None);
+    let (status, _) = request_json(&app, "GET", "/api/settings/host-mode", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        None,
+        Some(r#"{"enabled":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn host_mode_requires_admin_under_rbac() {
+    let (_dir, _toml, app) = fixture(Some(("dev", "dev")));
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(code_of(&json), "admin_required");
+    // GET vẫn được — chỉ đọc.
+    let (status, _) =
+        request_json(&app, "GET", "/api/settings/host-mode", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn host_mode_get_reports_disk_vs_running_and_pending() {
+    let (_dir, config_toml, app) = fixture(None);
+    let token = login(&app).await;
+    // Mặc định: docker trên cả đĩa lẫn snapshot — không pending, cần mật khẩu OS
+    // (FakeOsAuth mặc định has_password = true).
+    let (status, json) =
+        request_json(&app, "GET", "/api/settings/host-mode", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "docker");
+    assert_eq!(json["running_mode"], "docker");
+    assert_eq!(json["pending"], false);
+    assert_eq!(json["os_password_required"], true);
+    // Ghi host vào đĩa (mô phỏng lần bật trước chưa restart) — snapshot khởi động
+    // vẫn docker ⇒ pending = true cho banner restart.
+    std::fs::write(
+        &config_toml,
+        format!("{BEAN_TOML}\n[security.sandbox]\nmode = \"host\"\n"),
+    )
+    .unwrap();
+    let (status, json) =
+        request_json(&app, "GET", "/api/settings/host-mode", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "host");
+    assert_eq!(json["running_mode"], "docker");
+    assert_eq!(json["pending"], true);
+}
+
+#[tokio::test]
+async fn host_mode_noop_when_mode_matches_skips_password() {
+    let (_dir, config_toml, app) = fixture(None);
+    let token = login(&app).await;
+    // Đĩa đang docker, desired docker — no-op không đụng mật khẩu.
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":false}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "docker");
+    assert_eq!(json["restart_required"], false);
+    // File còn nguyên.
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(!written.contains("host"), "file phải còn nguyên: {written}");
+}
+
+#[tokio::test]
+async fn host_mode_rejects_wrong_os_password_and_rate_limits() {
+    let (_dir, config_toml, app) = fixture(None);
+    let token = login(&app).await;
+    for _ in 0..5 {
+        let (status, json) = request_json(
+            &app,
+            "POST",
+            "/api/settings/host-mode",
+            Some(&token),
+            Some(r#"{"enabled":true,"os_password":"wrong"}"#),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(code_of(&json), "invalid_os_password");
+    }
+    // Lần thứ 6 bị khoá theo IP — dùng chung bộ đếm `ip:` với step-up mật khẩu
+    // Bean (D19.5), ngưỡng 5.
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true,"os_password":"wrong"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(code_of(&json), "rate_limited");
+    // File không được đụng khi mọi lần đều sai.
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(!written.contains("host"), "file phải còn nguyên: {written}");
+}
+
+#[tokio::test]
+async fn host_mode_enable_writes_host_and_audits() {
+    let (dir, config_toml, app) = fixture(None);
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true,"os_password":"right"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "host");
+    assert_eq!(json["restart_required"], true);
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(
+        written.contains("mode = \"host\""),
+        "file phải ghi host: {written}"
+    );
+    // Audit: event step-up thành công + một `config.set` cho khoá mode, không
+    // chứa mật khẩu.
+    let audit = AuditLog::open(&dir.path().join("data").join("audit")).unwrap();
+    let entries = audit.read_recent(None, 100);
+    let raw = serde_json::to_string(&entries).unwrap();
+    assert!(
+        !raw.contains("right"),
+        "audit không được chứa mật khẩu: {raw}"
+    );
+    let step_ups = entries
+        .iter()
+        .filter(|entry| entry.get("tool").and_then(serde_json::Value::as_str) == Some("os_step_up"))
+        .count();
+    assert_eq!(step_ups, 1, "một event os_step_up: {entries:?}");
+    let config_sets = entries
+        .iter()
+        .filter(|entry| entry.get("tool").and_then(serde_json::Value::as_str) == Some("config.set"))
+        .count();
+    assert_eq!(config_sets, 1, "một khoá, một event: {entries:?}");
+}
+
+#[tokio::test]
+async fn host_mode_skips_password_when_os_account_has_none() {
+    let os_auth = FakeOsAuth {
+        account: Ok(bean_security::OsAccount {
+            username: "bean".into(),
+            has_password: false,
+        }),
+        password: None,
+    };
+    let (_dir, config_toml, app) = fixture_with_os_auth(os_auth, None);
+    let token = login(&app).await;
+    // Không gửi os_password — máy không đặt mật khẩu thì bỏ qua step-up.
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "host");
+    assert_eq!(json["restart_required"], true);
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(
+        written.contains("mode = \"host\""),
+        "file phải ghi host: {written}"
+    );
+}
+
+#[tokio::test]
+async fn host_mode_requires_os_password_when_machine_has_one() {
+    let (_dir, _toml, app) = fixture(None);
+    let token = login(&app).await;
+    // Thiếu os_password — 401 kèm code riêng để UI hiện ô nhập.
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(code_of(&json), "os_password_required");
+}
+
+#[tokio::test]
+async fn host_mode_is_readonly_without_config_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config = config_for(&data, &workspace, None);
+    let app = build(config, None);
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true,"os_password":"right"}"#),
     )
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);

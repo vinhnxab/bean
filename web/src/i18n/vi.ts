@@ -462,6 +462,25 @@ export const vi = {
   "settings.lanAccess.cancel": "Huỷ",
   "settings.lanAccess.saveFailed": "Không ghi được cấu hình LAN.",
   "settings.lanAccess.loadFailed": "Không đọc được trạng thái LAN access.",
+  "settings.hostMode.title": "Host mode",
+  "settings.hostMode.description":
+    "Khi bật, run_shell chạy trực tiếp trên máy này, không qua sandbox — mọi lệnh shell luôn ở mức Dangerous: Bean hỏi xác nhận từng lệnh, không có tuỳ chọn 'cho phép trong phiên'.",
+  "settings.hostMode.toggleAria": "Bật/tắt host mode",
+  "settings.hostMode.statusHost":
+    "Cấu hình hiện tại: host — lệnh shell chạy trực tiếp trên máy (không qua sandbox).",
+  "settings.hostMode.statusDocker": "Cấu hình hiện tại: docker — lệnh shell chạy trong sandbox.",
+  "settings.hostMode.pendingHint":
+    "Đã ghi cấu hình; khởi động lại Bean (scripts/beanctl restart) để mode mới có hiệu lực.",
+  "settings.hostMode.enableHint":
+    "Sẽ tắt sandbox: mọi lệnh shell chạy trực tiếp trên máy này và luôn cần bạn xác nhận.",
+  "settings.hostMode.disableHint": "Sẽ bật lại sandbox: lệnh shell chạy trong container docker.",
+  "settings.hostMode.noChangeHint": "Trạng thái đã trùng với hiện tại.",
+  "settings.hostMode.passwordPlaceholder": "Nhập mật khẩu máy (OS)",
+  "settings.hostMode.passwordAria": "Mật khẩu máy (OS)",
+  "settings.hostMode.apply": "Áp dụng",
+  "settings.hostMode.cancel": "Huỷ",
+  "settings.hostMode.saveFailed": "Không ghi được cấu hình host mode.",
+  "settings.hostMode.loadFailed": "Không đọc được trạng thái host mode.",
   "settings.restartBanner": "Có thay đổi cần khởi động lại Bean để có hiệu lực: {keys}",
   "advanced.tierBHint":
     "Khoá tầng B chỉ được sửa qua CLI tương tác (`bean config set <khoá> <giá trị>`); một số yêu cầu khởi động lại Bean.",

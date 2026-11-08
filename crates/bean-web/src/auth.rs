@@ -424,6 +424,34 @@ impl AuthService {
     fn clear_attempts(&self, ip: IpAddr) {
         self.inner.attempts.clear(&ip_key(ip));
     }
+
+    /// D22.2: mở phiên step-up **mật khẩu OS** (toggle host mode) — chỉ kiểm tra
+    /// giới hạn tần suất trước khi spawn `su`/FFI. Dùng chung bộ đếm `ip:` với
+    /// step-up mật khẩu Bean: cùng một bề mặt xác thực, một kẻ thử vạ lá đủ
+    /// khóa cả hai (theo tiền lệ D19.5).
+    ///
+    /// # Errors
+    /// [`AuthError::RateLimited`] khi vượt giới hạn.
+    pub fn os_step_up_begin(&self, ip: IpAddr, audit: Option<&AuditLog>) -> Result<(), AuthError> {
+        if let Err(error @ AuthError::RateLimited(_)) = self.check_limit(ip) {
+            record_auth_event(audit, ip, "os_step_up", false, Some("rate_limited"));
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// D22.2: chốt phiên step-up mật khẩu OS sau khi `OsAuth` đã xác minh xong —
+    /// đúng thì xoá bộ đếm, sai thì tính một lần thất bại. Audit **không**
+    /// chứa mật khẩu (chỉ event + ip).
+    pub fn os_step_up_finish(&self, ip: IpAddr, valid: bool, audit: Option<&AuditLog>) {
+        if valid {
+            self.clear_attempts(ip);
+            record_auth_event(audit, ip, "os_step_up", true, None);
+        } else {
+            self.record_failure(ip);
+            record_auth_event(audit, ip, "os_step_up", false, Some("invalid_credentials"));
+        }
+    }
 }
 
 /// Khoá IP của `AuthService` — cùng định dạng với khoá của MCP server.

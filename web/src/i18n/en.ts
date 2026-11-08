@@ -459,6 +459,26 @@ export const en: Record<MessageKey, string> = {
   "settings.lanAccess.cancel": "Cancel",
   "settings.lanAccess.saveFailed": "Could not write LAN configuration.",
   "settings.lanAccess.loadFailed": "Could not read LAN access status.",
+  "settings.hostMode.title": "Host mode",
+  "settings.hostMode.description":
+    "When enabled, run_shell runs directly on this machine without the sandbox — every shell command is Dangerous: Bean asks for confirmation each time, with no 'allow for this session' option.",
+  "settings.hostMode.toggleAria": "Toggle host mode",
+  "settings.hostMode.statusHost":
+    "Configured mode: host — shell commands run directly on this machine (no sandbox).",
+  "settings.hostMode.statusDocker": "Configured mode: docker — shell commands run inside the sandbox.",
+  "settings.hostMode.pendingHint":
+    "Configuration saved; restart Bean (scripts/beanctl restart) to make the new mode effective.",
+  "settings.hostMode.enableHint":
+    "Will disable the sandbox: every shell command runs directly on this machine and always needs your confirmation.",
+  "settings.hostMode.disableHint":
+    "Will re-enable the sandbox: shell commands run inside the docker container.",
+  "settings.hostMode.noChangeHint": "Already matches the current state.",
+  "settings.hostMode.passwordPlaceholder": "Enter your OS account password",
+  "settings.hostMode.passwordAria": "OS account password",
+  "settings.hostMode.apply": "Apply",
+  "settings.hostMode.cancel": "Cancel",
+  "settings.hostMode.saveFailed": "Could not write the host mode configuration.",
+  "settings.hostMode.loadFailed": "Could not read the host mode status.",
   "settings.restartBanner": "Changes pending restart of Bean: {keys}",
   "advanced.tierBHint":
     "Tier B keys are editable only via interactive CLI (`bean config set <key> <value>`); some require restarting Bean.",

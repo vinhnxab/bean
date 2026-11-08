@@ -114,6 +114,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        os_auth: Arc::new(bean_security::FakeOsAuth::default()),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), build_router(state))

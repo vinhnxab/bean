@@ -1363,3 +1363,49 @@ pub struct LanAccessMutateResponse {
     /// đĩa và sẽ hiệu lực sau `scripts/beanctl restart`.
     pub restart_required: bool,
 }
+
+/// `GET /api/settings/host-mode` — trạng thái sandbox mode + step-up mật khẩu OS
+/// (D22.2). Mode là khoá tầng B, hiệu lực sau restart — UI hiển thị banner
+/// `pending` từ cặp `mode`/`running_mode`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct HostModeDto {
+    /// Mode ghi trên đĩa (sẽ hiệu lực): `"docker"` | `"host"`.
+    pub mode: String,
+    /// Mode tiến trình đang chạy (snapshot cấu hình lúc khởi động).
+    pub running_mode: String,
+    /// `true` khi Apply cần mật khẩu OS. Không xác định được trạng thái tài khoản
+    /// (lệnh `passwd -S`/FFI lỗi) ⇒ `true` — fail-closed; máy không đặt mật khẩu
+    /// tài khoản ⇒ `false`, bỏ qua step-up (mất khóa màn hình máy cá nhân).
+    pub os_password_required: bool,
+    /// `mode != running_mode` — có thay đổi chưa áp dụng, cần restart Bean.
+    pub pending: bool,
+}
+
+/// `POST /api/settings/host-mode` — bật/tắt host mode. `os_password` bắt buộc khi
+/// GET trả `os_password_required = true` và request **có** ghi đĩa (khác mode
+/// hiện tại); thiếu/sai → 401.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct HostModeRequest {
+    /// `true` = tắt sandbox, `run_shell` chạy trực tiếp trên máy; `false` = về
+    /// sandbox cấu hình (`docker`/`host` tùy `security.sandbox.*`).
+    pub enabled: bool,
+    /// Mật khẩu tài khoản OS của tiến trình Bean (step-up D22.2). Không gửi khi
+    /// máy không đặt mật khẩu.
+    #[serde(default)]
+    pub os_password: Option<String>,
+}
+
+/// Kết quả ghi host mode: mode mới trên đĩa + cờ restart. No-op (mode đĩa đã
+/// bằng desired) → `restart_required = false`, không đụng mật khẩu.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct HostModeMutateResponse {
+    /// Mode ghi trên đĩa sau khi POST.
+    pub mode: String,
+    /// `true` khi đã ghi đĩa — cần `scripts/beanctl restart` để mode mới chạy;
+    /// `false` khi không có gì thay đổi.
+    pub restart_required: bool,
+}

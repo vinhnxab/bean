@@ -45,9 +45,7 @@ export function SettingsPage() {
     return <Navigate to="/settings/providers" replace />;
   }
 
-  const pendingRestart = (settings?.settings ?? []).filter(
-    (row) => row.apply === "restart" && row.pending,
-  );
+  const pendingRestart = (settings?.settings ?? []).filter((row) => row.apply === "restart" && row.pending);
 
   return (
     <PageShell title={t("settings.title")} description={t("settings.description")} className="max-w-none">

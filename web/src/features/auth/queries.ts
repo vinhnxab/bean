@@ -43,6 +43,8 @@ export const queryKeys = {
   settings: ["settings"] as const,
   /** Trạng thái LAN access (D21.x) — chế độ, IP LAN dò được, cổng, URL. */
   lanAccess: ["lan-access"] as const,
+  /** Trạng thái host mode (D22.2) — mode đĩa vs đang chạy, cần mật khẩu OS không. */
+  hostMode: ["host-mode"] as const,
   /** Secret slot (M29) — chỉ cờ `set`/`source`, không giá trị nên cache được. */
   secrets: ["secrets"] as const,
 };

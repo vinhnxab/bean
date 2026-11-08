@@ -20,6 +20,7 @@ use super::rest_config::{
     create_llm_provider_profile, delete_llm_provider_profile, get_llm_config, update_llm_model,
     update_llm_provider, update_llm_provider_profile,
 };
+use super::rest_host_mode::{host_mode_status, host_mode_update};
 use super::rest_lan_access::{lan_access_status, lan_access_update};
 use super::rest_memories::{delete_memory, get_memory_file, list_memories, put_memory_file};
 use super::rest_sessions::{
@@ -60,6 +61,10 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route(
             "/settings/lan-access",
             get(lan_access_status).post(lan_access_update),
+        )
+        .route(
+            "/settings/host-mode",
+            get(host_mode_status).post(host_mode_update),
         )
         .route("/settings/test/{target}", post(settings_test))
         .route("/secrets", get(secrets_list))

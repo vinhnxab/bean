@@ -492,6 +492,7 @@ Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thự
 | `DELETE /api/secrets/:name` | `{password}` (M29) |
 | `POST /api/settings/test/:target` | `llm` \| `voice` \| `telegram` \| `search`: kiểm tra kết nối, lỗi đã redact (M29) |
 | `GET/POST /api/settings/lan-access` | Bật/tắt truy cập mạng LAN: tự dò IP LAN, ghi atomic 3 khoá tầng B `web.*` qua `set_many` — admin + step-up mật khẩu, hiệu lực sau restart (D21.x) |
+| `GET/POST /api/settings/host-mode` | Bật/tắt host mode (`security.sandbox.mode`): admin + step-up **mật khẩu tài khoản OS** (bỏ qua khi máy không đặt mật khẩu); no-op không hỏi mật khẩu; hiệu lực sau restart (D22.x) |
 | `POST /api/auth/change-password` | `{current, new}`; huỷ các phiên web khác (M29 Q1) |
 
 ### 11.2 WebSocket `/api/ws`
@@ -614,7 +615,7 @@ Web + Telegram là bộ kênh cuối cùng. Thêm kênh chat mới phải có nh
 ## 15. Bảo mật (bắt buộc, có test riêng)
 
 1. **Path jail:** mọi thao tác file đi qua `cap_std::fs::Dir` gốc là workspace; cấm `..`, đường dẫn tuyệt đối và symlink thoát ra. Không tự nối chuỗi đường dẫn rồi gọi `std::fs`. Test bằng `proptest`.
-2. **Sandbox shell:** mặc định `docker run --rm` với: chỉ mount workspace, `--user` non-root, `--network none` (bật được qua config), `--memory`, `--cpus`, `--pids-limit`, `--cap-drop ALL`, `--security-opt no-new-privileges`, container có tên để timeout thì `docker kill` hẳn, không truyền env host. Chế độ `host` phải bật tường minh và khi đó mọi lệnh là `Dangerous`. Image sandbox cấu hình được (mặc định Debian slim, không kèm Node).
+2. **Sandbox shell:** mặc định `docker run --rm` với: chỉ mount workspace, `--user` non-root, `--network none` (bật được qua config), `--memory`, `--cpus`, `--pids-limit`, `--cap-drop ALL`, `--security-opt no-new-privileges`, container có tên để timeout thì `docker kill` hẳn, không truyền env host. Chế độ `host` phải bật tường minh và khi đó mọi lệnh là `Dangerous`. Image sandbox cấu hình được (mặc định Debian slim, không kèm Node). Host mode đa nền tảng (D22.x): `sh -c` trên Unix, `cmd /C` trên Windows; bật/tắt từ UI qua `POST /api/settings/host-mode` — step-up mật khẩu tài khoản OS (`su` stdin / `dscl` / `LogonUserW`), bỏ qua khi máy không đặt mật khẩu, hiệu lực sau restart.
 3. **Policy:** quyết định theo mức rủi ro; deny-list mẫu nguy hiểm chỉ là lớp phụ, **không phải rào cản chính**.
 4. **Prompt injection:** nội dung từ web, file, email, MCP bọc trong `<untrusted_content>...</untrusted_content>` (escape cả thẻ đóng nếu nội dung có chứa); system prompt dặn model không làm theo chỉ dẫn trong đó. Sau khi đọc nội dung untrusted trong một lượt, mọi tool `Confirm` trở lên luôn hỏi lại (vô hiệu hoá "cho phép trong phiên").
 5. **SSRF:** `web_fetch` chỉ `http(s)`; resolver DNS tuỳ biến cho `reqwest` lọc IP ngay lúc kết nối (chống DNS rebinding); chặn private, loopback, link-local, metadata (`169.254.169.254`), IPv6 tương ứng; policy redirect kiểm tra lại từng bước; giới hạn kích thước body và thời gian.

@@ -178,6 +178,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             workspace: workspace.clone(),
             speech,
             rebind: Arc::new(RebindHandle::new(rebind_tx)),
+            os_auth: Arc::new(bean_security::RealOsAuth),
         })?;
         let channel = Arc::new(WebChannel::new(state.notifications.clone()));
         router

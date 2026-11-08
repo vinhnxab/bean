@@ -746,3 +746,29 @@ ghi đĩa); `NoopRebind` thay `restart_required = false` cho mọi fixture cũ. 
 `pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (217 test) +
 `pnpm build` xanh; banner dùng cờ `pending` từ `SettingDto` (sinh lại bằng
 `make types`).
+
+## 22. Host mode toggle + shell đa nền tảng (D22.x — 2026-11-08)
+
+Bean thêm hỗ trợ Windows cho `run_shell` host mode và card **Host mode** trong
+Cài đặt → Nâng cao: bật/tắt `security.sandbox.mode = "host"` ngay trên UI, xác
+nhận bằng **mật khẩu tài khoản OS** của tiến trình Bean — lớp xác nhận gắn với
+máy, song song step-up mật khẩu Bean (D19.5).
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D22.1 | Windows host shell = `cmd /C` (không PowerShell) | PowerShell 5.1 `-Command` trả exit 0 dù lệnh con lỗi → model đọc sai kết quả; `cmd.exe` luôn có mặt và truyền exit code đúng. Linux/macOS giữ `sh -c`. Helper `host_shell_args` tách theo `#[cfg]`, test riêng cho từng nhánh. | Cú pháp lệnh Windows theo cmd (quoting khác POSIX) — description tool ghi rõ nền tảng cho model. |
+| D22.2 | Step-up = **mật khẩu tài khoản OS** của tiến trình Bean, xác minh per-platform: Linux `su <user> -c true` (mật khẩu qua **stdin**, không argv/env; exit khác 0 ⇒ sai — không khớp message locale), macOS `dscl . -authonly` (argv — duy nhất `dscl` nhận; lộ `ps` cục bộ khoảnh khắc gọi, chấp nhận trên máy cá nhân), Windows FFI `LogonUserW` (crate riêng `bean-osauth-win`) | Yêu cầu người chủ: xác nhận thứ hai gắn với máy thật; mật khẩu Bean (auth.toml) không chứng minh người gõ có quyền OS. Mật khẩu không bao giờ vào log/audit/argv ở Linux; sai mật khẩu dùng chung rate-limiter `ip:` với step-up D19.5 (ngưỡng 5, một bề mặt xác thực một bộ đếm). | `su` đọc mật khẩu từ stdin là hành vi của util-linux (đã ghi chú ở code; nếu nền tảng khác hành vi sẽ trả CommandFailed → 503, không khoá oan ai). |
+| D22.3 | **Máy không đặt mật khẩu OS ⇒ bỏ qua step-up** (fail-open có chủ đích); **không xác định được trạng thái** (`passwd -S`/`dscl`/FFI lỗi) ⇒ fail-closed (GET hiện "cần mật khẩu", POST trả 503 `os_auth_unavailable`) | Máy cá nhân không khoá màn hình là cấu hình phổ biến — bắt nhập mật khẩu không tồn tại là ngõ cụt; ngược lại hạ tầng xác minh hỏng không được phép mở sandbox tường minh. | GET `/api/settings/host-mode` trả `os_password_required` = `has_password` khi inspect được, `true` khi không. |
+| D22.4 | **No-op (mode đĩa đã bằng desired) → 200 `restart_required = false`, không hỏi mật khẩu** | Bấm Apply hai lần không nên dọa người dùng; check trước step-up. | — |
+| D22.5 | Toggle **hiệu lực sau restart** (không hot-swap như LAN D21.7) | Sandbox được dựng một lần lúc khởi động; swap giữa chừng rời rạc với tool đang chạy. `security.sandbox.mode` vốn là khoá `apply = Restart` tier B — dùng lại banner pending có sẵn (cờ `pending` từ D21.7). | POST trả `restart_required = true`; UI hiện hint restart. |
+| D22.6 | `unsafe` gói trong crate riêng `bean-osauth-win` (không inherit workspace lints `forbid(unsafe_code)`); `LogonUserW` + `LOGON32_LOGON_INTERACTIVE` là **đường duy nhất** xác minh mật khẩu Windows không đưa mật khẩu vào argv/env; CloseHandle ngay; GetLastError 1326/1327/1328/1330/1331/1332 → InvalidCredentials | Workspace cấm unsafe ở mọi crate khác; module doc của crate ghi rõ lý do được duyệt (quy tắc 0.8). Mọi call có `# Safety` comment. | Crate chỉ biên dịch trên Windows (`[target.'cfg(windows)'.dependencies]`); máy Linux/macOS không kéo dependency. |
+| D22.7 | Test hermetic qua trait `OsAuth` (DIP): `bean serve` cắm `RealOsAuth`, test cắm `FakeOsAuth` (trạng thái đặt được, không đụng OS thật của máy CI) | Endpoint không được phụ thuộc nền tảng máy chạy test; LSP — mọi implementation thay thế lẫn nhau. | `inspect()`/`verify()` blocking luôn chạy qua `spawn_blocking` (mục 22.8). |
+
+**Kiểm chứng:** `cargo test -p bean-security -p bean-web` (mới: test
+`host_shell_args_uses_platform_shell` + 9 test `/api/settings/host-mode`: 401,
+403 admin, GET pending, no-op bỏ qua mật khẩu, sai mật khẩu + rate-limit lần 6,
+ghi host + audit không chứa mật khẩu, bỏ step-up khi máy không mật khẩu, 401
+thiếu mật khẩu, 503 config_readonly) + `cargo clippy --workspace
+--all-targets -D warnings` + `cargo fmt --all` + `make types` +
+`pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (222 test, gồm 5
+test card Host mode) + `pnpm build` xanh.

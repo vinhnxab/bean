@@ -96,6 +96,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        os_auth: Arc::new(bean_security::FakeOsAuth::default()),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), build_router(state))
@@ -134,6 +135,7 @@ fn build_with_store(config: Config) -> (tempfile::TempDir, Arc<dyn Store>, AxumR
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        os_auth: Arc::new(bean_security::FakeOsAuth::default()),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), store, build_router(state))
@@ -359,6 +361,7 @@ async fn toggle_survives_restart_semantics_via_shared_store() {
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        os_auth: Arc::new(bean_security::FakeOsAuth::default()),
     })
     .unwrap();
     let restarted = build_router(state);
