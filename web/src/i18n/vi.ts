@@ -481,6 +481,18 @@ export const vi = {
   "settings.hostMode.cancel": "Huỷ",
   "settings.hostMode.saveFailed": "Không ghi được cấu hình host mode.",
   "settings.hostMode.loadFailed": "Không đọc được trạng thái host mode.",
+  "settings.update.title": "Phiên bản & cập nhật",
+  "settings.update.description":
+    "Kiểm tra bản mới từ GitHub Releases. Việc kiểm tra chỉ chạy khi bạn bấm nút — Bean không tự gọi ra ngoài.",
+  "settings.update.checkNow": "Kiểm tra bản mới",
+  "settings.update.checking": "Đang kiểm tra…",
+  "settings.update.upToDate": "Bạn đang dùng bản mới nhất (v{version}).",
+  "settings.update.available": "Có bản mới: v{current} → v{latest}.",
+  "settings.update.viewRelease": "Xem trang release",
+  "settings.update.installHint": "Chạy lệnh `bean update` để tải, xác minh SHA256, cài và tự restart Bean.",
+  "settings.update.noArtifact":
+    "Nền tảng của máy chủ chưa có bản build — hãy tải artifact phù hợp tay từ trang release.",
+  "settings.update.checkFailed": "Không kiểm tra được bản mới.",
   "settings.restartBanner": "Có thay đổi cần khởi động lại Bean để có hiệu lực: {keys}",
   "advanced.tierBHint":
     "Khoá tầng B chỉ được sửa qua CLI tương tác (`bean config set <khoá> <giá trị>`); một số yêu cầu khởi động lại Bean.",

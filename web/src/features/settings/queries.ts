@@ -114,6 +114,13 @@ export function useSetHostMode() {
   });
 }
 
+/** Kiểm tra bản mới trên GitHub Releases (M30) — mutation vì người dùng bấm nút, không cache. */
+export function useCheckUpdate() {
+  return useMutation({
+    mutationFn: ({ signal }: { signal?: AbortSignal }) => api.checkUpdate(signal),
+  });
+}
+
 /** Lưu secret vào `secrets.env` — step-up đã xảy ra ở server, client chỉ gửi `{value, password}`. */
 export function usePutSecret() {
   const queryClient = useQueryClient();

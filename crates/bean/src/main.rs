@@ -15,9 +15,11 @@ mod mcp;
 mod secret;
 mod serve;
 mod setup;
+mod update;
 
 use clap::Parser;
 use cli::{Cli, Command};
+use update::UpdateArgs;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -42,6 +44,11 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Setup => setup::run_setup(config_path.as_deref()).await,
         Command::Model => setup::run_model(config_path.as_deref()).await,
+        // M30: `bean update` không cần cấu hình — nguồn phát hành là hằng số
+        // (D23.1), chỉ dùng mạng + đường dẫn binary đang chạy.
+        Command::Update { check, no_restart } => {
+            update::run(&UpdateArgs { check, no_restart }).await
+        }
     }
 }
 

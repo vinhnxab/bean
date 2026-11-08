@@ -4,6 +4,7 @@ import { Panel } from "@/components/ui/Page";
 import { HostModeCard } from "@/features/settings/HostModeCard";
 import { LanAccessCard } from "@/features/settings/LanAccessCard";
 import { useSettings } from "@/features/settings/queries";
+import { UpdateCard } from "@/features/settings/UpdateCard";
 import { useI18n } from "@/i18n";
 
 /**
@@ -25,6 +26,8 @@ export function AdvancedPanel() {
       <LanAccessCard />
 
       <HostModeCard />
+
+      <UpdateCard />
 
       <div className="mt-4 overflow-x-auto border border-border rounded-lg">
         <table className="w-full text-left text-sm">

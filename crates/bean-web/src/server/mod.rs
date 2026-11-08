@@ -76,6 +76,7 @@ mod rest_sessions;
 mod rest_settings;
 mod rest_skills;
 mod rest_tasks;
+mod rest_update;
 mod rest_usage_system;
 mod rest_voice;
 mod routes;

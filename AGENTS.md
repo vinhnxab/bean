@@ -742,7 +742,7 @@ tool_tags = ["*"]
 
 Lưu ý khi bật RBAC: mọi identity khác (`telegram:<id>`, `mcp-client:<tên>`) **phải** được liệt kê trong `user_roles`, nếu không sẽ là `no-access`. Tắt/bật tool và đổi cấu hình voice trên UI chỉ dành cho `admin`.
 
-Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean secret set <NAME>` · `bean config set <key> <value>` · `bean setup` · `bean doctor [--online]` · `bean mcp serve [--http]`. Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
+Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean secret set <NAME>` · `bean config set <key> <value>` · `bean setup` · `bean doctor [--online]` · `bean mcp serve [--http]` · `bean update [--check] [--no-restart]` (M30: kiểm tra/cài bản mới từ GitHub Releases — D23 trong `docs/decisions.md`: check tay, chỉ bản stable, tự restart qua `scripts/beanctl` sau khi cài). Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
 
 ---
 
@@ -791,6 +791,9 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 - Bảo mật: path traversal, symlink thoát workspace, SSRF (127.0.0.1, `169.254.169.254`, 10.x/192.168.x, IPv6 loopback, domain trỏ IP nội bộ, redirect vào IP nội bộ, `file://`), sandbox không thấy file ngoài workspace và không có mạng khi `network=false`, timeout giết được container, audit log không lộ secret, tool `Confirm` bị từ chối khi chạy dưới scheduler, "cho phép trong phiên" bị vô hiệu sau khi đọc untrusted.
 - Web server (axum + `tower::ServiceExt::oneshot`, client `tokio-tungstenite`): chưa đăng nhập → 401; sai `Origin` → 403 (REST thay đổi dữ liệu và WS); WS thiếu cookie bị từ chối; giới hạn tần suất đăng nhập và lockout; cookie có đủ cờ; header bảo mật có mặt; `/api/*` không tồn tại trả 404 JSON (không rơi vào SPA fallback); token phiên lưu dạng hash; `Sync` đúng sau khi nối lại; sự kiện tới mọi kết nối.
 - Test gọi API thật đánh dấu `#[ignore]`.
+- Updater (M30): test crate `bean-update` dùng wiremock cho GitHub API + tải
+  artifact; test thật với GitHub đánh dấu `#[ignore]`; test tar-slip dựng header
+  ustar thô (tar crate chặn sẵn lúc đóng gói, phải kiểm chứng lúc đọc).
 
 **Web (Vitest + Testing Library + MSW)**
 - Markdown: `<script>`, `<img onerror>`, liên kết `javascript:`, ảnh từ xa (không được tạo `` nạp URL ngoài) đều bị vô hiệu.
@@ -833,6 +836,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 | M27 | QA test-runner (`qa_test`) **và** voice push-to-talk (`bean-speech`) | Hai tính năng cùng mang nhãn M27 trong code/tài liệu; `qa` không có đường ghi nào |
 | M28 | Đổi tên `BeanAgent` → `bean` | Không migration tự động: `mv ~/.BeanAgent ~/.bean` (`docs/decisions.md` D18.x) |
 | M29 | Thiết lập & secrets thống nhất (UI + terminal) | `secrets.env` duy nhất chứa key; `bean secret set`/`bean config set`; `bean doctor` sạch; `make check` xanh |
+| M30 | Updater: `bean update` + GitHub Releases (D23) | Crate `bean-update` (GitHub/tải/verify sha256/tar-slip/ghi đè atomic) có test; workflow `.github/workflows/release.yml` build 5 target khi push tag `v*` kèm `SHA256SUMS`; `GET /api/update/check` admin-only; thẻ “Phiên bản & cập nhật” trong Cài đặt; `make check` xanh |
 
 Trạng thái chi tiết, commit và phần còn thiếu của từng milestone: `docs/status-report.md` mục 2.
 

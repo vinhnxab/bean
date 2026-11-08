@@ -1,0 +1,28 @@
+[package]
+name = "bean-update"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Kiểm tra và cài bản cập nhật từ GitHub Releases (M30)"
+
+[lints]
+workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# Giải nén artifact `.tar.gz` (mọi nền tảng dùng chung một định dạng — D23.2).
+flate2.workspace = true
+tar.workspace = true
+# Thư mục tạm có dọn dẹp cho artifact tải về.
+tempfile.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true

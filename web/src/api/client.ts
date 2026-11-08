@@ -60,6 +60,7 @@ import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
 import type { HostModeDto } from "@/api/generated/HostModeDto";
 import type { HostModeMutateResponse } from "@/api/generated/HostModeMutateResponse";
 import type { HostModeRequest } from "@/api/generated/HostModeRequest";
+import type { UpdateCheckDto } from "@/api/generated/UpdateCheckDto";
 
 /** Lỗi HTTP có mã ổn định từ API. */
 export class ApiRequestError extends Error {
@@ -425,6 +426,13 @@ export const api = {
       // hiện lỗi tại form, không điều hướng về /login (như `login`).
       redirectOnUnauthorized: false,
     }),
+
+  /**
+   * Kiểm tra bản mới trên GitHub Releases (M30) — chỉ hỏi, không tải/cài.
+   * Lỗi: 403 `admin_required`, 502 `update_check_failed`, 422
+   * `update_platform_unsupported`, 404 `no_stable_release`.
+   */
+  checkUpdate: (signal?: AbortSignal) => requestJson<UpdateCheckDto>("/api/update/check", { signal }),
 
   /**
    * Secret slot: **không bao giờ** có giá trị — chỉ `set`/`source` và cờ bị env che.

@@ -1411,3 +1411,26 @@ pub struct HostModeMutateResponse {
     /// cấu hình đã ghi đĩa, cần `scripts/beanctl restart` để mode mới chạy.
     pub restart_required: bool,
 }
+
+/// `GET /api/update/check` — kiểm tra bản mới trên GitHub Releases (M30) khi
+/// người dùng bấm nút trong Cài đặt → Nâng cao. Chỉ hỏi, không tải/cài gì;
+/// self-update chỉ qua CLI `bean update` (D23.6). Admin-only khi RBAC bật.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct UpdateCheckDto {
+    /// Phiên bản binary đang chạy (`CARGO_PKG_VERSION`).
+    pub current_version: String,
+    /// Tag bản stable mới nhất, đã bỏ tiền tố `v` (ví dụ `0.2.0`) — đồng nhất
+    /// với `current_version`; UI tự thêm `v` khi hiển thị.
+    pub latest_version: String,
+    /// `latest_version` so hơn `current_version` — đã so semver-đơn giản ở lõi.
+    pub update_available: bool,
+    /// Trang release trên GitHub để xem ghi chú đầy đủ.
+    pub release_url: String,
+    /// Ghi chú release (body, cắt ~1000 ký tự) — có thể rỗng.
+    pub notes: String,
+    /// Tên artifact cho nền tảng của server (ví dụ
+    /// `bean-x86_64-unknown-linux-gnu.tar.gz`); `null` khi nền tảng chưa được
+    /// build trong workflow — UI hiện cảnh báo phải tải tay.
+    pub artifact: Option<String>,
+}

@@ -52,6 +52,19 @@ pub enum Command {
     /// Chọn nhà cung cấp/mô hình tương tác, lưu vào `llm-state.json` (cùng nơi
     /// với giao diện web) và áp dụng khi khởi động lại Bean.
     Model,
+
+    /// Kiểm tra và cài bản mới từ GitHub Releases (M30): tải artifact đúng nền
+    /// tảng, xác minh SHA256, ghi đè binary an toàn rồi tự restart qua
+    /// `scripts/beanctl` (D23). Chỉ nhận bản stable; check tay, không phone-home.
+    Update {
+        /// Chỉ kiểm tra có bản mới, không tải hay cài.
+        #[arg(long)]
+        check: bool,
+
+        /// Sau khi cài xong KHÔNG tự restart Bean.
+        #[arg(long)]
+        no_restart: bool,
+    },
 }
 
 /// Tham số của `mcp`.

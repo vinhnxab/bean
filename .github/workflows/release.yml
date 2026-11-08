@@ -1,0 +1,130 @@
+# Bean — workflow phát hành (M30, D23 trong docs/decisions.md)
+#
+# Bật khi push tag `v*`: build release 5 nền tảng (UI nhúng), đóng gói
+# `.tar.gz`, tạo GitHub Release kèm `SHA256SUMS`. `bean update` đọc đúng
+# những artifact này (D23.1–D23.3):
+#   bean-<target>.tar.gz   — binary `bean`/`bean.exe` ở cấp gốc của archive
+#   SHA256SUMS             — `sha256sum` cho mọi artifact (bắt buộc có trong release)
+#
+# Quy ước phải giữ đồng bộ với `bean_update::platform_artifact()` — đổi tên
+# artifact ở một phía phải đổi ở phía kia (test `platform_artifact_matches_current_host`).
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            bin: bean
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            bin: bean
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            bin: bean
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+            bin: bean
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            bin: bean.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # rust-embed nhúng web/dist lúc COMPILE — phải build UI trước cargo.
+      - name: Build UI (web/dist)
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build binary (release, UI embedded)
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cargo install cross --locked
+            cross build --release --locked -p bean --features ui --target ${{ matrix.target }}
+          else
+            cargo build --release --locked -p bean --features ui --target ${{ matrix.target }}
+          fi
+
+      # Một định dạng `.tar.gz` cho mọi nền tảng (D23.2) — Windows runner có
+      # bsdtar hỗ trợ `-czf`. Binary nằm ở cấp gốc của archive.
+      - name: Package
+        shell: bash
+        run: |
+          tar -czf "bean-${{ matrix.target }}.tar.gz" -C "target/${{ matrix.target }}/release" "${{ matrix.bin }}"
+          ls -la "bean-${{ matrix.target }}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bean-${{ matrix.target }}
+          path: bean-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum bean-*.tar.gz > SHA256SUMS
+
+      - name: Create GitHub release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Bean ${{ github.ref_name }}" \
+            --generate-notes \
+            bean-*.tar.gz SHA256SUMS

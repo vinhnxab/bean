@@ -774,3 +774,30 @@ không còn receiver, 503 config_readonly) + `cargo clippy --workspace
 --all-targets -D warnings` + `cargo fmt --all` + `make types` +
 `pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (222 test, gồm 5
 test card Host mode — handler msw mirror hot-swap) + `pnpm build` xanh.
+
+## 23. Updater — `bean update` + GitHub Releases (D23.x — 2026-11-08, milestone M30)
+
+Bean cần cơ chế cập nhật "như phần mềm thật". Người dùng chủ **đã confirm**
+(2026-11-08): phương án **A — GitHub Releases** + **tự restart sau khi cài**;
+hai câu phụ lấy **mặc định**: chỉ check tay (không phone-home, không check định
+kỳ) và chỉ nhận bản stable. Các điểm này là quyết định đã chốt, không mở lại.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D23.1 | Nguồn phát hành duy nhất: **GitHub Releases** của repo `vinhnxab/bean` (hằng `bean_update::GITHUB_REPO`, không cấu hình được ở v1). Người dùng chủ chốt phương án A | Không cần server riêng, miễn phí, `/releases/latest` có API chuẩn; đúng tinh thần self-hosted | Phụ thuộc GitHub (rate-limit 60 req/giờ/IP cho client chưa xác thực — dư cho check tay); muốn tự host sau này phải thêm `[update]` config — để mở |
+| D23.2 | Artifact **một định dạng `.tar.gz` cho mọi nền tảng** (kể cả Windows — runner có bsdtar), binary `bean`/`bean.exe` ở cấp gốc archive. 5 target: linux x86_64/aarch64, macOS x86_64/aarch64, Windows x86_64. Tên phải khớp `platform_artifact()` — workflow release.yml và code là một cặp | Một đường giải nén, một bộ test; Windows zip phải kéo thêm crate `zip` nặng cho không lợi ích gì | Nền tảng khác (freebsd…) trả `None` → CLI/endpoint báo tải tay; thêm target = sửa cả hai phía |
+| D23.3 | Toàn vẹn: tải kèm **`SHA256SUMS`** và so sha256 **trước** khi chạm binary cũ (khớp sai ⇒ bỏ, không ghi gì); trần tải 512 MiB; giải nén chặn đường dẫn tuyệt đối/`..` (tar-slip, test bằng header ustar dựng tay vì tar crate chặn sẵn lúc đóng gói). **Không ký GPG ở v1** | SHA256 chặn hỏng/tải dở; tar-slip là lớp tự vệ bắt buộc với archive từ mạng | Chưa chống được việc release bị thay bởi người có quyền push — chấp nhận rủi ro (một người quản lý repo); ghi rõ ở README nếu phát hành công khai |
+| D23.4 | Thay binary an toàn: **Unix** copy vào cùng thư mục (`bean.new`) + chmod 0755 + `rename` đè — atomic, tiến trình đang chạy giữ inode cũ; **Windows** không ghi đè được exe đang chạy nhưng **đổi tên được**: `bean.exe` → `bean.exe.old`, đặt bản mới vào chỗ cũ, lỗi giữa chừng thì trả `.old` về chỗ cũ, `.old` thừa dọn ở lần update sau | `rename` giữa hai filesystem trả EXDEV nên phải copy vào cùng thư mục trước; mô tả trong mục 22 “hai tiến trình cùng binary” | `bean update` chạy an toàn ngay cả khi `bean serve` đang chạy — hiệu lực sau restart |
+| D23.5 | **Tự restart sau khi cài** (người dùng chủ chốt): CLI tự tìm `scripts/beanctl` (đi ngược tối đa 6 cấp từ thư mục binary), thấy thì chạy `beanctl restart` (timeout 180s, kế thừa output), không thấy hoặc Windows thì in hướng dẫn tay; `--no-restart` để tắt | Khớp kỳ vọng “như phần mềm thật” và cách host mode vừa làm; beanctl là nơi duy nhất biết dừng/đóng đúng tiến trình (K27) | `beanctl` hardcode đường dẫn repo `/home/bean/dev/bean` — máy khác phải sửa script hoặc dùng `--no-restart` |
+| D23.6 | **Check tay thôi**: không phone-home, không check định kỳ (mặc định người dùng chủ chọn). Hai đường vào: CLI `bean update [--check]` và nút “Kiểm tra bản mới” trong Cài đặt → Nâng cao → thẻ “Phiên bản & cập nhật” (`GET /api/update/check`, chỉ hỏi). **UI không self-update ở v1** — cài đặt là hành viDangerous-adjacent, giữ ở CLI có người nhìn | Một agent tự tải và thay binary của chính nó là đường tấn công trong chính hệ thống; người dùng phải ra quyết định | UI chỉ hiển thị kết quả check + hướng dẫn lệnh; test UI ghi nhận “không gọi endpoint lúc mount” |
+| D23.7 | **Chỉ nhận bản stable**: dùng `/releases/latest` (GitHub loại sẵn draft/prerelease) và vẫn kiểm tra cờ `draft`/`prerelease` để không phụ thuộc hành vi bên ngoài. So phiên bản semver-đơn giản (`0.10.0` > `0.9.0`), bỏ tiền tố `v` khi **map** tag để đồng nhất với `CARGO_PKG_VERSION` (không sẽ render “vv0.2.0” ở UI) | Đơn giản, đúng nhu cầu; bản beta phải tự cài tay từ trang release | `-rc1` không bao giờ được đề xuất tự động — chấp nhận |
+| D23.8 | Endpoint `GET /api/update/check`: admin-only khi RBAC bật (403 `admin_required`), không audit (GET không đổi dữ liệu); lỗi mạng/API → 502 `update_check_failed`, nền tảng chưa build → 422 `update_platform_unsupported`. Crate mới `bean-update` giữ toàn bộ logic GitHub/tải/verify/giải nén/ghi đè — CLI và web dùng chung | Lượt check tốn request mạng ra ngoài và lộ thông tin phiên bản — không thuộc role thường; SRP: logic update không nằm trong bin crate | `latest_version` trả tag không kèm `v` — i18n template tự thêm khi hiển thị |
+
+**Kiểm chứng:** `cargo test -p bean-update` (13 test: so phiên bản, map/filter
+release qua wiremock, tải + verify SHA256 kèm case artifact bị thay, giải nén
+tar-slip bằng header ustar thô, ghi đè binary atomic, artifact theo nền tảng;
+1 test `#[ignore]` gọi GitHub thật) + endpoint + CLI qua `cargo test
+--workspace` + `make types` (generated `UpdateCheckDto.ts`) + web 228 test
+(gồm 6 test thẻ Update: không gọi lúc mount, available/up-to-date/noArtifact,
+lỗi 502, `notes` chứa `<script>` render nguyên văn dạng text) + `pnpm biome
+check` + `pnpm tsc --noEmit` + `pnpm build` xanh.

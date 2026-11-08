@@ -19,6 +19,7 @@ members = [
   "crates/bean-types",
   "crates/bean-mcp-test-server",
   "crates/bean-osauth-win",
+  "crates/bean-update",
   "crates/bean-web",
 ]
 # `default-members` để `cargo build --no-default-features` (bản headless, không UI)
@@ -65,6 +66,8 @@ bean-settings = { path = "crates/bean-settings" }
 bean-tools = { path = "crates/bean-tools" }
 bean-memory = { path = "crates/bean-memory" }
 bean-skills = { path = "crates/bean-skills" }
+# M30: `bean update` + `GET /api/update/check` — tải/cài bản mới từ GitHub Releases.
+bean-update = { path = "crates/bean-update" }
 bean-speech = { path = "crates/bean-speech" }
 bean-core = { path = "crates/bean-core" }
 bean-channels = { path = "crates/bean-channels" }
@@ -101,6 +104,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 # HTML -> text sạch cho `web_fetch` (M7); API nguồn `html2text::from_read` 0.17.1.
 html2text = "0.17.1"
 url = "2.5.8"
+# M30: giải nén artifact `.tar.gz` của bản update (một định dạng cho mọi nền tảng).
+flate2 = "1"
+tar = "0.4"
 
 serde_json = "1.0.151"
 tempfile = "3.27.0"

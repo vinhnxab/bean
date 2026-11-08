@@ -29,6 +29,8 @@ bean-llm.workspace = true
 bean-speech.workspace = true
 # M29: ghi/đọc key voice qua kho secret `secrets.env`.
 bean-settings.workspace = true
+# M30: `GET /api/update/check` — hỏi GitHub Releases có bản mới không.
+bean-update.workspace = true
 bean-types.workspace = true
 bean-core.workspace = true
 base64.workspace = true

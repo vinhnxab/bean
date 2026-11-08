@@ -479,6 +479,19 @@ export const en: Record<MessageKey, string> = {
   "settings.hostMode.cancel": "Cancel",
   "settings.hostMode.saveFailed": "Could not write the host mode configuration.",
   "settings.hostMode.loadFailed": "Could not read the host mode status.",
+  "settings.update.title": "Version & updates",
+  "settings.update.description":
+    "Check for a new release on GitHub. The check only runs when you press the button — Bean never calls out on its own.",
+  "settings.update.checkNow": "Check for updates",
+  "settings.update.checking": "Checking…",
+  "settings.update.upToDate": "You are on the latest version (v{version}).",
+  "settings.update.available": "New version available: v{current} → v{latest}.",
+  "settings.update.viewRelease": "View release page",
+  "settings.update.installHint":
+    "Run `bean update` to download, verify SHA256, install and restart Bean automatically.",
+  "settings.update.noArtifact":
+    "No build artifact exists for this server's platform yet — download one manually from the release page.",
+  "settings.update.checkFailed": "Could not check for updates.",
   "settings.restartBanner": "Changes pending restart of Bean: {keys}",
   "advanced.tierBHint":
     "Tier B keys are editable only via interactive CLI (`bean config set <key> <value>`); some require restarting Bean.",

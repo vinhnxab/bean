@@ -33,6 +33,7 @@ use super::rest_skills::{
     approve_skill_draft, get_skill, list_skill_drafts, list_skills, reject_skill_draft,
 };
 use super::rest_tasks::{create_task, delete_task, list_tasks, update_task};
+use super::rest_update::update_check;
 use super::rest_usage_system::{system_info, usage_history};
 use super::rest_voice::{voice_status, voice_synthesize, voice_transcribe, voice_update};
 use super::ui_assets::{StaticRoot, api_not_found, cache_control_layer, ui_handler};
@@ -101,6 +102,9 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/tasks", get(list_tasks).post(create_task))
         .route("/tasks/{id}", patch(update_task).delete(delete_task))
         .route("/audit", get(list_audit))
+        // M30 (D23.6): kiểm tra bản mới — chỉ hỏi GitHub, không tải/cài; check
+        // tay khi người dùng bấm nút, không tự gọi định kỳ.
+        .route("/update/check", get(update_check))
         .route("/ws", any(ws_handler))
         .fallback(api_not_found)
         .method_not_allowed_fallback(api_not_found)
