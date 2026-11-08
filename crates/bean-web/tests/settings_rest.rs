@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::Router as AxumRouter;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -25,7 +26,10 @@ use bean_skills::SkillCatalog;
 use bean_tools::{ToolRegistry, builtin::files::tool::read_file};
 use bean_types::config::RoleConfig;
 use bean_types::{Config, LlmResponse};
-use bean_web::{AuthService, WebState, WebStateDeps, build_router, set_password};
+use bean_web::{
+    AuthService, NoopRebind, WebListen, WebRebind, WebState, WebStateDeps, build_router,
+    set_password,
+};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -72,6 +76,16 @@ fn config_for(data: &Path, workspace: &Path, viewer: Option<(&str, &str)>) -> Co
 
 /// Dựng app web với kho secret và (tuỳ chọn) `bean.toml` thật cho Router.
 fn build(config: Config, config_toml: Option<&Path>) -> AxumRouter {
+    build_with_rebind(config, config_toml, Arc::new(NoopRebind))
+}
+
+/// Như [`build`] nhưng cắm [`WebRebind`] tuỳ ý — test hành vi `restart_required`
+/// khi supervisor không swap được listener (D21.7).
+fn build_with_rebind(
+    config: Config,
+    config_toml: Option<&Path>,
+    rebind: Arc<dyn WebRebind>,
+) -> AxumRouter {
     set_password(&config.data.dir, PASSWORD, None).unwrap();
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
     let workspace = Arc::new(CapWorkspace::open(config.agent.workspace.clone()).unwrap());
@@ -111,6 +125,7 @@ fn build(config: Config, config_toml: Option<&Path>) -> AxumRouter {
         skills,
         workspace: Some(workspace),
         speech: None,
+        rebind,
     })
     .unwrap();
     build_router(state)
@@ -118,6 +133,14 @@ fn build(config: Config, config_toml: Option<&Path>) -> AxumRouter {
 
 /// Fixture chuẩn: có `bean.toml` (PATCH ghi được) + data dir + workspace riêng.
 fn fixture(viewer: Option<(&str, &str)>) -> (tempfile::TempDir, PathBuf, AxumRouter) {
+    fixture_with_rebind(NoopRebind, viewer)
+}
+
+/// Như [`fixture`] nhưng cắm [`WebRebind`] tuỳ ý.
+fn fixture_with_rebind(
+    rebind: impl WebRebind + 'static,
+    viewer: Option<(&str, &str)>,
+) -> (tempfile::TempDir, PathBuf, AxumRouter) {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     let workspace = dir.path().join("workspace");
@@ -126,7 +149,7 @@ fn fixture(viewer: Option<(&str, &str)>) -> (tempfile::TempDir, PathBuf, AxumRou
     let config_toml = dir.path().join("bean.toml");
     std::fs::write(&config_toml, BEAN_TOML).unwrap();
     let config = config_for(&data, &workspace, viewer);
-    let app = build(config, Some(&config_toml));
+    let app = build_with_rebind(config, Some(&config_toml), Arc::new(rebind));
     (dir, config_toml, app)
 }
 
@@ -811,9 +834,10 @@ async fn lan_access_disable_writes_loopback_atomically_and_audits() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // NoopRebind (fixture) áp dụng listener mới thành công ⇒ không cần restart.
     assert_eq!(
         json.get("restart_required"),
-        Some(&serde_json::Value::Bool(true))
+        Some(&serde_json::Value::Bool(false))
     );
     let access = json.get("access").unwrap();
     assert_eq!(
@@ -851,6 +875,45 @@ async fn lan_access_disable_writes_loopback_atomically_and_audits() {
     assert!(
         !raw.contains("192.168"),
         "audit không được chứa giá trị: {raw}"
+    );
+}
+
+/// D21.7: supervisor không swap được listener (bind mới bị chiếm) ⇒ POST vẫn 200
+/// (ba khoá đã ghi đĩa — nguồn sự thật chờ restart) nhưng `restart_required = true`
+/// để UI báo người dùng restart áp cấu hình.
+#[tokio::test]
+async fn lan_access_reports_restart_required_when_rebind_fails() {
+    struct FailingRebind;
+
+    #[async_trait]
+    impl WebRebind for FailingRebind {
+        async fn apply(&self, _listen: WebListen) -> Result<(), String> {
+            Err("không bind được 0.0.0.0:7878 (Address already in use)".into())
+        }
+    }
+
+    let (_dir, config_toml, app) = fixture_with_rebind(FailingRebind, None);
+    std::fs::write(&config_toml, BEAN_TOML_LAN).unwrap();
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/lan-access",
+        Some(&token),
+        Some(r#"{"enabled":false,"password":"correct horse battery staple"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert_eq!(
+        json.get("restart_required"),
+        Some(&serde_json::Value::Bool(true)),
+        "rebind lỗi ⇒ phải yêu cầu restart: {json}"
+    );
+    // File vẫn phải được ghi — bean.toml trên đĩa là trạng thái chờ restart.
+    let written = std::fs::read_to_string(&config_toml).unwrap();
+    assert!(
+        written.contains("127.0.0.1:7878"),
+        "bind phải về loopback trên đĩa: {written}"
     );
 }
 

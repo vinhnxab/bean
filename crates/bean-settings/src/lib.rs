@@ -39,6 +39,7 @@ pub use probe::{
 pub use settings::{
     SETTINGS, SetOutcome, SettingApply, SettingEntry, SettingKind, SettingRead, SettingSource,
     SettingStore, SettingTier, SettingValue, SettingsService, lookup, parse_value,
+    value_from_config,
 };
 pub use slot::{SecretSlot, SecretSlotRegistry, SlotGroup, is_env_name};
 pub use store::{MAX_VALUE_BYTES, SecretSnapshot, SecretStore};

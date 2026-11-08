@@ -6,8 +6,8 @@
 //! Ba khoá bị sửa (`web.allow_remote`, `web.bind`, `web.public_origin`) đều là
 //! tầng B (M29) — đây là **ngoại lệ có kiểm soát** do người chủ dự án yêu cầu
 //! (D21.x): chỉ admin khi RBAC bật, **step-up mật khẩu** như secrets (D19.5),
-//! audit một event `config.set` cho mỗi khoá, và hiệu lực phải sau
-//! `scripts/beanctl restart` (UI tái dụng banner pending restart).
+//! audit một event `config.set` cho mỗi khoá, và hiệu lực **lúc nóng** qua hot
+//! rebind (D21.7) — restart chỉ cần khi supervisor không swap được listener.
 //!
 //! # Vì sao ghi atomic cả ba khoá
 //!
@@ -30,7 +30,7 @@ use crate::server::rest_settings::{
     config_readonly, map_settings_error, peer_ip, require_admin, required_audit, step_up,
     unknown_setting_failure,
 };
-use crate::server::{ApiFailure, ApiResult, WebState, require_user};
+use crate::server::{ApiFailure, ApiResult, WebListen, WebState, require_user};
 
 /// Dò IPv4 LAN của máy server: trick UDP connect — không gửi packet nào, chỉ để
 /// kernel chọn đường ra rồi đọc địa chỉ local của socket. Thử lần lượt hai địa
@@ -77,26 +77,26 @@ fn lan_access_dto(bind: SocketAddr, allow_remote: bool, lan_ip: Option<Ipv4Addr>
     }
 }
 
-/// Trạng thái LAN **sẽ hiệu lực sau restart** đọc qua `SettingsService` (nguồn sự
-/// thật trên đĩa, như `GET /api/settings`): nếu đọc `state.config` (snapshot lúc
-/// khởi động) thì ngay sau Apply, UI refetch GET sẽ thấy trạng thái cũ và công tắc
-/// bật lại vị trí cũ (lỗi thật 2026-11-08). Đĩa lỗi/parse lỗi ⇒ fallback snapshot.
+/// Trạng thái LAN **sẽ hiệu lực** đọc qua `SettingsService` (nguồn sự thật trên
+/// đĩa, như `GET /api/settings`): sau khi POST ghi file, GET phải phản ánh trạng
+/// thái mới — không phải snapshot in-memory lúc khởi động (lỗi thật 2026-11-08).
+/// Đĩa lỗi/parse lỗi ⇒ fallback cell nóng [`WebState::web_listen`].
 fn effective_lan_view(state: &WebState) -> (SocketAddr, bool) {
     let service = bean_settings::SettingsService::new(&state.config, state.router.config_path());
+    let fallback = state.web_listen.borrow().clone();
     let bind = bean_settings::lookup("web.bind")
         .map(|entry| service.get(entry).value)
         .and_then(|value| value.parse::<SocketAddr>().ok())
-        .unwrap_or(state.config.web.bind);
+        .unwrap_or(fallback.bind);
     let allow_remote = bean_settings::lookup("web.allow_remote")
         .map(|entry| service.get(entry).value == "true")
-        .unwrap_or(state.config.web.allow_remote);
+        .unwrap_or(fallback.allow_remote);
     (bind, allow_remote)
 }
 
-/// `GET /api/settings/lan-access` — mọi user đã đăng nhập, chỉ đọc: trạng thái sẽ
-/// hiệu lực sau restart (từ `bean.toml` trên đĩa), IP LAN dò được, cổng và URL.
-/// Đọc trạng thái chờ restart là chủ ý: banner pending restart của UI báo rằng
-/// server **đang chạy** vẫn theo cấu hình cũ cho đến khi `beanctl restart`.
+/// `GET /api/settings/lan-access` — mọi user đã đăng nhập, chỉ đọc: trạng thái
+/// hiệu lực (từ `bean.toml` trên đĩa, khớp cell nóng sau rebind), IP LAN dò được,
+/// cổng và URL.
 pub(super) async fn lan_access_status(
     State(state): State<WebState>,
     jar: CookieJar,
@@ -108,7 +108,10 @@ pub(super) async fn lan_access_status(
 
 /// `POST /api/settings/lan-access` — bật/tắt truy cập LAN (D21.x): ghi **atomic**
 /// ba khoá tầng B trong một lượt validate qua `SettingsService::set_many`.
-/// Admin + step-up mật khẩu + audit từng khoá; hiệu lực sau `beanctl restart`.
+/// Admin + step-up mật khẩu + audit từng khoá. Sau khi ghi, áp dụng **lúc nóng**
+/// qua `rebind` (D21.7): `restart_required = false` khi supervisor đã swap listener
+/// thành công; `true` khi bind mới thất bại (listener cũ được khôi phục, cấu hình
+/// đã ghi đĩa sẽ hiệu lực sau restart).
 pub(super) async fn lan_access_update(
     State(state): State<WebState>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
@@ -122,7 +125,7 @@ pub(super) async fn lan_access_update(
         return Err(config_readonly());
     };
     let audit = required_audit(&state)?;
-    let port = state.config.web.bind.port();
+    let port = state.web_bind().port();
 
     let (bind, allow_remote, lan_ip) = if request.enabled {
         let Some(ip) = detect_lan_ipv4() else {
@@ -151,6 +154,17 @@ pub(super) async fn lan_access_update(
     } else {
         format!("http://127.0.0.1:{port}")
     };
+    // D21.7: validate TRƯỚC khi ghi đĩa — origin hỏng không bao giờ được persist.
+    let public_origin = match super::rebind::validate_origin(&origin_value) {
+        Ok(url) => url,
+        Err(_) => {
+            return Err(ApiFailure::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "invalid_origin",
+                format!("origin không hợp lệ: {origin_value}"),
+            ));
+        }
+    };
     let entry = |path: &str| -> Result<&'static SettingEntry, ApiFailure> {
         bean_settings::lookup(path).ok_or_else(|| unknown_setting_failure(path))
     };
@@ -169,8 +183,15 @@ pub(super) async fn lan_access_update(
             &user_id,
         )
         .map_err(map_settings_error)?;
+    // D21.7: áp dụng lúc nóng — guard đọc origin mới từ cell nóng ngay sau swap.
+    let listen = WebListen {
+        bind,
+        allow_remote,
+        public_origin,
+    };
+    let restart_required = state.rebind.apply(listen).await.is_err();
     Ok(Json(LanAccessMutateResponse {
         access: lan_access_dto(bind, allow_remote, lan_ip),
-        restart_required: true,
+        restart_required,
     }))
 }

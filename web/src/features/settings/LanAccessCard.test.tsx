@@ -69,7 +69,9 @@ describe("LanAccessCard — bật/tắt truy cập LAN (D21.x)", () => {
     renderManagement(<AdvancedPanel />);
 
     await user.click(await screen.findByRole("switch", { name: "Toggle LAN access" }));
-    expect(screen.getByText(/Will bind 0.0.0.0 and serve http:\/\/192\.168\.1\.29:7878/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Applies immediately: binds 0\.0\.0\.0 and serves http:\/\/192\.168\.1\.29:7878/),
+    ).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Current password"), PASSWORD);
     await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -101,7 +103,7 @@ describe("LanAccessCard — bật/tắt truy cập LAN (D21.x)", () => {
 
     expect(await screen.findByText("LAN access on: http://192.168.1.29:7878")).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Toggle LAN access" }));
-    expect(screen.getByText(/Will close back to 127\.0\.0\.1/)).toBeInTheDocument();
+    expect(screen.getByText(/Applies immediately: closes back to 127\.0\.0\.1/)).toBeInTheDocument();
   });
 
   it("GET lỗi: hiện thông báo + nút thử lại", async () => {

@@ -48,6 +48,9 @@ use super::{ApiFailure, ApiResult, WebState, require_user};
 ///
 /// Đọc qua `SettingsService` (tự load `bean.toml` + state files từ đĩa) nên luôn
 /// khớp với những gì CLI `bean config get` thấy — UI không tự giữ bản sao schema.
+/// Khoá `apply = restart` được tính cờ `pending` bằng cách so giá trị đĩa với giá
+/// trị **đang chạy** (D21.7) — banner restart chỉ hiện với khoá thật sự chờ, thay
+/// cho heuristic `source != default` cũ báo sai với mọi khoá nằm trong toml.
 pub(super) async fn settings_list(
     State(state): State<WebState>,
     jar: CookieJar,
@@ -58,6 +61,8 @@ pub(super) async fn settings_list(
         .iter()
         .map(|entry| {
             let read = service.get(entry);
+            let pending = entry.apply == bean_settings::SettingApply::Restart
+                && read.value != running_value(&state, entry);
             SettingDto {
                 key: entry.path.to_string(),
                 value: read.value,
@@ -66,6 +71,7 @@ pub(super) async fn settings_list(
                 apply: entry.apply.label().to_string(),
                 kind: kind_str(entry.kind).to_string(),
                 editable_in_ui: !entry.tier.cli_only(),
+                pending,
                 desc_vi: entry.desc_vi.to_string(),
                 desc_en: entry.desc_en.to_string(),
             }
@@ -75,6 +81,23 @@ pub(super) async fn settings_list(
         settings,
         writable: state.router.config_path().is_some(),
     }))
+}
+
+/// Giá trị của một khoá **trong tiến trình đang chạy**: khoá `web.*` đọc từ cell
+/// nóng (D21.7 — LAN toggle swap listener mà không đụng `state.config`), còn lại
+/// đọc snapshot cấu hình lúc khởi động. Định dạng phải khớp
+/// `bean_settings::value_from_config` để so sánh chuỗi đáng tin.
+fn running_value(state: &WebState, entry: &bean_settings::SettingEntry) -> String {
+    match entry.path {
+        "web.bind" => state.web_bind().to_string(),
+        "web.allow_remote" => state.web_listen.borrow().allow_remote.to_string(),
+        "web.public_origin" => state
+            .public_origin()
+            .as_str()
+            .trim_end_matches('/')
+            .to_string(),
+        _ => bean_settings::value_from_config(&state.config, entry),
+    }
 }
 
 /// `PATCH /api/settings` — ghi một khoá tầng A; tầng B trả `403 cli_only` kèm đúng

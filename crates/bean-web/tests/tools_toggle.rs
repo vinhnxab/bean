@@ -25,7 +25,7 @@ use bean_skills::SkillCatalog;
 use bean_tools::{ToolRegistry, builtin::files::tool::read_file};
 use bean_types::config::RoleConfig;
 use bean_types::{Config, LlmResponse};
-use bean_web::{AuthService, WebState, WebStateDeps, build_router, set_password};
+use bean_web::{AuthService, NoopRebind, WebState, WebStateDeps, build_router, set_password};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -95,6 +95,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         skills,
         workspace: Some(workspace),
         speech: None,
+        rebind: Arc::new(NoopRebind),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), build_router(state))
@@ -132,6 +133,7 @@ fn build_with_store(config: Config) -> (tempfile::TempDir, Arc<dyn Store>, AxumR
         skills,
         workspace: Some(workspace),
         speech: None,
+        rebind: Arc::new(NoopRebind),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), store, build_router(state))
@@ -356,6 +358,7 @@ async fn toggle_survives_restart_semantics_via_shared_store() {
         skills,
         workspace: Some(workspace),
         speech: None,
+        rebind: Arc::new(NoopRebind),
     })
     .unwrap();
     let restarted = build_router(state);

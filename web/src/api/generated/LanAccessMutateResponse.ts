@@ -10,7 +10,8 @@ export type LanAccessMutateResponse = {
  */
 access: LanAccessDto, 
 /**
- * Luôn `true` — cả ba khoá `web.*` đều `apply = restart`, phải
- * `scripts/beanctl restart` mới có hiệu lực.
+ * `false` khi hot rebind (D21.7) áp dụng thành công — có hiệu lực ngay.
+ * `true` khi bind mới thất bại (listener cũ được khôi phục); cấu hình đã ghi
+ * đĩa và sẽ hiệu lực sau `scripts/beanctl restart`.
  */
 restart_required: boolean, };

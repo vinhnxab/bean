@@ -22,4 +22,7 @@ pub use auth::{
     AuthError, AuthService, LoginSession, auth_file_path, set_password,
     set_password_and_revoke_sessions,
 };
-pub use server::{ApiFailure, WebBuildError, WebChannel, WebState, WebStateDeps, build_router};
+pub use server::{
+    ApiFailure, NoopRebind, RebindHandle, WebBuildError, WebChannel, WebListen, WebRebind,
+    WebState, WebStateDeps, build_router, run_web_supervisor,
+};

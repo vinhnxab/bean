@@ -34,6 +34,11 @@ kind: string,
  */
 editable_in_ui: boolean, 
 /**
+ * `true` khi khoá `apply = restart` nhưng giá trị trên đĩa **chưa** trùng giá
+ * trị đang chạy — banner "cần restart" chỉ hiện với khoá thật sự chờ (D21.7).
+ */
+pending: boolean, 
+/**
  * Mô tả tiếng Việt (ngôn ngữ mặc định của UI).
  */
 desc_vi: string, 

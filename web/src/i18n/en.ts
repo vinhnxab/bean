@@ -444,13 +444,14 @@ export const en: Record<MessageKey, string> = {
   "settings.section.advancedDescription": "Security keys (tier B) editable only via interactive CLI.",
   "settings.lanAccess.title": "LAN Access",
   "settings.lanAccess.description":
-    "Expose Bean to devices on your local network (phone, other machines). Requires password and a Bean restart.",
+    "Expose Bean to devices on your local network (phone, other machines). Requires password; applies immediately, no restart needed.",
   "settings.lanAccess.toggleAria": "Toggle LAN access",
   "settings.lanAccess.statusLan": "LAN access on: {url}",
   "settings.lanAccess.statusLoopback": "Only this machine can access (127.0.0.1).",
   "settings.lanAccess.enableHint":
-    "Will bind 0.0.0.0 and serve {url} — plain HTTP over the LAN, unencrypted; only enable on a trusted network.",
-  "settings.lanAccess.disableHint": "Will close back to 127.0.0.1 — only this machine can access.",
+    "Applies immediately: binds 0.0.0.0 and serves {url} — plain HTTP over the LAN, unencrypted; only enable on a trusted network.",
+  "settings.lanAccess.disableHint":
+    "Applies immediately: closes back to 127.0.0.1 — only this machine can access.",
   "settings.lanAccess.noChangeHint": "Already matches the current state.",
   "settings.lanAccess.passwordPlaceholder": "Enter Bean password",
   "settings.lanAccess.passwordAria": "Current password",

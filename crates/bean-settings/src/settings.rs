@@ -1442,7 +1442,9 @@ fn search_provider_str(provider: bean_types::config::WebSearchProvider) -> &'sta
 
 /// Giá trị của một khoá đọc từ `Config` (đã gộp state) — bảng và hàm này phải khớp
 /// nhau: mọi dòng trong [`SETTINGS`] phải có nhánh ở đây (test bảng kiểm tra).
-fn value_from_config(config: &Config, entry: &SettingEntry) -> String {
+/// Công khai cho web so sánh giá trị **đang chạy** với giá trị đĩa để tính cờ
+/// `pending` restart trung thực (`GET /api/settings`).
+pub fn value_from_config(config: &Config, entry: &SettingEntry) -> String {
     match entry.path {
         // ---- [llm] ----
         "llm.model" => config.llm.model.clone(),

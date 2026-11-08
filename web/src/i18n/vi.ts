@@ -448,13 +448,13 @@ export const vi = {
   "settings.section.advancedDescription": "Khoá bảo mật (tầng B) chỉ sửa được qua CLI tương tác.",
   "settings.lanAccess.title": "Truy cập từ mạng LAN",
   "settings.lanAccess.description":
-    "Mở Bean cho các thiết bị trong mạng nội bộ (điện thoại, máy khác). Yêu cầu mật khẩu và khởi động lại Bean.",
+    "Mở Bean cho các thiết bị trong mạng nội bộ (điện thoại, máy khác). Yêu cầu mật khẩu; áp dụng ngay, không cần khởi động lại.",
   "settings.lanAccess.toggleAria": "Bật/tắt truy cập từ mạng LAN",
   "settings.lanAccess.statusLan": "Đang mở LAN: {url}",
   "settings.lanAccess.statusLoopback": "Đang chỉ cho máy này truy cập (127.0.0.1).",
   "settings.lanAccess.enableHint":
-    "Sẽ mở bind 0.0.0.0 và dùng {url} — truy cập qua mạng LAN http thường, không mã hoá; chỉ bật trên mạng tin cậy.",
-  "settings.lanAccess.disableHint": "Sẽ đóng về 127.0.0.1 — chỉ máy này truy cập được.",
+    "Áp dụng ngay: bind 0.0.0.0 và dùng {url} — truy cập qua mạng LAN http thường, không mã hoá; chỉ bật trên mạng tin cậy.",
+  "settings.lanAccess.disableHint": "Áp dụng ngay: đóng về 127.0.0.1 — chỉ máy này truy cập được.",
   "settings.lanAccess.noChangeHint": "Trạng thái đã trùng với hiện tại.",
   "settings.lanAccess.passwordPlaceholder": "Nhập mật khẩu Bean",
   "settings.lanAccess.passwordAria": "Mật khẩu hiện tại",

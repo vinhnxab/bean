@@ -15,7 +15,7 @@ export function AdvancedPanel() {
   const { data: settings } = useSettings();
 
   const tierB = settings?.settings.filter((row) => row.tier === "B") ?? [];
-  const pendingRestart = tierB.filter((row) => row.apply === "restart" && row.source !== "default");
+  const pendingRestart = tierB.filter((row) => row.apply === "restart" && row.pending);
 
   return (
     <Panel>

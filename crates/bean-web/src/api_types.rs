@@ -1205,6 +1205,9 @@ pub struct SettingDto {
     pub kind: String,
     /// `false` (tầng B) ⇒ UI chỉ xem và gợi ý lệnh `bean config set`.
     pub editable_in_ui: bool,
+    /// `true` khi khoá `apply = restart` nhưng giá trị trên đĩa **chưa** trùng giá
+    /// trị đang chạy — banner "cần restart" chỉ hiện với khoá thật sự chờ (D21.7).
+    pub pending: bool,
     /// Mô tả tiếng Việt (ngôn ngữ mặc định của UI).
     pub desc_vi: String,
     /// Mô tả tiếng Anh.
@@ -1355,7 +1358,8 @@ pub struct LanAccessRequest {
 pub struct LanAccessMutateResponse {
     /// Trạng thái LAN access sau khi ghi.
     pub access: LanAccessDto,
-    /// Luôn `true` — cả ba khoá `web.*` đều `apply = restart`, phải
-    /// `scripts/beanctl restart` mới có hiệu lực.
+    /// `false` khi hot rebind (D21.7) áp dụng thành công — có hiệu lực ngay.
+    /// `true` khi bind mới thất bại (listener cũ được khôi phục); cấu hình đã ghi
+    /// đĩa và sẽ hiệu lực sau `scripts/beanctl restart`.
     pub restart_required: bool,
 }

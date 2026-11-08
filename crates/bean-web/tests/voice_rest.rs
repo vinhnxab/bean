@@ -23,7 +23,7 @@ use bean_skills::SkillCatalog;
 use bean_speech::{FakeSpeech, SpeechProvider};
 use bean_tools::ToolRegistry;
 use bean_types::{Config, LlmResponse};
-use bean_web::{AuthService, WebState, WebStateDeps, build_router, set_password};
+use bean_web::{AuthService, NoopRebind, WebState, WebStateDeps, build_router, set_password};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -96,6 +96,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
         skills,
         workspace: Some(workspace_fs),
         speech,
+        rebind: Arc::new(NoopRebind),
     })
     .unwrap();
     (dir, build_router(state))
@@ -281,7 +282,7 @@ async fn voice_update_requires_auth() {
 }
 
 // Toggle từ UI: tắt ⇒ GET enabled:false và STT/TTS fail-closed; bật lại ⇒ dùng được
-// ngay. File `voice-state.json` phải được ghi để trạng thái sống sót qua restart.
+// ngay. File `settings-state.json` phải được ghi để trạng thái sống sót qua restart.
 #[tokio::test]
 async fn voice_toggle_persists_and_gates_stt_tts() {
     let (dir, app) = fixture(true).await;
@@ -324,9 +325,9 @@ async fn voice_toggle_persists_and_gates_stt_tts() {
         assert!(payload.contains("voice_disabled"), "{payload}");
     }
 
-    let state_file = dir.path().join("data").join("voice-state.json");
+    let state_file = dir.path().join("data").join("settings-state.json");
     let saved = std::fs::read_to_string(&state_file).unwrap();
-    assert!(saved.contains("\"enabled\":false"), "{saved}");
+    assert!(saved.contains("\"voice_enabled\":false"), "{saved}");
 
     let response = app
         .clone()
@@ -392,11 +393,11 @@ async fn voice_update_to_api_persists_key_and_never_echoes_it() {
     assert!(payload.contains("\"api_key_set\":true"), "{payload}");
     assert!(!payload.contains("sk-test-1234abcd"), "rò key: {payload}");
 
-    let state_file = dir.path().join("data").join("voice-state.json");
+    let state_file = dir.path().join("data").join("settings-state.json");
     let saved = std::fs::read_to_string(&state_file).unwrap();
-    assert!(saved.contains("\"provider\":\"api\""), "{saved}");
-    assert!(saved.contains("\"language\":\"vi\""), "{saved}");
-    // M29: key KHÔNG nằm trong voice-state.json nữa — nó sống ở secrets.env.
+    assert!(saved.contains("\"voice_provider\":\"api\""), "{saved}");
+    assert!(saved.contains("\"voice_language\":\"vi\""), "{saved}");
+    // Key KHÔNG nằm trong settings-state.json — nó sống ở secrets.env.
     assert!(
         !saved.contains("sk-test-1234abcd"),
         "rò key vào state file: {saved}"
@@ -450,7 +451,7 @@ async fn voice_update_api_without_key_is_rejected_and_not_persisted() {
     let payload = body_string(response).await;
     assert!(payload.contains("voice_not_configured"), "{payload}");
 
-    let state_file = dir.path().join("data").join("voice-state.json");
+    let state_file = dir.path().join("data").join("settings-state.json");
     assert!(!state_file.exists(), "không được persist khi dựng thất bại");
 }
 
@@ -475,9 +476,16 @@ async fn voice_update_persists_tts_voices_and_status_returns_them() {
     assert!(payload.contains("\"tts_voice_id\":\"vid-en\""), "{payload}");
     assert!(payload.contains("\"tts_voice_vi\":\"vid-vi\""), "{payload}");
 
-    let saved = std::fs::read_to_string(dir.path().join("data").join("voice-state.json")).unwrap();
-    assert!(saved.contains("\"tts_voice_id\":\"vid-en\""), "{saved}");
-    assert!(saved.contains("\"tts_voice_vi\":\"vid-vi\""), "{saved}");
+    let saved =
+        std::fs::read_to_string(dir.path().join("data").join("settings-state.json")).unwrap();
+    assert!(
+        saved.contains("\"voice_tts_voice_id\":\"vid-en\""),
+        "{saved}"
+    );
+    assert!(
+        saved.contains("\"voice_tts_voice_vi\":\"vid-vi\""),
+        "{saved}"
+    );
 
     let status = app
         .clone()
@@ -508,7 +516,7 @@ async fn voice_update_rejects_empty_default_voice_and_clears_vi_voice() {
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(body_string(response).await.contains("invalid_voice_id"));
     assert!(
-        !dir.path().join("data").join("voice-state.json").exists(),
+        !dir.path().join("data").join("settings-state.json").exists(),
         "không được persist khi request hỏng"
     );
 

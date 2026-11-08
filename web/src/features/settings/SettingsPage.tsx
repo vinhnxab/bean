@@ -46,7 +46,7 @@ export function SettingsPage() {
   }
 
   const pendingRestart = (settings?.settings ?? []).filter(
-    (row) => row.apply === "restart" && row.source !== "default",
+    (row) => row.apply === "restart" && row.pending,
   );
 
   return (

@@ -728,6 +728,7 @@ trick UDP connect (không gửi packet), port giữ nguyên từ cấu hình đa
 | D21.4 | Dò IP LAN bằng UDP connect tới 8.8.8.8/1.1.1.1 rồi đọc `local_addr()` — **không gửi packet**, không cần dependency | Kernel tự chọn đường ra; rẻ, chính xác cho trường hợp một NIC LAN phổ biến. Không dò được ⇒ **fail-closed** (422 `lan_ip_unavailable`), không bao giờ bind `0.0.0.0` mù. | Máy nhiều NIC sẽ chọn theo default route — đổi bind tay vẫn được qua `bean config set` như cũ. |
 | D21.5 | LAN http **không mã hoá** — UI hiện cảnh báo rõ trong form bật; khuyến nghị reverse proxy TLS/Tailscale (mục 23) không đổi | Mục đích là tiện truy cập điện thoại/máy khác trong mạng nhà; người dùng tự chịu rủi ro mạng. | Mật khẩu phiên đi qua LAN dưới dạng cookie thường (chưa `Secure` vì origin http) — chỉ bật trên mạng tin cậy. |
 | D21.6 | Guard origin (mục 15.7) nới thêm một đường: chấp nhận `Origin` khớp đúng `Host` của request khi **Host là IP literal** (loopback/RFC1918, IPv4/IPv6) — song song với cặp check `public_origin` cũ | Con gà–quả trứng thật: toggle LAN được thiết kế để **đổi** `public_origin`, nhưng guard lại bắt origin hiện tại phải khớp nó → bấm toggle qua `http://127.0.0.1:7878` khi `public_origin` là IP LAN bị 403. An toàn vì DNS rebinding (phòng thủ mục 15.7) **bắt buộc dùng domain** — browser chỉ gửi Host dạng IP khi người dùng tự gõ/đánh dấu; trang tấn công ở IP/port khác luôn có `Origin ≠ Host` (browser đặt Origin, không giả được); `Origin: null` bị từ chối. | Host domain dù Origin khớp vẫn bị chặn; so sánh scheme http/https + host IP + port (port mặc định theo scheme khi thiếu). |
+| D21.7 | **Hot rebind listener web (2026-11-08):** sau khi `set_many` ghi đĩa, supervisor web (`run_web_supervisor` ở `bean-web`) swap listener lúc nóng — dừng listener cũ (graceful trần 2s rồi abort) → bind địa chỉ mới → cập nhật watch cell `web_listen` trong `WebState`; guard/handler đọc origin + bind hiệu lực **từng request** từ cell | Người dùng hỏi: "sao không làm luôn tự restart để cấu hình có hiệu lực ngay?" — restart nguyên tiến trình giết run agent đang chạy; swap listener giữ nguyên tiến trình, tab web tự nối lại WS + nạp lại bằng REST (cơ chế backoff + `Sync` có sẵn từ M10/M16). `RebindHandle` (mpsc + oneshot) là điểm DIP: `bean serve` cắm supervisor thật, test/nhúng không supervisor cắm `NoopRebind`. | Bind mới thất bại ⇒ khôi phục listener cũ (3 lần thử) và trả `restart_required = true` — cấu hình đã ghi đĩa, restart sẽ áp; người dùng phải mở URL mới sau đổi origin (tab đang ở origin cũ bị 403 rồi tự nối lại); banner pending restart đổi ngữ nghĩa từ heuristic `source != default` sang cờ `pending` (đĩa ≠ đang chạy) — hết nhiễu cũ với các khoá đã apply mà vẫn hiện banner |
 
 **Kiểm chứng:** `cargo test --workspace` (mới có 2 test `set_many` ở bean-settings
 và 6 test `/api/settings/lan-access` ở bean-web: 401, 403 admin, 401 sai mật
@@ -736,3 +737,12 @@ khẩu, ghi atomic + audit khi tắt LAN, enable fail-closed khi không dò đư
 `pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (217 test, gồm 5
 test card LAN) + `pnpm build` xanh; test kiến trúc 600-dòng vẫn pass (handler
 LAN tách riêng `rest_lan_access.rs`).
+
+**Kiểm chứng D21.7 (2026-11-08):** bean-web có thêm test guard đọc origin nóng
+(`send_modify` cell ⇒ origin cũ 403 / origin mới 200), test tích hợp supervisor
+(swap A→B: A đóng, B phục vụ, cell cập nhật; apply vào port bị chiếm ⇒ Err,
+B vẫn phục vụ), test `restart_required = true` khi `WebRebind` trả Err (file vẫn
+ghi đĩa); `NoopRebind` thay `restart_required = false` cho mọi fixture cũ. Web:
+`pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (217 test) +
+`pnpm build` xanh; banner dùng cờ `pending` từ `SettingDto` (sinh lại bằng
+`make types`).

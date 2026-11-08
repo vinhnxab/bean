@@ -38,7 +38,7 @@ pub async fn request_guard(
     let path = request.uri().path().to_string();
     let headers = request.headers().clone();
     if path.starts_with("/api/") && is_mutating(method) {
-        if !same_site_allowed(&headers, &state.public_origin) {
+        if !same_site_allowed(&headers, &state.public_origin()) {
             return ApiFailure::forbidden().into_response();
         }
         if !has_json_content_type(&headers) {
@@ -50,7 +50,7 @@ pub async fn request_guard(
             .into_response();
         }
     }
-    if path == "/api/ws" && !same_site_allowed(&headers, &state.public_origin) {
+    if path == "/api/ws" && !same_site_allowed(&headers, &state.public_origin()) {
         return ApiFailure::forbidden().into_response();
     }
     next.run(request).await

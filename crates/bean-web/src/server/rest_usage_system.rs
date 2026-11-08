@@ -122,8 +122,10 @@ pub(super) async fn system_info(
         },
         web: WebChannelDto {
             enabled: config.web.enabled,
-            bind: config.web.bind.to_string(),
-            allow_remote: config.web.allow_remote,
+            // D21.7: bind/allow_remote đọc cell nóng — sau LAN toggle thành công
+            // đây là trạng thái đang phục vụ thật, không phải snapshot khởi động.
+            bind: state.web_bind().to_string(),
+            allow_remote: state.web_listen.borrow().allow_remote,
             session_ttl_hours: config.web.session_ttl_hours,
         },
         telegram: TelegramChannelDto {

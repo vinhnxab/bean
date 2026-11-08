@@ -22,14 +22,15 @@ use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};
 use bean_types::config::{McpServerConfig, RoleConfig};
 use bean_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec, Usage};
 use bean_web::{
-    AuthService, WebState, WebStateDeps, build_router, set_password,
-    set_password_and_revoke_sessions,
+    AuthService, NoopRebind, RebindHandle, WebListen, WebRebind, WebState, WebStateDeps,
+    build_router, run_web_supervisor, set_password, set_password_and_revoke_sessions,
 };
 use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 use tower::ServiceExt;
+use url::Url;
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -140,6 +141,7 @@ async fn make_state_with(
         skills,
         workspace: Some(workspace),
         speech: None,
+        rebind: Arc::new(NoopRebind),
     })
     .unwrap();
     (build_router(state.clone()), state)
@@ -409,6 +411,49 @@ async fn domain_host_rejected_even_when_origin_matches_it() {
     assert_eq!(
         app.oneshot(request).await.unwrap().status(),
         StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn guard_reads_public_origin_from_hot_listen_cell() {
+    // D21.7: guard đọc origin hiệu lực từ cell nóng — sau khi LAN toggle đổi
+    // `public_origin` lúc nóng, request mang origin cũ bị từ chối ngay và origin
+    // mới được chấp nhận, không cần dựng lại state. Host dùng domain để không
+    // rơi vào ngoại lệ IP-literal của D21.6.
+    let origin = "http://bean.local:7878";
+    let (_dir, app, state, _store) = fixture(origin, vec![]).await;
+    let body = format!("{{\"password\":\"{PASSWORD}\"}}");
+    assert_eq!(
+        app.clone()
+            .oneshot(login_request(origin, &body, None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    let lan_origin = "http://198.51.100.7:7878";
+    state.web_listen.send_modify(|listen| {
+        listen.public_origin = Url::parse(lan_origin).unwrap();
+    });
+
+    // Origin cũ: Host domain không khớp origin mới, và D21.6 không cứu được
+    // (Host không phải IP literal) → 403.
+    assert_eq!(
+        app.clone()
+            .oneshot(login_request(origin, &body, None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    // Origin mới được chấp nhận ngay sau swap.
+    assert_eq!(
+        app.oneshot(login_request(lan_origin, &body, None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
     );
 }
 
@@ -2208,4 +2253,78 @@ async fn ui_dir_missing_directory_returns_404_but_api_still_works() {
         response.headers().get(header::CONTENT_TYPE).unwrap(),
         "application/json"
     );
+}
+
+#[tokio::test]
+async fn web_supervisor_swaps_listener_hot_and_keeps_serving_on_failure() {
+    // D21.7: tích hợp supervisor — apply(B) ⇒ A đóng, B phục vụ, cell cập nhật;
+    // apply vào port bị chiếm ⇒ Err nhưng B vẫn phục vụ (web không đứng im).
+    let squatter = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let squatted = squatter.local_addr().unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_a = listener_a.local_addr().unwrap();
+    let mut config = make_config(&data, &workspace, &format!("http://{addr_a}"));
+    // Cell nóng khởi tạo từ config — phải khớp listener A để assert đầu có nghĩa.
+    config.web.bind = addr_a;
+    let (_app, state) = make_state(config, Arc::new(MemoryStore::new()), vec![]).await;
+
+    let listen_a = state.web_listen.borrow().clone();
+    assert_eq!(listen_a.bind, addr_a);
+
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let supervisor = tokio::spawn(run_web_supervisor(
+        state.clone(),
+        (listener_a, listen_a.clone()),
+        rx,
+        shutdown.clone(),
+    ));
+    let rebind = RebindHandle::new(tx);
+
+    // Swap sang port B còn tự do: Ok, A đóng, B phục vụ, cell cập nhật.
+    let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_b = probe.local_addr().unwrap();
+    drop(probe);
+    let origin_b = Url::parse(&format!("http://{addr_b}")).unwrap();
+    rebind
+        .apply(WebListen {
+            bind: addr_b,
+            allow_remote: false,
+            public_origin: origin_b.clone(),
+        })
+        .await
+        .expect("swap sang port còn tự do phải thành công");
+    assert!(
+        tokio::net::TcpStream::connect(addr_a).await.is_err(),
+        "listener A phải đóng sau swap"
+    );
+    tokio::net::TcpStream::connect(addr_b)
+        .await
+        .expect("listener B phải phục vụ sau swap");
+    assert_eq!(state.web_listen.borrow().bind, addr_b);
+    assert_eq!(state.web_listen.borrow().public_origin, origin_b);
+
+    // Apply vào port bị chiếm: Err, nhưng B vẫn phục vụ (đã khôi phục).
+    let error = rebind
+        .apply(WebListen {
+            bind: squatted,
+            allow_remote: false,
+            public_origin: Url::parse(&format!("http://{squatted}")).unwrap(),
+        })
+        .await
+        .expect_err("bind port bị chiếm phải thất bại");
+    assert!(error.contains("không bind được"), "{error}");
+    tokio::net::TcpStream::connect(addr_b)
+        .await
+        .expect("listener B vẫn phải phục vụ sau apply thất bại");
+    assert_eq!(state.web_listen.borrow().bind, addr_b);
+
+    shutdown.cancel();
+    supervisor.await.unwrap().unwrap();
 }

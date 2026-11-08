@@ -16,8 +16,8 @@ import { useI18n } from "@/i18n";
  *
  * Ba khoá bị sửa (`web.allow_remote`, `web.bind`, `web.public_origin`) là tầng B
  * — ngoại lệ có kiểm soát so với M29: chỉ admin, **step-up mật khẩu** như secrets
- * (D19.5), audit từng khoá, và hiệu lực sau `scripts/beanctl restart` (banner
- * pending restart của panel tự hiện qua invalidation `settings`).
+ * (D19.5), audit từng khoá, và áp dụng **ngay** bằng hot rebind listener (D21.7);
+ * khi rebind thất bại (bind mới bị chiếm) UI báo restart qua banner `pending`.
  */
 export function LanAccessCard() {
   const { t } = useI18n();

@@ -1,19 +1,18 @@
 //! `bean serve` — chạy web và Telegram qua cùng một Router.
 
-use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use axum::serve;
 use bean_channels::TelegramChannel;
 use bean_core::{Channel, Router, RouterDeps, Scheduler};
 use bean_memory::{SqliteStore, Store};
 use bean_skills::SkillCatalog;
 use bean_types::Config;
-use bean_web::{AuthService, WebChannel, WebState, WebStateDeps, build_router};
+use bean_web::{AuthService, RebindHandle, WebChannel, WebState, WebStateDeps, run_web_supervisor};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::chat;
@@ -164,8 +163,11 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         .context("không khởi tạo được scheduler")?,
     );
 
-    let mut web_listener = None;
+    let mut web_parts = None;
     if web_enabled {
+        // D21.7: supervisor sở hữu listener web — LAN toggle từ UI áp dụng lúc nóng
+        // qua `RebindHandle` mà không cần restart tiến trình.
+        let (rebind_tx, rebind_rx) = mpsc::channel(4);
         let state = WebState::new(WebStateDeps {
             config: config.clone(),
             store: store_dyn.clone(),
@@ -175,6 +177,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             skills: skills.clone(),
             workspace: workspace.clone(),
             speech,
+            rebind: Arc::new(RebindHandle::new(rebind_tx)),
         })?;
         let channel = Arc::new(WebChannel::new(state.notifications.clone()));
         router
@@ -187,7 +190,8 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             .local_addr()
             .context("đọc địa chỉ listener thất bại")?;
         tracing::info!(%local_addr, "Bean web đang lắng nghe");
-        web_listener = Some((listener, state));
+        let initial_listen = state.web_listen.borrow().clone();
+        web_parts = Some((state, listener, initial_listen, rebind_rx));
     }
 
     let mut telegram = None;
@@ -211,17 +215,12 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let telegram_shutdown = shutdown.clone();
     let telegram_router = router.clone();
     let web_future = async move {
-        match web_listener {
-            Some((listener, state)) => serve(
-                listener,
-                build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .with_graceful_shutdown({
-                let shutdown = web_shutdown;
-                async move { shutdown.cancelled().await }
-            })
-            .await
-            .context("web server dừng lỗi"),
+        match web_parts {
+            Some((state, listener, initial, rx)) => {
+                run_web_supervisor(state, (listener, initial), rx, web_shutdown)
+                    .await
+                    .context("supervisor web dừng lỗi")
+            }
             None => std::future::pending::<Result<()>>().await,
         }
     };

@@ -13,6 +13,7 @@
 //! server/
 //! ├─ mod.rs                WebState, ApiFailure, WebChannel, bản đồ module
 //! ├─ guard.rs              Origin/Host/CSRF + security headers  (mục 15.7)
+//! ├─ rebind.rs             hot rebind listener web khi LAN toggle (D21.7)
 //! ├─ dto.rs                chuyển record của store → DTO JSON
 //! ├─ routes.rs             dựng axum router
 //! ├─ ui_assets.rs          phục vụ UI nhúng + SPA fallback
@@ -36,6 +37,7 @@
 //!   WebSocket hijacking, mục 22.15) — nằm ở `guard.rs` và `ws.rs`.
 //! * Request thay đổi dữ liệu bắt buộc `Content-Type: application/json`.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -49,7 +51,7 @@ use bean_skills::SkillCatalog;
 use bean_speech::SpeechProvider;
 use bean_tools::WorkspaceFs;
 use bean_types::{Config, Outbound};
-use tokio::sync::{RwLock, Semaphore, broadcast};
+use tokio::sync::{RwLock, Semaphore, broadcast, watch};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -62,6 +64,7 @@ use crate::auth::AuthService;
 
 mod dto;
 mod guard;
+mod rebind;
 mod rest_audit_tools;
 mod rest_auth_status;
 mod rest_config;
@@ -83,6 +86,7 @@ mod ws;
 
 pub use guard::request_guard;
 pub use guard::security_headers;
+pub use rebind::{NoopRebind, RebindHandle, WebListen, WebRebind, run_web_supervisor};
 pub use routes::build_router;
 
 /// Xác thực cookie cho REST handler — mọi handler dùng chung một cách.
@@ -138,8 +142,13 @@ pub struct WebState {
     pub notifications: broadcast::Sender<ServerMsg>,
     /// Thời điểm process bắt đầu.
     pub started_at: Instant,
-    /// Origin canonical đã validate.
-    pub public_origin: Url,
+    /// Tham số lắng nghe hiệu lực (D21.7) — guard/handler đọc nóng qua
+    /// [`Self::public_origin()`]/[`Self::web_bind()`]; supervisor swap sau mỗi lần
+    /// LAN toggle áp dụng thành công.
+    pub web_listen: Arc<watch::Sender<WebListen>>,
+    /// Điểm áp rebind lúc nóng (DIP): `bean serve` cắm [`RebindHandle`], test/
+    /// nhúng không supervisor dùng [`NoopRebind`].
+    pub rebind: Arc<dyn WebRebind>,
     /// Giới hạn số WebSocket đồng thời; permit sống cùng connection.
     ws_connections: Arc<Semaphore>,
 }
@@ -147,7 +156,7 @@ pub struct WebState {
 impl std::fmt::Debug for WebState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebState")
-            .field("public_origin", &self.public_origin.as_str())
+            .field("public_origin", &self.public_origin().as_str())
             .field("started_at", &self.started_at)
             .finish_non_exhaustive()
     }
@@ -175,10 +184,14 @@ pub struct WebStateDeps {
     pub workspace: Option<Arc<dyn WorkspaceFs>>,
     /// Provider STT/TTS (M27); `None` khi `[voice]` chưa cấu hình đủ.
     pub speech: Option<Arc<dyn SpeechProvider>>,
+    /// Điểm áp rebind lúc nóng (D21.7); mặc định [`NoopRebind`] khi không có
+    /// supervisor (test, nhúng khác).
+    pub rebind: Arc<dyn WebRebind>,
 }
 
 impl WebState {
-    /// Tạo state và kiểm tra `public_origin` không có path/query/userinfo.
+    /// Tạo state và kiểm tra `public_origin` không có path/query/userinfo (bất
+    /// biến gốc trong [`rebind::validate_origin`]).
     pub fn new(deps: WebStateDeps) -> Result<Self, WebBuildError> {
         let WebStateDeps {
             config,
@@ -189,19 +202,10 @@ impl WebState {
             skills,
             workspace,
             speech,
+            rebind,
         } = deps;
-        let public_origin =
-            Url::parse(&config.web.public_origin).map_err(|_| WebBuildError::InvalidOrigin)?;
-        if !matches!(public_origin.scheme(), "http" | "https")
-            || public_origin.host_str().is_none()
-            || !public_origin.username().is_empty()
-            || public_origin.password().is_some()
-            || public_origin.path() != "/"
-            || public_origin.query().is_some()
-            || public_origin.fragment().is_some()
-        {
-            return Err(WebBuildError::InvalidOrigin);
-        }
+        let web_listen = rebind::WebListen::from_config(&config)?;
+        let (web_listen, _) = watch::channel(web_listen);
         let (notifications, _) = broadcast::channel(256);
         Ok(Self {
             config,
@@ -213,10 +217,21 @@ impl WebState {
             workspace,
             notifications,
             started_at: Instant::now(),
-            public_origin,
+            web_listen: Arc::new(web_listen),
+            rebind,
             ws_connections: Arc::new(Semaphore::new(MAX_WS_CONNECTIONS)),
             speech: Arc::new(RwLock::new(speech)),
         })
+    }
+
+    /// Origin canonical hiệu lực — đọc nóng, có thể đã đổi sau LAN toggle (D21.7).
+    pub fn public_origin(&self) -> Url {
+        self.web_listen.borrow().public_origin.clone()
+    }
+
+    /// Địa chỉ bind hiệu lực — đọc nóng (D21.7).
+    pub fn web_bind(&self) -> SocketAddr {
+        self.web_listen.borrow().bind
     }
 
     /// Clone `Arc` provider hiện hành; `None` khi chưa dựng được (chưa cấu hình).
