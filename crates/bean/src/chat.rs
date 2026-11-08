@@ -108,7 +108,19 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
     } else {
         String::new()
     };
-    let built = build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
+    // D22.5b: watch cell chế độ sandbox hiện hành — CLI không swap (sender drop ngay,
+    // receiver vẫn đọc được giá trị cuối); `serve` giữ sender để WebState hot-swap.
+    let (sandbox_mode_tx, sandbox_mode_rx) =
+        tokio::sync::watch::channel(config.security.sandbox.mode);
+    drop(sandbox_mode_tx);
+    let built = build_registry(
+        &config,
+        store.clone(),
+        skills.clone(),
+        web_search_api_key,
+        sandbox_mode_rx,
+    )
+    .await?;
     let mcp = built.mcp;
     let built_browser = built.browser.clone();
     let registry = Arc::new(built.registry);
@@ -254,6 +266,7 @@ pub(crate) async fn build_registry(
     store: Arc<SqliteStore>,
     skills: SkillCatalog,
     web_search_api_key: Option<SecretString>,
+    sandbox_mode: tokio::sync::watch::Receiver<bean_types::config::SandboxMode>,
 ) -> Result<BuiltRegistry> {
     std::fs::create_dir_all(&config.agent.workspace).with_context(|| {
         format!(
@@ -315,7 +328,11 @@ pub(crate) async fn build_registry(
     ));
     register_group(
         &mut registry,
-        vec![run_shell_for_projects(sandbox, project_sandboxes)],
+        vec![run_shell_for_projects(
+            sandbox,
+            project_sandboxes,
+            sandbox_mode,
+        )],
         "shell",
         enabled_groups,
         &mut seed_disabled,

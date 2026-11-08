@@ -2,8 +2,9 @@
 
 /**
  * `GET /api/settings/host-mode` — trạng thái sandbox mode + step-up mật khẩu OS
- * (D22.2). Mode là khoá tầng B, hiệu lực sau restart — UI hiển thị banner
- * `pending` từ cặp `mode`/`running_mode`.
+ * (D22.2). Mode là khoá tầng B; sau toggle, mode được hot-swap qua watch cell
+ * (D22.5b) — UI hiển thị banner `pending` từ cặp `mode`/`running_mode` chỉ khi
+ * hot-swap không áp dụng được (restart_required).
  */
 export type HostModeDto = { 
 /**
@@ -11,13 +12,13 @@ export type HostModeDto = {
  */
 mode: string, 
 /**
- * Mode tiến trình đang chạy (snapshot cấu hình lúc khởi động).
+ * Mode tiến trình đang dùng (watch cell hiện hành — hot-swap D22.5b).
  */
 running_mode: string, 
 /**
  * `true` khi Apply cần mật khẩu OS. Không xác định được trạng thái tài khoản
  * (lệnh `passwd -S`/FFI lỗi) ⇒ `true` — fail-closed; máy không đặt mật khẩu
- * tài khoản ⇒ `false`, bỏ qua step-up (mất khóa màn hình máy cá nhân).
+ * tài khoản ⇒ `false`, bỏ qua step-up (máy cá nhân không khóa màn hình).
  */
 os_password_required: boolean, 
 /**

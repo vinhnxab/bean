@@ -94,7 +94,9 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
         skills_root,
         std::path::PathBuf::from("skills/_drafts"),
     );
-    let built = chat::build_registry(config, store.clone(), skills, None).await?;
+    let (_sandbox_mode_tx, sandbox_mode_rx) =
+        tokio::sync::watch::channel(config.security.sandbox.mode);
+    let built = chat::build_registry(config, store.clone(), skills, None, sandbox_mode_rx).await?;
     let audit = chat::build_audit(config);
     // K24: nhật ký riêng của MCP, tách khỏi `audit.jsonl` để phát hiện lạm dụng không
     // phải lọc giữa các kênh. Vẫn ghi **song song** vào `audit.jsonl` (D16.10).

@@ -1365,18 +1365,19 @@ pub struct LanAccessMutateResponse {
 }
 
 /// `GET /api/settings/host-mode` — trạng thái sandbox mode + step-up mật khẩu OS
-/// (D22.2). Mode là khoá tầng B, hiệu lực sau restart — UI hiển thị banner
-/// `pending` từ cặp `mode`/`running_mode`.
+/// (D22.2). Mode là khoá tầng B; sau toggle, mode được hot-swap qua watch cell
+/// (D22.5b) — UI hiển thị banner `pending` từ cặp `mode`/`running_mode` chỉ khi
+/// hot-swap không áp dụng được (restart_required).
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export)]
 pub struct HostModeDto {
     /// Mode ghi trên đĩa (sẽ hiệu lực): `"docker"` | `"host"`.
     pub mode: String,
-    /// Mode tiến trình đang chạy (snapshot cấu hình lúc khởi động).
+    /// Mode tiến trình đang dùng (watch cell hiện hành — hot-swap D22.5b).
     pub running_mode: String,
     /// `true` khi Apply cần mật khẩu OS. Không xác định được trạng thái tài khoản
     /// (lệnh `passwd -S`/FFI lỗi) ⇒ `true` — fail-closed; máy không đặt mật khẩu
-    /// tài khoản ⇒ `false`, bỏ qua step-up (mất khóa màn hình máy cá nhân).
+    /// tài khoản ⇒ `false`, bỏ qua step-up (máy cá nhân không khóa màn hình).
     pub os_password_required: bool,
     /// `mode != running_mode` — có thay đổi chưa áp dụng, cần restart Bean.
     pub pending: bool,
@@ -1405,7 +1406,8 @@ pub struct HostModeRequest {
 pub struct HostModeMutateResponse {
     /// Mode ghi trên đĩa sau khi POST.
     pub mode: String,
-    /// `true` khi đã ghi đĩa — cần `scripts/beanctl restart` để mode mới chạy;
-    /// `false` khi không có gì thay đổi.
+    /// `false` khi đã hot-swap cell nóng (D22.5b) — mode mới áp dụng NGAY cho
+    /// mọi tool call sau đó; `true` khi không còn receiver (registry đã tháo) —
+    /// cấu hình đã ghi đĩa, cần `scripts/beanctl restart` để mode mới chạy.
     pub restart_required: bool,
 }

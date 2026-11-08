@@ -77,7 +77,7 @@ pub enum SandboxError {
 static CONTAINER_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Cấu hình sandbox + workspace.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Sandbox {
     cfg: SandboxConfig,
     workspace: PathBuf,
@@ -95,11 +95,31 @@ impl Sandbox {
         Self { cfg, workspace }
     }
 
+    /// Bản sao với chế độ khác — dùng cho hot-swap mode (D22.5b): toggle host
+    /// mode từ UI chỉ đổi `mode`, các trường khác (image/memory/timeout) giữ
+    /// nguyên. Rẻ: `Sandbox` chỉ là cfg + path, dựng lại mỗi lượt gọi không tốn.
+    #[must_use]
+    pub fn with_mode(&self, mode: SandboxMode) -> Self {
+        let mut cfg = self.cfg.clone();
+        cfg.mode = mode;
+        Self {
+            cfg,
+            workspace: self.workspace.clone(),
+        }
+    }
+
     /// Mức rủi ro **cơ bản** của `run_shell` theo chế độ (mục 15.2): docker ⇒ `Confirm`,
     /// host ⇒ `Dangerous` (luôn hỏi, không có "cho phép trong phiên" — mục 7.2).
     #[must_use]
     pub const fn base_risk(&self) -> Risk {
-        match self.cfg.mode {
+        Self::base_risk_for(self.cfg.mode)
+    }
+
+    /// Bản đồ chế độ → rủi ro, dạng associated — [`crate::shell`] đọc từ watch cell
+    /// (D22.5b) nên không cần instance [`Sandbox`].
+    #[must_use]
+    pub const fn base_risk_for(mode: SandboxMode) -> Risk {
+        match mode {
             SandboxMode::Docker => Risk::Confirm,
             SandboxMode::Host => Risk::Dangerous,
         }

@@ -157,7 +157,9 @@ async fn run_shell_wraps_and_flags() {
         },
         dir.path().to_path_buf(),
     );
-    let tool = run_shell(Arc::new(sandbox));
+    let (tx, rx) = tokio::sync::watch::channel(SandboxMode::Host);
+    let _ = tx;
+    let tool = run_shell(Arc::new(sandbox), rx);
     let seen = Arc::new(AtomicBool::new(false));
     let ctx = ToolCtx::for_project(
         Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap()),
@@ -294,7 +296,9 @@ fn every_external_source_tool_declares_marks_untrusted() {
         },
         dir.path().to_path_buf(),
     );
-    reg.register(run_shell(Arc::new(sandbox))).unwrap();
+    let (tx, rx) = tokio::sync::watch::channel(SandboxMode::Host);
+    let _ = tx;
+    reg.register(run_shell(Arc::new(sandbox), rx)).unwrap();
     reg.register(web_fetch(Arc::new(SafeHttpClient::new().unwrap())))
         .unwrap();
     reg.register(web_search(&WebSearchConfig::default(), None).unwrap())

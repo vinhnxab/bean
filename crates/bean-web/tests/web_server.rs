@@ -143,6 +143,7 @@ async fn make_state_with(
         speech: None,
         rebind: Arc::new(NoopRebind),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
+        sandbox_mode: sandbox_mode_cell(),
     })
     .unwrap();
     (build_router(state.clone()), state)
@@ -2328,4 +2329,11 @@ async fn web_supervisor_swaps_listener_hot_and_keeps_serving_on_failure() {
 
     shutdown.cancel();
     supervisor.await.unwrap().unwrap();
+}
+
+/// Channel mode sandbox cho `WebStateDeps` (D22.5b): test này không đụng POST
+/// host-mode nên receiver thả drop cũng không sao — chỉ cần một sender sống.
+fn sandbox_mode_cell() -> Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>> {
+    let (tx, _rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
+    Arc::new(tx)
 }

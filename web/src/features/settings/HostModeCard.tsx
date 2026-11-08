@@ -56,7 +56,9 @@ export function HostModeCard() {
       {data ? (
         <>
           <p className="mt-3 text-xs text-muted-foreground" data-testid="host-mode-status">
-            {data.mode === "host" ? t("settings.hostMode.statusHost") : t("settings.hostMode.statusDocker")}
+            {data.running_mode === "host"
+              ? t("settings.hostMode.statusHost")
+              : t("settings.hostMode.statusDocker")}
           </p>
           {data.pending ? (
             <p

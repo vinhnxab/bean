@@ -50,6 +50,7 @@ use bean_security::{AuditLog, OsAuth};
 use bean_skills::SkillCatalog;
 use bean_speech::SpeechProvider;
 use bean_tools::WorkspaceFs;
+use bean_types::config::SandboxMode;
 use bean_types::{Config, Outbound};
 use tokio::sync::{RwLock, Semaphore, broadcast, watch};
 use tokio_util::sync::CancellationToken;
@@ -141,6 +142,8 @@ pub struct WebState {
     pub speech: Arc<RwLock<Option<Arc<dyn SpeechProvider>>>>,
     /// Broadcast notification từ scheduler/channel.
     pub notifications: broadcast::Sender<ServerMsg>,
+    /// Watch cell chế độ sandbox hiện hành (D22.5b — hot-swap host mode).
+    pub sandbox_mode: Arc<watch::Sender<SandboxMode>>,
     /// Xác minh mật khẩu OS cho step-up host mode (D22.2).
     pub os_auth: Arc<dyn OsAuth>,
     /// Thời điểm process bắt đầu.
@@ -193,6 +196,10 @@ pub struct WebStateDeps {
     /// Xác minh mật khẩu tài khoản OS cho step-up toggle host mode (D22.2).
     /// `bean serve` cắm [`bean_security::RealOsAuth`], test cắm giả (hermetic).
     pub os_auth: Arc<dyn OsAuth>,
+    /// Watch cell chế độ sandbox hiện hành (D22.5b): `bean serve` giữ receiver
+    /// trong tool `run_shell`; POST host-mode gửi mode mới vào đây để áp dụng
+    /// lúc nóng. Test dựng channel riêng, giữ receiver sống như registry thật.
+    pub sandbox_mode: Arc<watch::Sender<SandboxMode>>,
 }
 
 impl WebState {
@@ -209,6 +216,7 @@ impl WebState {
             workspace,
             speech,
             rebind,
+            sandbox_mode,
             os_auth,
         } = deps;
         let web_listen = rebind::WebListen::from_config(&config)?;
@@ -226,6 +234,7 @@ impl WebState {
             started_at: Instant::now(),
             web_listen: Arc::new(web_listen),
             rebind,
+            sandbox_mode,
             os_auth,
             ws_connections: Arc::new(Semaphore::new(MAX_WS_CONNECTIONS)),
             speech: Arc::new(RwLock::new(speech)),

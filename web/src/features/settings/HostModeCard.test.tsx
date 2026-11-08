@@ -25,8 +25,8 @@ const quietNeighbourHandlers = [
 /**
  * Handler host-mode theo kịch bản, mirror `lanHandlers` của LanAccessCard.test.
  * GET có trạng thái (`diskMode`) để test "đúng mật khẩu" thấy được kết quả ghi
- * đĩa sau khi card invalidate query: lần GET sau trả mode mới + `pending = true`
- * ⇒ gợi ý restart hiện ra.
+ * đĩa sau khi card invalidate query. Hot-swap D22.5b: POST thành công cũng đổi
+ * `runningMode` (cell nóng) ⇒ GET sau trả `pending = false`, không gợi ý restart.
  */
 function hostModeHandlers(overrides: {
   status?: number;
@@ -36,7 +36,11 @@ function hostModeHandlers(overrides: {
   correctPassword?: string;
 }) {
   const osPasswordRequired = overrides.osPasswordRequired ?? true;
-  const state: { diskMode: string; posted: HostModePost | null } = { diskMode: "docker", posted: null };
+  const state: {
+    diskMode: string;
+    runningMode: string;
+    posted: HostModePost | null;
+  } = { diskMode: "docker", runningMode: "docker", posted: null };
   const handlers = [
     http.get("/api/settings/host-mode", () => {
       if (overrides.status) {
@@ -44,9 +48,9 @@ function hostModeHandlers(overrides: {
       }
       return HttpResponse.json({
         mode: state.diskMode,
-        running_mode: "docker",
+        running_mode: state.runningMode,
         os_password_required: osPasswordRequired,
-        pending: state.diskMode !== "docker",
+        pending: state.diskMode !== state.runningMode,
       });
     }),
     http.post("/api/settings/host-mode", async ({ request }) => {
@@ -72,7 +76,10 @@ function hostModeHandlers(overrides: {
         }
       }
       state.diskMode = desired;
-      return HttpResponse.json({ mode: desired, restart_required: true });
+      // Mirror backend D22.5b: hot-swap cell nóng thành công (registry sống) —
+      // mode mới áp dụng NGAY, không cần restart.
+      state.runningMode = desired;
+      return HttpResponse.json({ mode: desired, restart_required: false });
     }),
   ];
   return { handlers, state };
@@ -129,7 +136,7 @@ describe("HostModeCard — bật/tắt host mode (D22.2)", () => {
     ).toBeInTheDocument();
   });
 
-  it("đúng mật khẩu: ghi host vào đĩa, form đóng, hiện gợi ý restart", async () => {
+  it("đúng mật khẩu: ghi host vào đĩa, hot-swap áp dụng ngay, không còn gợi ý restart", async () => {
     const user = userEvent.setup();
     const scenario = hostModeHandlers({ correctPassword: OS_PASSWORD });
     testServer.use(...quietNeighbourHandlers, ...scenario.handlers);
@@ -140,7 +147,7 @@ describe("HostModeCard — bật/tắt host mode (D22.2)", () => {
     await user.click(screen.getByRole("button", { name: "Apply" }));
 
     // Sau thành công: ô mật khẩu đóng lại (bản nháp reset) và invalidate
-    // hostMode đã refetch — GET trả mode mới + pending ⇒ gợi ý restart.
+    // hostMode đã refetch — hot-swap D22.5b ⇒ running_mode = host, pending biến mất.
     await waitFor(() => {
       expect(screen.queryByLabelText("OS account password")).not.toBeInTheDocument();
     });
@@ -150,10 +157,10 @@ describe("HostModeCard — bật/tắt host mode (D22.2)", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(
+      screen.queryByText(
         "Configuration saved; restart Bean (scripts/beanctl restart) to make the new mode effective.",
       ),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
   it("máy không cần mật khẩu: không hiện ô mật khẩu, Apply gửi POST không có os_password", async () => {

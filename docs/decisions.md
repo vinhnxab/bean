@@ -760,15 +760,17 @@ máy, song song step-up mật khẩu Bean (D19.5).
 | D22.2 | Step-up = **mật khẩu tài khoản OS** của tiến trình Bean, xác minh per-platform: Linux `su <user> -c true` (mật khẩu qua **stdin**, không argv/env; exit khác 0 ⇒ sai — không khớp message locale), macOS `dscl . -authonly` (argv — duy nhất `dscl` nhận; lộ `ps` cục bộ khoảnh khắc gọi, chấp nhận trên máy cá nhân), Windows FFI `LogonUserW` (crate riêng `bean-osauth-win`) | Yêu cầu người chủ: xác nhận thứ hai gắn với máy thật; mật khẩu Bean (auth.toml) không chứng minh người gõ có quyền OS. Mật khẩu không bao giờ vào log/audit/argv ở Linux; sai mật khẩu dùng chung rate-limiter `ip:` với step-up D19.5 (ngưỡng 5, một bề mặt xác thực một bộ đếm). | `su` đọc mật khẩu từ stdin là hành vi của util-linux (đã ghi chú ở code; nếu nền tảng khác hành vi sẽ trả CommandFailed → 503, không khoá oan ai). |
 | D22.3 | **Máy không đặt mật khẩu OS ⇒ bỏ qua step-up** (fail-open có chủ đích); **không xác định được trạng thái** (`passwd -S`/`dscl`/FFI lỗi) ⇒ fail-closed (GET hiện "cần mật khẩu", POST trả 503 `os_auth_unavailable`) | Máy cá nhân không khoá màn hình là cấu hình phổ biến — bắt nhập mật khẩu không tồn tại là ngõ cụt; ngược lại hạ tầng xác minh hỏng không được phép mở sandbox tường minh. | GET `/api/settings/host-mode` trả `os_password_required` = `has_password` khi inspect được, `true` khi không. |
 | D22.4 | **No-op (mode đĩa đã bằng desired) → 200 `restart_required = false`, không hỏi mật khẩu** | Bấm Apply hai lần không nên dọa người dùng; check trước step-up. | — |
-| D22.5 | Toggle **hiệu lực sau restart** (không hot-swap như LAN D21.7) | Sandbox được dựng một lần lúc khởi động; swap giữa chừng rời rạc với tool đang chạy. `security.sandbox.mode` vốn là khoá `apply = Restart` tier B — dùng lại banner pending có sẵn (cờ `pending` từ D21.7). | POST trả `restart_required = true`; UI hiện hint restart. |
+| D22.5 | Toggle **áp dụng lúc nóng qua watch cell** (D22.5b, hoàn thiện cùng ngày): `security.sandbox.mode` ghi đĩa qua `set_many`, rồi POST gửi `SandboxMode` mới vào `watch::Sender` trong `WebState`; tool `run_shell` đọc cell **mỗi lượt gọi** và risk tính lại theo từng call (`with_risk_fn`) — không restart, không đứt run đang chạy | Người chủ hỏi "sau khi switch thành công thì nên tự restart để tự chấp nhận luôn phải không?" — restart nguyên tiến trình giết run giữa chừng; nhưng `Sandbox` chỉ là struct cfg+path nên chỉ cần đổi `mode` nóng (D21.7 đã mở đường watch cell cho `web_listen`). `restart_required = true` chỉ khi không còn receiver (registry đã tháo — test/edge): cấu hình ghi đĩa, restart sẽ áp | CLI `chat`/`mcp` tạo cell riêng không ai swap — hành vi không đổi; toggle chỉ đổi `mode`, image/memory/timeout giữ nguyên |
 | D22.6 | `unsafe` gói trong crate riêng `bean-osauth-win` (không inherit workspace lints `forbid(unsafe_code)`); `LogonUserW` + `LOGON32_LOGON_INTERACTIVE` là **đường duy nhất** xác minh mật khẩu Windows không đưa mật khẩu vào argv/env; CloseHandle ngay; GetLastError 1326/1327/1328/1330/1331/1332 → InvalidCredentials | Workspace cấm unsafe ở mọi crate khác; module doc của crate ghi rõ lý do được duyệt (quy tắc 0.8). Mọi call có `# Safety` comment. | Crate chỉ biên dịch trên Windows (`[target.'cfg(windows)'.dependencies]`); máy Linux/macOS không kéo dependency. |
 | D22.7 | Test hermetic qua trait `OsAuth` (DIP): `bean serve` cắm `RealOsAuth`, test cắm `FakeOsAuth` (trạng thái đặt được, không đụng OS thật của máy CI) | Endpoint không được phụ thuộc nền tảng máy chạy test; LSP — mọi implementation thay thế lẫn nhau. | `inspect()`/`verify()` blocking luôn chạy qua `spawn_blocking` (mục 22.8). |
 
 **Kiểm chứng:** `cargo test -p bean-security -p bean-web` (mới: test
-`host_shell_args_uses_platform_shell` + 9 test `/api/settings/host-mode`: 401,
-403 admin, GET pending, no-op bỏ qua mật khẩu, sai mật khẩu + rate-limit lần 6,
-ghi host + audit không chứa mật khẩu, bỏ step-up khi máy không mật khẩu, 401
-thiếu mật khẩu, 503 config_readonly) + `cargo clippy --workspace
+`risk_follows_mode_cell` — flip cell ⇒ risk đổi ngay; `host_shell_args_uses_platform_shell`
++ 10 test `/api/settings/host-mode`: 401, 403 admin, GET pending, no-op bỏ qua
+mật khẩu, sai mật khẩu + rate-limit lần 6, ghi host + **hot-swap thành công
+`restart_required = false` + GET `running_mode` theo cell**, bỏ step-up khi máy
+không mật khẩu, 401 thiếu mật khẩu, `restart_required = true` khi registry
+không còn receiver, 503 config_readonly) + `cargo clippy --workspace
 --all-targets -D warnings` + `cargo fmt --all` + `make types` +
 `pnpm biome check` + `pnpm tsc --noEmit` + `pnpm vitest run` (222 test, gồm 5
-test card Host mode) + `pnpm build` xanh.
+test card Host mode — handler msw mirror hot-swap) + `pnpm build` xanh.

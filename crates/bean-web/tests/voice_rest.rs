@@ -98,6 +98,7 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
         speech,
         rebind: Arc::new(NoopRebind),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
+        sandbox_mode: sandbox_mode_cell(),
     })
     .unwrap();
     (dir, build_router(state))
@@ -583,4 +584,11 @@ async fn transcribe_accepts_body_over_global_limit() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert!(body_string(response).await.contains("xin chào"));
+}
+
+/// Channel mode sandbox cho `WebStateDeps` (D22.5b): test này không đụng POST
+/// host-mode nên receiver thả drop cũng không sao — chỉ cần một sender sống.
+fn sandbox_mode_cell() -> Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>> {
+    let (tx, _rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
+    Arc::new(tx)
 }

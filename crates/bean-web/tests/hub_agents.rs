@@ -115,6 +115,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         speech: None,
         rebind: Arc::new(NoopRebind),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
+        sandbox_mode: sandbox_mode_cell(),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), build_router(state))
@@ -360,4 +361,11 @@ async fn no_access_role_is_denoed_every_agent() {
     for hidden in ["finance-readonly", "security-scan", "developer"] {
         assert!(!body.contains(hidden), "`{hidden}` lọt cho no-access");
     }
+}
+
+/// Channel mode sandbox cho `WebStateDeps` (D22.5b): test này không đụng POST
+/// host-mode nên receiver thả drop cũng không sao — chỉ cần một sender sống.
+fn sandbox_mode_cell() -> Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>> {
+    let (tx, _rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
+    Arc::new(tx)
 }

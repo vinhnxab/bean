@@ -86,7 +86,29 @@ fn build_with_rebind(
     config_toml: Option<&Path>,
     rebind: Arc<dyn WebRebind>,
 ) -> AxumRouter {
-    build_with_os_auth(config, config_toml, rebind, Arc::new(FakeOsAuth::default()))
+    build_with_os_auth(
+        config,
+        config_toml,
+        rebind,
+        Arc::new(FakeOsAuth::default()),
+        sandbox_mode_cell(),
+    )
+}
+
+/// Channel mode sandbox với receiver **sống suốt test** (mô phỏng registry thật
+/// trong `bean serve`): POST host-mode hot-swap thành công ⇒ `restart_required = false`.
+fn sandbox_mode_cell() -> Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>> {
+    let (tx, rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
+    std::mem::forget(rx); // receiver "registry" sống suốt test — như `bean serve`
+    Arc::new(tx)
+}
+
+/// Channel orphan — không còn receiver (registry đã tháo): hot-swap thất bại,
+/// cấu hình ghi đĩa và chờ restart ⇒ `restart_required = true`.
+fn sandbox_mode_cell_orphan() -> Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>> {
+    let (tx, rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
+    drop(rx);
+    Arc::new(tx)
 }
 
 /// Như [`build_with_rebind`] nhưng cắm [`OsAuth`] tuỳ ý — test step-up mật khẩu
@@ -96,6 +118,7 @@ fn build_with_os_auth(
     config_toml: Option<&Path>,
     rebind: Arc<dyn WebRebind>,
     os_auth: Arc<dyn OsAuth>,
+    sandbox_mode: Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>>,
 ) -> AxumRouter {
     set_password(&config.data.dir, PASSWORD, None).unwrap();
     let store: Arc<dyn Store> = Arc::new(MemoryStore::new());
@@ -138,6 +161,7 @@ fn build_with_os_auth(
         speech: None,
         rebind,
         os_auth,
+        sandbox_mode,
     })
     .unwrap();
     build_router(state)
@@ -183,6 +207,7 @@ fn fixture_with_os_auth(
         Some(&config_toml),
         Arc::new(NoopRebind),
         Arc::new(os_auth),
+        sandbox_mode_cell(),
     );
     (dir, config_toml, app)
 }
@@ -1197,12 +1222,20 @@ async fn host_mode_enable_writes_host_and_audits() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["mode"], "host");
-    assert_eq!(json["restart_required"], true);
+    // Hot-swap (D22.5b): receiver sống ⇒ cell áp dụng ngay, không cần restart.
+    assert_eq!(json["restart_required"], false);
     let written = std::fs::read_to_string(&config_toml).unwrap();
     assert!(
         written.contains("mode = \"host\""),
         "file phải ghi host: {written}"
     );
+    // GET sau swap: running_mode theo cell mới — pending biến mất.
+    let (status, json) =
+        request_json(&app, "GET", "/api/settings/host-mode", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "host");
+    assert_eq!(json["running_mode"], "host");
+    assert_eq!(json["pending"], false);
     // Audit: event step-up thành công + một `config.set` cho khoá mode, không
     // chứa mật khẩu.
     let audit = AuditLog::open(&dir.path().join("data").join("audit")).unwrap();
@@ -1246,12 +1279,52 @@ async fn host_mode_skips_password_when_os_account_has_none() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["mode"], "host");
-    assert_eq!(json["restart_required"], true);
+    // Hot-swap áp dụng ngay (D22.5b) — máy không mật khẩu ⇒ không step-up.
+    assert_eq!(json["restart_required"], false);
     let written = std::fs::read_to_string(&config_toml).unwrap();
     assert!(
         written.contains("mode = \"host\""),
         "file phải ghi host: {written}"
     );
+}
+
+#[tokio::test]
+async fn host_mode_restart_required_when_registry_gone() {
+    // Registry không còn receiver — hot-swap không áp dụng được: cấu hình ghi
+    // đĩa, `restart_required = true`, GET cho thấy pending (đĩa ≠ đang chạy).
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config_toml = dir.path().join("bean.toml");
+    std::fs::write(&config_toml, BEAN_TOML).unwrap();
+    let config = config_for(&data, &workspace, None);
+    let app = build_with_os_auth(
+        config,
+        Some(&config_toml),
+        Arc::new(NoopRebind),
+        Arc::new(FakeOsAuth::default()),
+        sandbox_mode_cell_orphan(),
+    );
+    let token = login(&app).await;
+    let (status, json) = request_json(
+        &app,
+        "POST",
+        "/api/settings/host-mode",
+        Some(&token),
+        Some(r#"{"enabled":true,"os_password":"right"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "host");
+    assert_eq!(json["restart_required"], true);
+    let (status, json) =
+        request_json(&app, "GET", "/api/settings/host-mode", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["mode"], "host");
+    assert_eq!(json["running_mode"], "docker");
+    assert_eq!(json["pending"], true);
 }
 
 #[tokio::test]

@@ -2,16 +2,21 @@
 //!
 //! Chạy trong [`crate::sandbox::Sandbox`]: mặc định docker với workspace mount,
 //! `--network none`, `--cap-drop ALL`, no-new-privileges; chế độ host ⇒ mức rủi ro
-//! `Dangerous`. Mức rủi ro **cơ bản** lấy từ [`Sandbox::base_risk`]; deny-list mẫu
-//! và "cho phép trong phiên" do [`crate::policy::decide`] áp thêm ở agent loop.
+//! `Dangerous`. Chế độ hiện hành đọc từ **watch cell** [`SandboxMode`] mỗi lượt gọi
+//! (D22.5b — toggle host mode từ UI áp dụng lúc nóng, không restart); mức rủi ro
+//! cũng tính lại theo từng call qua `with_risk_fn`, nên policy luôn thấy đúng
+//! chế độ. Deny-list mẫu và "cho phép trong phiên" do [`crate::policy::decide`]
+//! áp thêm ở agent loop.
 
 use std::sync::Arc;
 
 use bean_tools::{Tool, ToolError, TypedTool};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::watch;
 
 use crate::sandbox::{Sandbox, ShellOutcome};
+use bean_types::config::SandboxMode;
 
 /// Tham số của `run_shell`.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -24,8 +29,8 @@ pub struct RunShellParams {
 
 /// Dựng tool `run_shell` gắn với một sandbox.
 #[must_use]
-pub fn run_shell(sandbox: Arc<Sandbox>) -> Arc<dyn Tool> {
-    run_shell_for_projects(sandbox, Default::default())
+pub fn run_shell(sandbox: Arc<Sandbox>, mode: watch::Receiver<SandboxMode>) -> Arc<dyn Tool> {
+    run_shell_for_projects(sandbox, Default::default(), mode)
 }
 
 /// Dựng tool `run_shell` với sandbox riêng cho từng project profile (M21.1).
@@ -33,19 +38,24 @@ pub fn run_shell(sandbox: Arc<Sandbox>) -> Arc<dyn Tool> {
 /// `by_project` tra theo [`ToolCtx::project`]; project không có trong map thì dùng
 /// `sandbox` mặc định. Nhờ vậy lệnh trong project A **không** nhìn thấy (hay ghi được)
 /// file của project B — giữ đúng nguyên tắc path jail mục 15.1 khi có nhiều project.
+///
+/// `mode` là watch cell chế độ hiện hành (D22.5b): `Sandbox` giữ cấu hình gốc +
+/// workspace, còn docker/host đọc nóng mỗi lượt gọi — toggle từ UI không cần restart.
 #[must_use]
 pub fn run_shell_for_projects(
     sandbox: Arc<Sandbox>,
     by_project: std::collections::BTreeMap<String, Arc<Sandbox>>,
+    mode: watch::Receiver<SandboxMode>,
 ) -> Arc<dyn Tool> {
-    // Mức rủi ro cơ bản lấy từ sandbox **mặc định**; mọi sandbox đều dùng chung
-    // `[security.sandbox]` nên cùng chế độ docker/host.
-    let base_risk = sandbox.base_risk();
+    // Risk tính lại **mỗi call** từ watch cell — bật host mode là mọi lượt gọi
+    // về sau thành `Dangerous` ngay, kể cả trong session đang mở.
+    let risk_mode = mode.clone();
     Arc::new(
-        TypedTool::new(
+        TypedTool::with_risk_fn(
             "run_shell",
-            base_risk,
+            move |_args: &serde_json::Value| Sandbox::base_risk_for(*risk_mode.borrow()),
             move |ctx: &bean_tools::ToolCtx, p: RunShellParams| {
+                let mode = mode.clone();
                 let sandbox = by_project
                     .get(&ctx.project)
                     .cloned()
@@ -57,6 +67,8 @@ pub fn run_shell_for_projects(
                             "command rỗng — cần một câu lệnh để chạy".to_string(),
                         ));
                     }
+                    // Chế độ hiện hành thắng cấu hình gốc của sandbox (hot-swap D22.5b).
+                    let sandbox = sandbox.with_mode(*mode.borrow());
                     // Sandbox có timeout riêng theo cấu hình để kill container khi hết giờ;
                     // agent loop cũng bọc `tool_timeout_seconds` bên ngoài (mục 6).
                     let timeout = std::time::Duration::from_secs(sandbox.timeout_seconds());
@@ -109,34 +121,38 @@ mod tests {
     use bean_types::config::{SandboxConfig, SandboxMode};
 
     #[test]
-    fn risk_follows_sandbox_mode() {
+    fn risk_follows_mode_cell() {
         let ws = tempfile::tempdir().unwrap();
-        let docker = Sandbox::new(
-            SandboxConfig {
-                mode: SandboxMode::Docker,
-                ..SandboxConfig::default()
-            },
-            ws.path().to_path_buf(),
-        );
-        let host = Sandbox::new(
+        let sandbox = Sandbox::new(SandboxConfig::default(), ws.path().to_path_buf());
+        let args = serde_json::json!({"command": "ls"});
+        // Cell docker — sandbox gốc cũng docker: Confirm.
+        let (tx, rx) = watch::channel(SandboxMode::Docker);
+        let docker_tool = run_shell(Arc::new(sandbox.clone()), rx);
+        assert_eq!(docker_tool.risk(&args), Risk::Confirm);
+        // Sandbox gốc dựng với host: cell vẫn thắng (docker ⇒ Confirm).
+        let host_built = Sandbox::new(
             SandboxConfig {
                 mode: SandboxMode::Host,
                 ..SandboxConfig::default()
             },
             ws.path().to_path_buf(),
         );
-        let args = serde_json::json!({"command": "ls"});
-        let docker_tool = run_shell(Arc::new(docker));
-        let host_tool = run_shell(Arc::new(host));
+        let (_tx2, rx2) = watch::channel(SandboxMode::Docker);
+        let tool2 = run_shell(Arc::new(host_built.clone()), rx2);
+        assert_eq!(tool2.risk(&args), Risk::Confirm);
+        // Hot-swap (D22.5b): flip cell ⇒ risk Dangerous **ngay**, không restart.
+        tx.send(SandboxMode::Host).unwrap();
+        assert_eq!(docker_tool.risk(&args), Risk::Dangerous);
+        tx.send(SandboxMode::Docker).unwrap();
         assert_eq!(docker_tool.risk(&args), Risk::Confirm);
-        assert_eq!(host_tool.risk(&args), Risk::Dangerous);
     }
 
     #[test]
     fn spec_has_description_and_command_param() {
         let ws = tempfile::tempdir().unwrap();
         let sandbox = Sandbox::new(SandboxConfig::default(), ws.path().to_path_buf());
-        let tool = run_shell(Arc::new(sandbox));
+        let (_tx, rx) = watch::channel(SandboxMode::Docker);
+        let tool = run_shell(Arc::new(sandbox), rx);
         let spec = tool.spec();
         assert_eq!(spec.name, "run_shell");
         assert!(!spec.description.is_empty());

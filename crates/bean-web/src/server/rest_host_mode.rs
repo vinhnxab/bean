@@ -4,10 +4,11 @@
 //!
 //! # Ranh giới bảo mật
 //!
-//! * `security.sandbox.mode` là khoá tầng B (M29) + `apply = Restart` — không
-//!   hot-apply như LAN (D21.7): sandbox được dựng một lần lúc khởi động, hot-swap
-//!   sẽ rời rạc giữa các tool đang chạy. UI hiển thị banner "cần restart" từ cặp
-//!   `mode`/`running_mode`.
+//! * `security.sandbox.mode` là khoá tầng B (M29). Sau khi ghi đĩa, mode được
+//!   **hot-swap qua watch cell** (D22.5b): tool `run_shell` đọc mode mỗi lượt gọi
+//!   và risk tính lại theo từng call — không cần restart, không đứt run đang chạy
+//!   (khác LAN D21.7 ở chỗ sandbox không giữ state, chỉ đổi nhánh thực thi).
+//!   `restart_required = true` chỉ khi không còn receiver (registry đã tháo).
 //! * No-op (mode đĩa đã bằng desired) → 200 `restart_required = false`, **không**
 //!   đụng mật khẩu — tránh hỏi lại khi bấm Apply hai lần.
 //! * Sai mật khẩu OS dùng chung bộ đếm khoá theo IP với step-up mật khẩu Bean
@@ -26,6 +27,7 @@ use axum::http::StatusCode;
 use axum_extra::extract::cookie::CookieJar;
 use bean_security::OsAuthError;
 use bean_settings::{SettingEntry, SettingValue};
+use bean_types::config::SandboxMode;
 use secrecy::SecretString;
 
 use crate::api_types::{HostModeDto, HostModeMutateResponse, HostModeRequest};
@@ -69,14 +71,17 @@ fn disk_mode(state: &WebState) -> String {
 }
 
 /// `GET /api/settings/host-mode` — mọi user đã đăng nhập, chỉ đọc: mode trên đĩa,
-/// mode đang chạy, cần mật khẩu OS không (fail-closed khi không inspect được) và
-/// cờ `pending` cho banner restart.
+/// mode đang chạy (watch cell — có thể đã hot-swap sau lần toggle trước, D22.5b),
+/// cần mật khẩu OS không (fail-closed khi không inspect được) và cờ `pending`
+/// cho banner restart.
 pub(super) async fn host_mode_status(
     State(state): State<WebState>,
     jar: CookieJar,
 ) -> ApiResult<Json<HostModeDto>> {
     let _ = require_user(&state, &jar).await?;
-    let running_mode = state.config.security.sandbox.mode.as_str().to_string();
+    // Mode đang chạy đọc từ watch cell — hot-swap (D22.5b) làm cell lệch snapshot
+    // khởi động trong `state.config`, cell mới là nguồn sự thật của tiến trình.
+    let running_mode = state.sandbox_mode.borrow().as_str().to_string();
     let mode = disk_mode(&state);
     let os_auth = state.os_auth.clone();
     // Blocking (`passwd -S` trên Linux) — spawn_blocking; mọi lỗi ⇒ `true` (fail-closed).
@@ -111,6 +116,11 @@ pub(super) async fn host_mode_update(
     };
     let audit = required_audit(&state)?;
     let desired = if request.enabled { "host" } else { "docker" };
+    let desired_mode = if request.enabled {
+        SandboxMode::Host
+    } else {
+        SandboxMode::Docker
+    };
 
     // No-op trước step-up: bấm Apply khi đã ở đúng mode không nên hỏi mật khẩu.
     let entry: &'static SettingEntry =
@@ -174,8 +184,18 @@ pub(super) async fn host_mode_update(
             &user_id,
         )
         .map_err(map_settings_error)?;
+    // D22.5b: áp dụng lúc nóng — tool `run_shell` đọc mode từ cell mỗi lượt gọi,
+    // risk tính lại theo từng call. `send` thất bại chỉ khi không còn receiver
+    // (registry không sống — test/đúng sau khi tool bị tháo): cấu hình đã ghi đĩa,
+    // restart sẽ áp dụng ⇒ `restart_required = true` là đúng ngữ nghĩa.
+    let restart_required = state.sandbox_mode.send(desired_mode).is_err();
+    tracing::info!(
+        mode = desired,
+        restart_required,
+        "sandbox mode đã đổi lúc nóng (D22.5b)"
+    );
     Ok(Json(HostModeMutateResponse {
         mode: desired.to_string(),
-        restart_required: true,
+        restart_required,
     }))
 }

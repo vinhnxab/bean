@@ -10,7 +10,8 @@ export type HostModeMutateResponse = {
  */
 mode: string, 
 /**
- * `true` khi đã ghi đĩa — cần `scripts/beanctl restart` để mode mới chạy;
- * `false` khi không có gì thay đổi.
+ * `false` khi đã hot-swap cell nóng (D22.5b) — mode mới áp dụng NGAY cho
+ * mọi tool call sau đó; `true` khi không còn receiver (registry đã tháo) —
+ * cấu hình đã ghi đĩa, cần `scripts/beanctl restart` để mode mới chạy.
  */
 restart_required: boolean, };

@@ -123,8 +123,18 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         }
     };
 
-    let built =
-        chat::build_registry(&config, store.clone(), skills.clone(), web_search_api_key).await?;
+    // D22.5b: cell mode sandbox — sender đi vào WebState (POST host-mode swap nóng),
+    // receiver đi vào tool `run_shell` (đọc mỗi lượt gọi).
+    let (sandbox_mode_tx, sandbox_mode_rx) =
+        tokio::sync::watch::channel(config.security.sandbox.mode);
+    let built = chat::build_registry(
+        &config,
+        store.clone(),
+        skills.clone(),
+        web_search_api_key,
+        sandbox_mode_rx,
+    )
+    .await?;
     let mcp = built.mcp;
     let browser_session = built.browser.clone();
     let workspace = built.registry.workspace_opt();
@@ -179,6 +189,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             speech,
             rebind: Arc::new(RebindHandle::new(rebind_tx)),
             os_auth: Arc::new(bean_security::RealOsAuth),
+            sandbox_mode: Arc::new(sandbox_mode_tx),
         })?;
         let channel = Arc::new(WebChannel::new(state.notifications.clone()));
         router

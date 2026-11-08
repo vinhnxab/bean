@@ -97,6 +97,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         speech: None,
         rebind: Arc::new(NoopRebind),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
+        sandbox_mode: sandbox_mode_cell(),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), build_router(state))
@@ -136,6 +137,7 @@ fn build_with_store(config: Config) -> (tempfile::TempDir, Arc<dyn Store>, AxumR
         speech: None,
         rebind: Arc::new(NoopRebind),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
+        sandbox_mode: sandbox_mode_cell(),
     })
     .unwrap();
     (tempfile::tempdir().unwrap(), store, build_router(state))
@@ -362,6 +364,7 @@ async fn toggle_survives_restart_semantics_via_shared_store() {
         speech: None,
         rebind: Arc::new(NoopRebind),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
+        sandbox_mode: sandbox_mode_cell(),
     })
     .unwrap();
     let restarted = build_router(state);
@@ -383,4 +386,11 @@ async fn toggle_survives_restart_semantics_via_shared_store() {
         "registry mới phải nạp lại trạng thái tắt từ store: {tools}"
     );
     assert!(registry.is_disabled("read_file"));
+}
+
+/// Channel mode sandbox cho `WebStateDeps` (D22.5b): test này không đụng POST
+/// host-mode nên receiver thả drop cũng không sao — chỉ cần một sender sống.
+fn sandbox_mode_cell() -> Arc<tokio::sync::watch::Sender<bean_types::config::SandboxMode>> {
+    let (tx, _rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
+    Arc::new(tx)
 }
