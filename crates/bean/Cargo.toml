@@ -30,6 +30,8 @@ bean-settings.workspace = true
 bean-qa.workspace = true
 bean-llm.workspace = true
 bean-types.workspace = true
+# Eval runner: `bean eval run` — đo chất lượng agent bằng bộ task TOML.
+bean-eval.workspace = true
 # M29: dựng provider STT/TTS (whisper/piper local hoặc ElevenLabs) cho `serve`.
 bean-speech.workspace = true
 # M30: `bean update` — kiểm tra/tải/cài bản mới từ GitHub Releases.

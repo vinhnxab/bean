@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/bean",
+  "crates/bean-eval",
   "crates/bean-billing",
   "crates/bean-browser",
   "crates/bean-channels",
@@ -70,6 +71,8 @@ bean-skills = { path = "crates/bean-skills" }
 bean-update = { path = "crates/bean-update" }
 bean-speech = { path = "crates/bean-speech" }
 bean-core = { path = "crates/bean-core" }
+# Khung đo chất lượng agent: bộ task eval, runner, metrics (đo trước khi tối ưu).
+bean-eval = { path = "crates/bean-eval" }
 bean-channels = { path = "crates/bean-channels" }
 bean-web = { path = "crates/bean-web" }
 

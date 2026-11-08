@@ -1,0 +1,133 @@
+# Bean — CI kiểm tra chất lượng (bổ sung cho release.yml của M30)
+#
+# `make check` (check-rust + check-web) chạy trên mọi push/PR; `make audit`
+# soi lỗ hổng dependency. Job eval chạy đúng đường CLI thật (`bean eval run`)
+# trên bộ task FakeProvider — xác định và miễn phí, là vạch chuẩn bắt lệch
+# hành vi agent (đã có test trong check-rust, còn job này chấm cả CLI + báo cáo).
+#
+# Test cần Docker (sandbox) tự bỏ qua khi runner không có Docker — không cần
+# cấu hình thêm (K22).
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: check-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # rust-embed nhúng web/dist lúc COMPILE — phải build UI trước cargo.
+      - name: Build UI (web/dist)
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: make check-rust
+        run: make check-rust
+
+  web:
+    name: check-web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: make check-web
+        run: make check-web
+
+  eval:
+    name: eval baseline (fake)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build UI (web/dist)
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Mã thoát khác 0 khi có task fail — vạch chuẩn eval là cổng CI.
+      - name: bean eval run --provider fake
+        run: cargo run --locked -p bean -- eval run --provider fake
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: make audit
+        run: make audit

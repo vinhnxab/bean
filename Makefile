@@ -9,7 +9,7 @@ BIN := bean
 
 .DEFAULT_GOAL := help
 
-.PHONY: help types check-rust check-web check-brand check audit build build-headless e2e smoke-scheduler \
+.PHONY: help types check-rust check-web check-brand check audit build build-headless e2e smoke-scheduler eval \
         fmt lint test dev-web run-chat clean
 
 help: ## In danh sách target
@@ -74,6 +74,8 @@ e2e: ## Binary E2E: login -> chat -> confirm -> Stop -> reconnect Sync
 smoke-scheduler: ## M16 scheduler smoke: 1 virtual hour with 1ms tick
 	$(CARGO) test --locked -p bean-core --test scheduler one_hour_scheduler_smoke_with_fast_tick -- --nocapture
 
+eval: ## Chạy bộ task eval (FakeProvider) — đường cơ sở chất lượng agent
+	$(CARGO) test --locked -p bean-eval
 
 fmt: ## Định dạng code
 	$(CARGO) fmt --all

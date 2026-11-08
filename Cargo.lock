@@ -303,6 +303,7 @@ dependencies = [
  "bean-browser",
  "bean-channels",
  "bean-core",
+ "bean-eval",
  "bean-llm",
  "bean-marketing",
  "bean-memory",
@@ -430,6 +431,30 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "bean-eval"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bean-core",
+ "bean-llm",
+ "bean-memory",
+ "bean-security",
+ "bean-skills",
+ "bean-speech",
+ "bean-tools",
+ "bean-types",
+ "chrono",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
  "tracing",
 ]
 

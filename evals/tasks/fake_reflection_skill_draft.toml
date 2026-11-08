@@ -1,0 +1,37 @@
+# Task eval 3 — learning loop / reflection (K17): run thành công với đủ 5 tool
+# call ⇒ reflection gọi LLM một lượt riêng, sinh skill nháp chờ duyệt.
+#
+# Với FakeProvider: chứng minh máy eval bắt được vòng reflection end-to-end
+# (run → Final → reflection → draft) và draft KHÔNG tự kích hoạt. Với
+# `--provider real`: kiểm chứng K17 — model thật có trả đúng JSON schema,
+# chấp nhận fenced JSON, tạo SKILL.md hợp lệ hay không.
+id = "fake_reflection_skill_draft"
+description = "Run 5 lần read_file kết thúc thành công ⇒ reflection sinh skill nháp 'release-checklist'."
+prompt = "Đọc ghi chú quy trình release trong notes.md thật kỹ (đọc lại vài lần cho chắc) rồi xác nhận với tôi."
+max_steps = 6
+timeout_seconds = 60
+
+[llm]
+script = """
+{"responses":[
+ {"tool_calls":[
+  {"id":"c1","name":"read_file","args":{"path":"notes.md"}},
+  {"id":"c2","name":"read_file","args":{"path":"notes.md"}},
+  {"id":"c3","name":"read_file","args":{"path":"notes.md"}},
+  {"id":"c4","name":"read_file","args":{"path":"notes.md"}},
+  {"id":"c5","name":"read_file","args":{"path":"notes.md"}}
+ ],"stop":"tool_use"},
+ {"text":"Đã nắm quy trình release: make check, tag phiên bản, đẩy artifact. Sẵn sàng khi bạn cần.","stop":"end_turn"},
+ {"text":"{\\"reusable\\": true, \\"proposal\\": {\\"kind\\": \\"new\\", \\"name\\": \\"release-checklist\\", \\"description\\": \\"Dùng khi cần phát hành phiên bản mới của một dự án.\\", \\"body\\": \\"# Release checklist\\\\n\\\\n1. make check.\\\\n2. Tag phiên bản.\\\\n3. Đẩy artifact kèm SHA256SUMS.\\", \\"reason\\": \\"Run đọc lại quy trình nhiều bước và kết thúc thành công.\\"}}","stop":"end_turn"}
+]}
+"""
+
+[setup.files]
+"notes.md" = "# Quy trình release\n1. Chạy make check.\n2. Tag phiên bản.\n3. Đẩy artifact kèm SHA256SUMS.\n"
+
+[assert]
+end_reason = "final"
+tools_called = ["read_file"]
+min_tool_calls = 5
+draft_created = true
+final_contains = ["release"]

@@ -90,9 +90,49 @@ fn script_loads_from_json_string_in_two_shapes() {
     let provider = FakeProvider::from_json_str(bare_array).unwrap();
     assert_eq!(provider.remaining(), 1);
 
-    // Thiếu trường nào cũng có default: tool_calls rỗng, usage 0, stop = other.
+    // Thiếu trường nào cũng có default: tool_calls rỗng, usage 0 (provider tự
+    // ước lượng lúc chat), stop = other.
     let minimal = FakeProvider::from_json_str(r#"{"responses":[{}]}"#).unwrap();
     assert_eq!(minimal.remaining(), 1);
+}
+
+#[tokio::test]
+async fn response_without_usage_gets_estimated_tokens() {
+    let provider = FakeProvider::from_json_str(r#"{"responses":[{"text":"xin chào"}]}"#).unwrap();
+    let messages = [Message::user("một câu hỏi dài hơn bốn ký tự")];
+    let req = ChatRequest {
+        system: "system prompt",
+        messages: &messages,
+        tools: &[],
+        max_tokens: 100,
+    };
+    let response = provider.chat(req).await.unwrap();
+    assert!(
+        response.usage.input_tokens > 0,
+        "usage input phải được ước lượng"
+    );
+    assert!(
+        response.usage.output_tokens > 0,
+        "usage output phải được ước lượng"
+    );
+}
+
+#[tokio::test]
+async fn explicit_usage_in_script_is_kept() {
+    let provider = FakeProvider::from_json_str(
+        r#"{"responses":[{"text":"a","usage":{"input_tokens":10,"output_tokens":5}}]}"#,
+    )
+    .unwrap();
+    let messages = [Message::user("hỏi")];
+    let req = ChatRequest {
+        system: "s",
+        messages: &messages,
+        tools: &[],
+        max_tokens: 100,
+    };
+    let response = provider.chat(req).await.unwrap();
+    assert_eq!(response.usage.input_tokens, 10);
+    assert_eq!(response.usage.output_tokens, 5);
 }
 
 #[test]

@@ -53,7 +53,7 @@ pub enum Command {
     /// với giao diện web) và áp dụng khi khởi động lại Bean.
     Model,
 
-    /// Kiểm tra và cài bản mới từ GitHub Releases (M30): tải artifact đúng nền
+    /// Kiểm tra và cài bản mới từ GitHub Releases (M30): tải/cài bản mới đúng nền
     /// tảng, xác minh SHA256, ghi đè binary an toàn rồi tự restart qua
     /// `scripts/beanctl` (D23). Chỉ nhận bản stable; check tay, không phone-home.
     Update {
@@ -64,6 +64,48 @@ pub enum Command {
         /// Sau khi cài xong KHÔNG tự restart Bean.
         #[arg(long)]
         no_restart: bool,
+    },
+
+    /// Chạy bộ eval đo chất lượng agent (crate `bean-eval`): task TOML trong
+    /// `evals/tasks/`, ghi metrics JSONL + trajectory để so sánh trước/sau khi
+    /// tối ưu. Mọi run nằm trong thư mục tạm — không đụng dữ liệu thật.
+    Eval(EvalArgs),
+}
+
+/// Tham số của `eval`.
+#[derive(Debug, Args)]
+pub struct EvalArgs {
+    /// Lệnh con của `eval`.
+    #[command(subcommand)]
+    pub command: EvalCommand,
+}
+
+/// Lệnh con của `eval`.
+#[derive(Debug, Subcommand)]
+pub enum EvalCommand {
+    /// Chạy các task eval và ghi metrics + trajectory.
+    Run {
+        /// Thư mục chứa task TOML.
+        #[arg(long, value_name = "DIR", default_value = "evals/tasks")]
+        tasks: PathBuf,
+
+        /// Chỉ chạy task có id này (lặp được).
+        #[arg(long, value_name = "ID")]
+        only: Option<String>,
+
+        /// fake (kịch bản) | real (provider thật, key từ env) — mặc định tự theo task.
+        #[arg(long, value_name = "MODE")]
+        provider: Option<String>,
+
+        /// Thư mục ghi metrics.jsonl + trajectory/.
+        #[arg(long, value_name = "DIR", default_value = "evals/out")]
+        out: PathBuf,
+    },
+
+    /// Đọc file metrics JSONL và in báo cáo tổng hợp ra stdout.
+    Report {
+        /// File metrics JSONL.
+        file: PathBuf,
     },
 }
 

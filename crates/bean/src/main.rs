@@ -11,6 +11,7 @@ mod chat;
 mod cli;
 mod config_cmd;
 mod doctor;
+mod eval_cmd;
 mod mcp;
 mod secret;
 mod serve;
@@ -48,6 +49,15 @@ async fn main() -> anyhow::Result<()> {
         // (D23.1), chỉ dùng mạng + đường dẫn binary đang chạy.
         Command::Update { check, no_restart } => {
             update::run(&UpdateArgs { check, no_restart }).await
+        }
+        // Eval: không cần `bean.toml` — runner tự dựng Config mặc định + ghi đè
+        // theo task, mọi run nằm trong thư mục tạm (bean-eval).
+        Command::Eval(args) => {
+            let exit_code = eval_cmd::run(&args).await?;
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+            Ok(())
         }
     }
 }

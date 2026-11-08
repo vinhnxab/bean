@@ -1,0 +1,33 @@
+# Task eval 2 — compaction thật (K12): lịch sử dài vượt 70% ngân sách ⇒ compaction
+# chạy ngay đầu lượt, gọi LLM tóm tắt, ghi `sessions.summary`, xoá phần cũ.
+#
+# Với FakeProvider: chứng minh máy móc compaction chạy đúng (summary được lưu,
+# run kết thúc bình thường, token của lượt tóm tắt được ghi nhận). Với
+# `--provider real` (opt-in, key từ env): chính là lượt kiểm chứng K12 — nếu
+# cắt lịch sử tách cặp tool hoặc wire format sai, provider thật sẽ trả 400.
+id = "fake_compaction_long_history"
+description = "Lịch sử 30 message vượt 70% ngân sách ⇒ compaction tóm tắt trước khi trả lời."
+prompt = "Tóm tắt lại trạng thái dự án và cho tôi biết bước tiếp theo."
+max_steps = 6
+context_budget_tokens = 1000
+timeout_seconds = 60
+
+[llm]
+script = """
+{"responses":[
+ {"text":"Mục tiêu: kiểm tra cấu hình triển khai. Đã rà nhật ký lỗi, còn kiểm tra cấu hình systemd và tổng hợp báo cáo. File quan trọng: deploy/systemd/bean.service.","stop":"end_turn"},
+ {"text":"Trạng thái đã nén xong. Bước tiếp theo: kiểm tra cấu hình systemd rồi tổng hợp báo cáo cho bạn.","stop":"end_turn"}
+]}
+"""
+
+[setup.prefill]
+messages = 30
+user_text = "Ghi chú dự án: cần kiểm tra lại cấu hình triển khai và nhật ký lỗi, rồi tổng hợp báo cáo cho cuộc họp tuần sau."
+assistant_text = "Đã ghi nhận. Việc còn dang dở: rà nhật ký lỗi, kiểm tra cấu hình systemd, tổng hợp báo cáo họp tuần."
+
+[assert]
+end_reason = "final"
+summary_saved = true
+min_summary_chars = 30
+final_contains = ["Bước tiếp theo"]
+tools_forbidden = ["run_shell"]

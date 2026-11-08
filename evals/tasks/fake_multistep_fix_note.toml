@@ -1,0 +1,33 @@
+# Task eval 1 — vòng lặp nhiều bước + policy confirm + hiệu ứng file (FakeProvider).
+#
+# Task **xác định**: FakeProvider trả kịch bản dựng sẵn, chạy được trong CI.
+# Nó chứng minh máy eval đo được đúng những gì một lượt sửa code thật cần:
+# đọc file → xin confirm → ghi file → trả lời cuối; và hiệu ứng thật nằm
+# trong workspace sau run.
+id = "fake_multistep_fix_note"
+description = "Đọc note.txt, sửa lỗi chính tả 'heloo' → 'hello', ghi lại qua write_file (Confirm tự Allow)."
+prompt = "File note.txt có một lỗi chính tả: 'heloo' phải là 'hello'. Hãy đọc file, sửa lỗi và ghi lại, rồi báo ngắn gọn."
+max_steps = 6
+timeout_seconds = 60
+
+[llm]
+script = """
+{"responses":[
+ {"tool_calls":[{"id":"c1","name":"read_file","args":{"path":"note.txt"}}],"stop":"tool_use"},
+ {"tool_calls":[{"id":"c2","name":"write_file","args":{"path":"note.txt","content":"Ban ghi cong viec: hello world\\n"}}],"stop":"tool_use"},
+ {"text":"Đã sửa xong: 'heloo' → 'hello' trong note.txt.","stop":"end_turn"}
+]}
+"""
+
+[setup.files]
+"note.txt" = "Ban ghi cong viec: heloo world\n"
+
+[assert]
+end_reason = "final"
+tools_called = ["read_file", "write_file"]
+tool_sequence = ["read_file", "write_file"]
+min_tool_calls = 2
+max_tool_calls = 2
+confirm_count = 1
+files_equal = { "note.txt" = "Ban ghi cong viec: hello world\n" }
+final_contains = ["hello"]

@@ -16,6 +16,8 @@ web/.vite/
 !/workspace/.gitkeep
 /data/
 /skills/_drafts/
+# Kết quả chạy eval (metrics.jsonl + trajectory) — dữ liệu đo, không thuộc repo
+/evals/out/
 bean.toml
 auth.toml
 

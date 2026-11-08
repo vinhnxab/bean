@@ -1,0 +1,31 @@
+[package]
+name = "bean-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Khung đo chất lượng agent: bộ task eval, runner và metrics (chạy riêng, không đụng dữ liệu thật)"
+
+[lints]
+workspace = true
+
+[dependencies]
+bean-core.workspace = true
+bean-llm.workspace = true
+bean-memory.workspace = true
+bean-security.workspace = true
+bean-skills.workspace = true
+bean-speech.workspace = true
+bean-tools.workspace = true
+bean-types.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
