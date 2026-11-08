@@ -10,6 +10,15 @@
 //!
 //! Kiem tra `Origin` la thu **khong the bo qua** va la thu doc doc lap, tach ra day de
 //! kiem chung rang buoc "moi request thay doi du lieu deu phai qua day" chi mot lan.
+//!
+//! # Ngoai le IP literal (D21.6)
+//!
+//! Nhoi `Origin` khop dung `Host` cua request va Host la **IP literal** (loopback/RFC1918)
+//! cung duoc chap nhan — truy cap thang qua `http://127.0.0.1:7878` khi `public_origin`
+//! la IP LAN. DNS rebinding bat buoc dung domain nen khong ma duoc Host dang IP; trang
+//! tan cong o IP/port khac luon co `Origin != Host` (Origin do browser dat, khong gia duoc).
+
+use std::net::IpAddr;
 
 use axum::extract::{Request, State};
 use axum::http::uri::Authority;
@@ -29,9 +38,7 @@ pub async fn request_guard(
     let path = request.uri().path().to_string();
     let headers = request.headers().clone();
     if path.starts_with("/api/") && is_mutating(method) {
-        if !host_matches(&headers, &state.public_origin)
-            || !origin_matches(&headers, &state.public_origin)
-        {
+        if !same_site_allowed(&headers, &state.public_origin) {
             return ApiFailure::forbidden().into_response();
         }
         if !has_json_content_type(&headers) {
@@ -43,10 +50,7 @@ pub async fn request_guard(
             .into_response();
         }
     }
-    if path == "/api/ws"
-        && (!host_matches(&headers, &state.public_origin)
-            || !origin_matches(&headers, &state.public_origin))
-    {
+    if path == "/api/ws" && !same_site_allowed(&headers, &state.public_origin) {
         return ApiFailure::forbidden().into_response();
     }
     next.run(request).await
@@ -113,6 +117,59 @@ fn host_matches(headers: &HeaderMap, origin: &Url) -> bool {
 fn origin_matches(headers: &HeaderMap, origin: &Url) -> bool {
     header_str(headers, header::ORIGIN)
         .is_some_and(|value| value == origin.as_str().trim_end_matches('/'))
+}
+
+/// Chấp nhận khi cặp check chuẩn khớp, hoặc khi `Origin` khớp đúng `Host` và Host là
+/// IP literal (D21.6) — cho phép toggle LAN Access qua `http://127.0.0.1` dù
+/// `public_origin` đã là IP LAN.
+fn same_site_allowed(headers: &HeaderMap, public_origin: &Url) -> bool {
+    (host_matches(headers, public_origin) && origin_matches(headers, public_origin))
+        || origin_matches_host(headers)
+}
+
+/// `Origin` phải khớp đúng `Host` của request (scheme http/https, host IP, port) và
+/// Host bắt buộc là IP literal. `Origin: null` (iframe sandbox) bị từ chối.
+fn origin_matches_host(headers: &HeaderMap) -> bool {
+    let Some(host) = header_str(headers, header::HOST) else {
+        return false;
+    };
+    let Ok(authority) = host.parse::<Authority>() else {
+        return false;
+    };
+    // Rebinding chỉ hoạt động qua domain — Host dạng IP nghĩa là người dùng tự truy cập.
+    let Some(host_ip) = parse_ip_literal(authority.host()) else {
+        return false;
+    };
+    let Some(origin) = header_str(headers, header::ORIGIN)
+        .filter(|value| !value.eq_ignore_ascii_case("null"))
+        .and_then(|value| Url::parse(value).ok())
+    else {
+        return false;
+    };
+    if !matches!(origin.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(origin_ip) = parse_ip_literal(origin.host_str().unwrap_or_default()) else {
+        return false;
+    };
+    let origin_port = origin.port_or_known_default();
+    let host_port = authority.port_u16().or_else(|| {
+        if origin.scheme() == "https" {
+            Some(443)
+        } else {
+            Some(80)
+        }
+    });
+    origin_ip == host_ip && origin_port == host_port
+}
+
+/// Parse host IPv4/IPv6; `Url`/`Authority` trả IPv6 kèm ngoặc vuông `[::1]`.
+fn parse_ip_literal(host: &str) -> Option<IpAddr> {
+    host.strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(host)
+        .parse::<IpAddr>()
+        .ok()
 }
 
 fn has_json_content_type(headers: &HeaderMap) -> bool {

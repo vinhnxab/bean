@@ -11,7 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use axum::Router as AxumRouter;
 use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
+use axum::http::{HeaderValue, Request, StatusCode, header};
 use bean_core::{Router, RouterDeps};
 use bean_llm::FakeProvider;
 use bean_memory::traits::*;
@@ -353,6 +353,63 @@ async fn mutating_requests_require_json_and_valid_host() {
         .await
         .unwrap();
     assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn ip_literal_host_with_matching_origin_is_allowed() {
+    // D21.6: `public_origin` là IP LAN, người dùng truy cập thẳng qua 127.0.0.1 —
+    // Origin khớp Host và Host là IP literal nên guard phải chấp nhận.
+    let (_dir, app, _state, _store) = fixture("http://10.0.0.5:7878", vec![]).await;
+    let request = login_request(
+        "http://127.0.0.1:7878",
+        &format!("{{\"password\":\"{PASSWORD}\"}}"),
+        None,
+    );
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ip_literal_host_rejects_mismatched_origin() {
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, _store) = fixture(origin, vec![]).await;
+    let body = format!("{{\"password\":\"{PASSWORD}\"}}");
+
+    // Trang tấn công ở port khác: Host 7878 nhưng Origin 9999.
+    let mut wrong_port = login_request(origin, &body, None);
+    wrong_port.headers_mut().insert(
+        header::ORIGIN,
+        HeaderValue::from_static("http://127.0.0.1:9999"),
+    );
+    assert_eq!(
+        app.clone().oneshot(wrong_port).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+
+    // `Origin: null` (iframe sandbox) không parse được → từ chối.
+    let mut null_origin = login_request(origin, &body, None);
+    null_origin
+        .headers_mut()
+        .insert(header::ORIGIN, HeaderValue::from_static("null"));
+    assert_eq!(
+        app.oneshot(null_origin).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn domain_host_rejected_even_when_origin_matches_it() {
+    // DNS rebinding: Origin khớp Host nhưng Host là domain, không phải IP literal.
+    let (_dir, app, _state, _store) = fixture("http://127.0.0.1:7878", vec![]).await;
+    let request = login_request(
+        "http://evil.com:7878",
+        &format!("{{\"password\":\"{PASSWORD}\"}}"),
+        None,
+    );
+    assert_eq!(
+        app.oneshot(request).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
 }
 
 #[tokio::test]
