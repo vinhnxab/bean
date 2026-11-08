@@ -27,7 +27,7 @@ members = [
 default-members = ["crates/bean"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 # MSRV: ts-rs 12 / rmcp 3.4 / libsqlite3-sys 0.38 đều yêu cầu 1.88.
 rust-version = "1.88"

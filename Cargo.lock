@@ -293,7 +293,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bean"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "bean-billing"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-security",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "bean-browser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -379,7 +379,7 @@ dependencies = [
 
 [[package]]
 name = "bean-channels"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "bean-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "bean-llm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-types",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "bean-marketing"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-security",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "bean-mcp-test-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-core",
@@ -490,7 +490,7 @@ dependencies = [
 
 [[package]]
 name = "bean-memory"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-llm",
@@ -510,14 +510,14 @@ dependencies = [
 
 [[package]]
 name = "bean-osauth-win"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "bean-qa"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-security",
@@ -535,7 +535,7 @@ dependencies = [
 
 [[package]]
 name = "bean-scan"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-security",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "bean-security"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-osauth-win",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "bean-settings"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bean-llm",
  "bean-security",
@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "bean-skills"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bean-security",
  "bean-tools",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "bean-speech"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-types",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "bean-tools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bean-types",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "bean-types"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "secrecy",
  "serde",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "bean-update"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "reqwest 0.13.5",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "bean-web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "argon2",
