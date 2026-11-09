@@ -125,7 +125,7 @@
 | `make build` | ✅ Pass | Web build + Rust release có UI nhúng |
 | `make build-headless` | ✅ Pass | Release không UI, không cần Node |
 | Playwright | ⬜ Chưa có | Là tuỳ chọn trong M16 |
-| CI | ✅ Đã chạy xanh trên GitHub | `release.yml` (M30, tag `v*` — run #1 xanh) và `ci.yml` (milestone eval): 4 job `check-rust` / `check-web` / `eval baseline` (`bean eval run --provider fake`) / `audit`; run đầu tiên (2026-11-09) xanh toàn bộ sau khi sửa advisory dependency mới (commit `fix(deps)` ngay sau đó) |
+| CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4) |
 | Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
 
 ### Ghi chú về warning dependency

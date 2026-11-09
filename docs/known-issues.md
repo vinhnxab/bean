@@ -117,6 +117,7 @@ Mức độ: **cao** = có thể sai lệch về hành vi/an toàn · **trung b�
 * **M6 (Skills)**: K9 (giới hạn cú pháp FTS trong description), K5 (nhiễu tool-call trong search).
 * **M8 (Router/Channel)**: K2, K3, K6, K7, K13.
 * **M9 (Web server)**: K6, K14 (REST cho phiên/memory files), giữ `/api/*` trả 404 JSON.
-* **M15 (Learning loop — phần còn lại)**: K16 (tín hiệu phàn nàn), K17 (provider thật), K19 (audit/lịch sử draft), K20 (draft từ scheduler).
-* **M16 (Hardening)**: K2, K3, K4, K11, K12, K18 + `make audit`/`make e2e` (K1 đã đóng 2026-09-27).
+* **M15 (Learning loop — phần còn lại)**: K16 (tín hiệu phàn nàn), K19 (audit/lịch sử draft), K20 (draft từ scheduler). K17 đã đóng 2026-11-09 (provider thật qua eval opt-in).
+* **M16 (Hardening)**: K2, K3, K4, K11, K18 + `make audit`/`make e2e` (K1 đã đóng 2026-09-27; K12 đã đóng 2026-11-09).
 * **Sau tất cả milestone / trước phát hành**: K15 — smoke test Telegram thật bằng token lấy từ môi trường; không đưa token vào repo hay làm `make check` phụ thuộc secret; K21 — theo dõi future-incompatibility của `proc-macro-error2` qua `aquamarine`/`teloxide`.
+* **CI flake cần theo dõi (2026-11-09)**: run `287eb46` fail job check-rust ở `cargo test --workspace` (exit 2, không có annotation chi tiết — job log cần auth), chạy lại ở `937387b` với cùng code Rust thì pass; local chạy lại nhiều lần không tái hiện. Nghi test thời gian thực (sleep 30–1100ms trong scheduler/learning/router/settings tests) trên runner chậm. Nếu lặp lại: lấy log từ GitHub (cần token) hoặc chạy `cargo test --workspace` vòng lặp dưới load để bắt test cụ thể; chưa fix mù.
