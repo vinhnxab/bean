@@ -1,0 +1,33 @@
+# Task eval K12 — compaction với **provider thật** (opt-in, KHÔNG chạy trong CI).
+#
+# Khác biệt so với `evals/tasks/fake_compaction_long_history.toml`: thay kịch bản
+# FakeProvider bằng openai_compat qua OpenRouter. Điểm cần chứng minh với model
+# thật là **wire format**: nếu cách cắt lịch sử tách cặp `assistant(tool_calls)`/
+# `tool`, hoặc prompt tóm tắt sai định dạng, provider thật sẽ trả 400 — điều mà
+# FakeProvider không bao giờ bắt được.
+#
+# Chạy (key chỉ từ biến môi trường, không bao giờ nằm trong file):
+#   bean eval run --tasks evals/tasks-real --provider real
+id = "real_compaction_long_history"
+description = "K12: 30 message thật vượt 70% ngân sách ⇒ compaction gọi LLM thật tóm tắt, lịch sử cũ bị xoá, run không lỗi API."
+prompt = "Nhắc lại ngắn gọn cho tôi: việc còn dang dở của dự án là gì? Trả lời trong một câu."
+max_steps = 6
+context_budget_tokens = 1000
+timeout_seconds = 180
+
+[llm]
+provider = "openai_compat"
+model = "nvidia/nemotron-3.5-super-vl:free"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_KEY"
+
+[setup.prefill]
+messages = 30
+user_text = "Ghi chú dự án: cần kiểm tra lại cấu hình triển khai và nhật ký lỗi, rồi tổng hợp báo cáo cho cuộc họp tuần sau."
+assistant_text = "Đã ghi nhận. Việc còn dang dở: rà nhật ký lỗi, kiểm tra cấu hình systemd, tổng hợp báo cáo họp tuần."
+
+[assert]
+end_reason = "final"
+summary_saved = true
+min_summary_chars = 30
+tools_forbidden = ["run_shell"]

@@ -33,6 +33,10 @@ use crate::task::{EvalTask, load_tasks_dir};
 /// Thời gian tối đa chờ reflection tạo draft sau `Final`.
 const REFLECTION_WAIT_MS: u64 = 10_000;
 
+/// Như trên nhưng cho provider thật: network + độ trễ model có thể vượt 10s
+/// (retry 3 lần với backoff cho 429/5xx là hợp lệ), nên trần phải nới ra.
+const REFLECTION_WAIT_REAL_MS: u64 = 180_000;
+
 /// Chế độ chọn provider cho run eval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderChoice {
@@ -360,8 +364,16 @@ async fn run_task_inner(
     drop(router);
 
     // 8. Reflection chạy bất đồng bộ sau Final — chờ draft (nếu task yêu cầu).
+    //    Provider thật cần trần chờ lớn hơn: network + retry backoff.
     let draft_count = match &catalog {
-        Some(catalog) => wait_for_drafts(catalog, want_draft).await,
+        Some(catalog) => {
+            let wait_ms = if wants_fake(task, options.provider) {
+                REFLECTION_WAIT_MS
+            } else {
+                REFLECTION_WAIT_REAL_MS
+            };
+            wait_for_drafts(catalog, want_draft, wait_ms).await
+        }
         None => 0,
     };
 
@@ -498,8 +510,8 @@ impl EventCollector {
 }
 
 /// Chờ drafts xuất hiện (reflection chạy sau Final); trả số draft hiện có.
-async fn wait_for_drafts(catalog: &SkillCatalog, expected: bool) -> usize {
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(REFLECTION_WAIT_MS);
+async fn wait_for_drafts(catalog: &SkillCatalog, expected: bool, wait_ms: u64) -> usize {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(wait_ms);
     loop {
         let count = catalog.list_drafts().map_or(0, |drafts| drafts.len());
         if count > 0 || !expected || tokio::time::Instant::now() >= deadline {
@@ -563,12 +575,7 @@ fn build_provider(
     config: &Config,
     choice: ProviderChoice,
 ) -> anyhow::Result<Arc<dyn LlmProvider>> {
-    let use_fake = match choice {
-        ProviderChoice::Fake => true,
-        ProviderChoice::Real => false,
-        ProviderChoice::Auto => task.llm.is_fake(),
-    };
-    if use_fake {
+    if wants_fake(task, choice) {
         let Some(script) = &task.llm.script else {
             bail!("task `{}` không có kịch bản fake", task.id);
         };
@@ -583,6 +590,15 @@ fn build_provider(
         .filter(|value| !value.trim().is_empty())
         .map(SecretString::from);
     bean_llm::build_provider(&config.llm, key).context("dựng provider thật cho eval thất bại")
+}
+
+/// `true` khi task này nên chạy FakeProvider theo lựa chọn của người dùng.
+fn wants_fake(task: &EvalTask, choice: ProviderChoice) -> bool {
+    match choice {
+        ProviderChoice::Fake => true,
+        ProviderChoice::Real => false,
+        ProviderChoice::Auto => task.llm.is_fake(),
+    }
 }
 
 /// Ghi trajectory JSON (kể cả run lỗi — càng lỗi càng cần băng ghi).

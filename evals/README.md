@@ -30,6 +30,38 @@ bean eval report evals/out/metrics.jsonl        # tổng hợp một file metric
 | `fake_compaction_long_history` | Lịch sử 30 message vượt 70% ngân sách ⇒ compaction lưu summary, run không lỗi | K12 (chạy `--provider real` để kiểm chứng với model thật) |
 | `fake_reflection_skill_draft` | Run ≥5 tool call thành công ⇒ reflection sinh skill nháp, không tự kích hoạt | K17 (như trên) |
 
+## Task provider thật (opt-in, KHÔNG chạy trong CI)
+
+`tasks-real/` chứa task đòi hỏi model thật — đóng K12/K17 bằng số đo thay vì
+giả định:
+
+| Task | Đo gì | Gắn với |
+|---|---|---|
+| `real_compaction_long_history` | Hội thoại đủ dài kích hoạt compaction với model thật: summary lưu, run không lỗi API | K12 — đã đóng 2026-11-09 |
+| `real_reflection_skill_draft` | Run thật ≥6 tool call ⇒ reflection trả JSON đúng schema ⇒ draft SKILL.md hợp lệ chờ duyệt | K17 — đã đóng 2026-11-09 (openai_compat) |
+
+Chạy (eval **chỉ đọc key từ biến môi trường** — không bao giờ nằm trong file,
+không in giá trị):
+
+```sh
+set -a; . ~/.bean/secrets.env; set +a   # hoặc export OPENROUTER_KEY=… / NVIDIA_KEY=…
+bean eval run --tasks evals/tasks-real --provider real
+bean eval run --tasks evals/tasks-real --provider real --only real_reflection_skill_draft
+```
+
+Lưu ý với model free (quan sát thật 2026-11-09):
+
+- **Flaky là dữ liệu, không phải lỗi harness.** Cùng một task có thể PASS hoặc
+  FAIL vì model free hay 503, chậm, hoặc trả JSON sai escape. Chạy lại vài lượt
+  trước khi kết luận; mọi đường im lặng của reflection đều đã có log
+  (`bean-core/src/learning.rs`, `router/run.rs`).
+- Lỗi parse reflection kèm **lỗi serde + nguyên văn model trả** (cắt 400 ký
+  tự) — đọc log để biết phải sửa prompt hay chấp nhận model yếu.
+- Cửa sổ chờ draft với provider thật là 180s (`REFLECTION_WAIT_REAL_MS` trong
+  `bean-eval/src/runner.rs`); model free chậm có khi vượt — tăng nếu cần.
+- Gán K17 cho model khác: sửa `[llm]` trong TOML (provider/model/base_url/
+  `api_key_env` là **tên** biến), giữ nguyên phần setup/assert.
+
 ## Viết task mới
 
 1. Copy một task TOML, đổi `id` + `prompt`.

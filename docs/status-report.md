@@ -126,6 +126,7 @@
 | `make build-headless` | ✅ Pass | Release không UI, không cần Node |
 | Playwright | ⬜ Chưa có | Là tuỳ chọn trong M16 |
 | CI | ✅ Đã chạy xanh trên GitHub | `release.yml` (M30, tag `v*` — run #1 xanh) và `ci.yml` (milestone eval): 4 job `check-rust` / `check-web` / `eval baseline` (`bean eval run --provider fake`) / `audit`; run đầu tiên (2026-11-09) xanh toàn bộ sau khi sửa advisory dependency mới (commit `fix(deps)` ngay sau đó) |
+| Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
 
 ### Ghi chú về warning dependency
 
@@ -186,9 +187,10 @@ cp bean.example.toml bean.toml
 
 ### 6.2. Đã có code nhưng chưa kiểm chứng thực tế
 
-1. **Provider thật (K12/K17).**
-   - Anthropic/OpenAI-compat được test bằng wiremock SSE và JSON.
-   - Chưa có key nên chưa xác minh một phiên dài thật, compaction thật, streaming thật và reflection với model thật.
+1. **Provider thật (K12/K17).** — **compaction và reflection đã kiểm chứng với model thật (2026-11-09)** qua khung eval opt-in `evals/tasks-real/`:
+   - K12: `real_compaction_long_history` (OpenRouter, nemotron free) — hội thoại đủ dài kích hoạt compaction, summary lưu, run sạch; số đo tại `evals/out/metrics.jsonl`.
+   - K17: `real_reflection_skill_draft` (GLM-5.3-flash) — 6 tool call thật, reflection JSON đúng schema, draft được tạo và pass assert; model free flaky (chi tiết trong `docs/known-issues.md` K17).
+   - Còn lại: streaming thật (M17) và biến thể Anthropic/Ollama — chưa có key tương ứng.
 
 2. **Telegram bot thật (K15).**
    - Adapter dùng `MockTransport` và Router thật.
@@ -219,7 +221,7 @@ cp bean.example.toml bean.toml
 | Store semantics | K5–K7 | trung bình | Memory search lẫn message lượt hiện tại; `clear` chưa xoá summary; `MemoryStore`/`SqliteStore` có thể lệch hành vi |
 | Search | K8–K9 | thấp | BM25 chỉ tương đối theo nguồn; cú pháp FTS bị giới hạn |
 | E2E | K11 | trung bình | Thiếu E2E bền vững cho memory save/search |
-| Provider thật | K12, K17 | trung bình | Chưa có credential để chạy compaction, streaming và reflection với model thật |
+| Provider thật | K12, K17 | **đã đóng** (2026-11-09) | Compaction + reflection đã chạy với model thật qua khung eval opt-in (`evals/tasks-real/`, key từ env); còn streaming thật (M17) và Anthropic/Ollama — thiếu key |
 | Telegram | K15 | trung bình | Chưa smoke test bot thật |
 | Learning | K16, K19, K20 | trung bình/thấp | Chưa có tín hiệu phàn nàn; draft decision chưa có audit bền vững; scheduler draft chưa có inline approval Telegram |
 | Learning E2E | K18 | trung bình | Chưa có flow E2E task nhiều bước → notification → duyệt skill → run kế tiếp dùng skill |

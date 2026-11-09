@@ -198,6 +198,11 @@ impl Router {
                         self.inner.learning_gate.reserve(&config, catalog.as_ref())
                     {
                         self.spawn_reflection(queued, config, outcome, reservation);
+                    } else {
+                        tracing::info!(
+                            session_id = %queued.session_id,
+                            "learning: bỏ qua reflection (learning tắt hoặc chưa tới hạn cooldown)"
+                        );
                     }
                 }
             }

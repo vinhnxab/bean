@@ -1,0 +1,46 @@
+# Task eval K17 — reflection với **provider thật** (opt-in, KHÔNG chạy trong CI).
+#
+# Kiểm chứng điều mà FakeProvider không thay thế được (K17): model thật trả đúng
+# JSON schema của reflection, chấp nhận fenced JSON, và tạo SKILL.md hợp lệ
+# chờ duyệt — run ≥5 tool call thành công mới được phép đề xuất
+# (`learning.min_tool_calls` mặc định 5, agents.md mục 17).
+#
+# Thiết kế quan trọng, rút từ 3 lần chạy thật đầu tiên:
+# 1. Chỉ đọc + tóm tắt không đủ: hai model thật (nemotron-free, GLM-5.3-flash)
+#    cùng trả `reusable=false` — hợp lý, vì việc đọc tài liệu không phải quy
+#    trình đáng thành skill. Lượt chạy phải là quy trình mà agent **tự thực
+#    hiện**: đọc 5 mảnh rời rạc → gộp thành checklist bằng write_file.
+# 2. Đủ ngưỡng tool call: 5 read + 1 write = 6 ≥ 5; thiếu một call là reflection
+#    không bao giờ được kích hoạt (đường `should_reflect=false` — đã thêm log
+#    quan sát ở các đường im lặng này).
+#
+# Chạy (key chỉ từ biến môi trường, không bao giờ nằm trong file):
+#   bean eval run --tasks evals/tasks-real --provider real
+id = "real_reflection_skill_draft"
+description = "K17: agent thật gộp 5 mảnh quy trình thành CHECKLIST.md (6 tool call) ⇒ reflection sinh skill nháp hợp lệ chờ duyệt."
+prompt = """Đọc 5 file deploy-1.md, deploy-2.md, deploy-3.md, deploy-4.md, deploy-5.md bằng tool read_file, sau đó gộp toàn bộ các bước thành một file duy nhất tên CHECKLIST.md bằng tool write_file (giữ nguyên các bước, đánh số thứ tự).
+Không dùng tool nào khác ngoài read_file và write_file.
+Cuối cùng, kết thúc câu trả lời bằng một đoạn nêu rõ: quy trình 5 bước vừa gộp đáng được lưu thành skill để các lần phát hành sau tái sử dụng."""
+max_steps = 8
+timeout_seconds = 240
+
+[llm]
+provider = "openai_compat"
+model = "z-ai/glm-5.3-flash"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_KEY"
+
+[setup.files]
+"deploy-1.md" = "# Quy trình release — phần 1/5\nBước 1. Chạy `make check` xanh: fmt, clippy, test toàn workspace, kiểu TypeScript không lệch.\n"
+"deploy-2.md" = "# Quy trình release — phần 2/5\nBước 2. Chạy `make audit`: cargo audit strict (ignore có lý do trong Makefile) và pnpm audit --prod.\n"
+"deploy-3.md" = "# Quy trình release — phần 3/5\nBước 3. Build phát hành: `make build` (web trước, Rust release nhúng UI sau).\n"
+"deploy-4.md" = "# Quy trình release — phần 4/5\nBước 4. Xác nhận binary tự chứa giao diện: `bean serve` không cần Node trên máy chạy.\n"
+"deploy-5.md" = "# Quy trình release — phần 5/5\nBước 5. Tag `vX.Y.Z` kèm SHA256SUMS; sau cài chạy `bean doctor --online` và sao lưu data.dir.\n"
+
+[assert]
+end_reason = "final"
+tools_called = ["read_file", "write_file"]
+min_tool_calls = 6
+max_tool_calls = 12
+draft_created = true
+tools_forbidden = ["run_shell"]

@@ -16,6 +16,38 @@ fn tasks_dir() -> PathBuf {
         .expect("evals/tasks phải tồn tại trong repo")
 }
 
+/// Thư mục task provider thật (opt-in) — chỉ kiểm tra **parse**, không gọi mạng.
+#[test]
+fn real_tasks_parse_and_are_opt_in() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../evals/tasks-real")
+        .canonicalize()
+        .expect("evals/tasks-real phải tồn tại trong repo");
+    let tasks = load_tasks_dir(&dir).unwrap();
+    assert!(tasks.len() >= 2, "cần tối thiểu task K12 + K17");
+    for task in &tasks {
+        assert!(
+            !task.llm.is_fake(),
+            "task {} phải là provider thật",
+            task.id
+        );
+        let env_name = task.llm.api_key_env.as_deref().unwrap_or_default();
+        assert!(
+            !env_name.is_empty(),
+            "task {} phải khai báo api_key_env",
+            task.id
+        );
+        assert!(
+            !env_name.contains('='),
+            "api_key_env là TÊN biến, không phải giá trị key"
+        );
+        assert!(
+            task.timeout_seconds >= 180,
+            "provider thật cần trần thời gian lớn"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn all_fake_tasks_pass_and_metrics_are_written() {
     let tasks = load_tasks_dir(&tasks_dir()).unwrap();
