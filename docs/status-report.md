@@ -125,7 +125,7 @@
 | `make build` | ✅ Pass | Web build + Rust release có UI nhúng |
 | `make build-headless` | ✅ Pass | Release không UI, không cần Node |
 | Playwright | ⬜ Chưa có | Là tuỳ chọn trong M16 |
-| CI | 🟡 Workflow đã có, chưa chạy trên host thật | `release.yml` (M30, tag `v*`) và **`ci.yml` (milestone eval, 2026-11-08)**: 4 job `check-rust` / `check-web` / `eval baseline` (`bean eval run --provider fake`) / `audit`; chưa chứng minh chạy xanh trên GitHub vì chưa push |
+| CI | ✅ Đã chạy xanh trên GitHub | `release.yml` (M30, tag `v*` — run #1 xanh) và `ci.yml` (milestone eval): 4 job `check-rust` / `check-web` / `eval baseline` (`bean eval run --provider fake`) / `audit`; run đầu tiên (2026-11-09) xanh toàn bộ sau khi sửa advisory dependency mới (commit `fix(deps)` ngay sau đó) |
 
 ### Ghi chú về warning dependency
 
@@ -171,9 +171,8 @@ cp bean.example.toml bean.toml
 1. **Kênh chat thứ ba (M18 Discord).** — **ĐÃ LOẠI BỎ, không phải việc tồn đọng.**
    Chủ dự án quyết bỏ 2026-09-26. Telegram + web là bộ kênh cuối cùng; xem `Plan.md` mục 5.0.
 
-2. **CI tự động.**
-   - ~~Chưa có workflow `.github/workflows` hoặc pipeline tương đương.~~
-     **Cập nhật 2026-11-08:** đã có `.github/workflows/ci.yml` (check-rust, check-web, eval baseline fake, audit — trigger push/PR) và `release.yml` từ M30 (build 5 target khi push tag `v*`). Còn lại: chưa push nên chưa chứng minh workflow chạy xanh trên GitHub Actions.
+2. **CI tự động.** — **ĐÃ XONG (2026-11-09).**
+   - `.github/workflows/ci.yml` (check-rust, check-web, eval baseline fake, audit — trigger push/PR) chạy xanh toàn bộ trên GitHub Actions từ lần chạy đầu; `release.yml` từ M30 cũng xanh khi push tag.
    - `make check`, `make audit`, `make e2e` ngoài CI vẫn là cổng local của mỗi milestone.
 
 3. **Playwright/browser E2E.**
