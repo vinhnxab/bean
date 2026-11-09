@@ -62,4 +62,4 @@ http-body-util.workspace = true
 tokio-tungstenite.workspace = true
 tower.workspace = true
 tempfile.workspace = true
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }

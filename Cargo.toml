@@ -30,7 +30,7 @@ default-members = ["crates/bean"]
 [workspace.package]
 version = "0.1.1"
 edition = "2024"
-# MSRV: ts-rs 12 / rmcp 3.4 / libsqlite3-sys 0.38 đều yêu cầu 1.88.
+# MSRV: ts-rs 12 / rmcp 3.9 / libsqlite3-sys 0.39 (qua rusqlite 0.41) đều yêu cầu 1.88.
 rust-version = "1.88"
 license = "MIT"
 authors = ["Bean contributors"]
@@ -176,8 +176,8 @@ cap-std = "4.0.3"
 proptest = "1.11.0"
 # MCP client chính thức (M14) + MCP server read-only (M25). Chỉ bật stdio client và
 # streamable-HTTP server, không kéo OAuth/macros/reqwest.
-# API đã đối chiếu source rmcp 3.4.x trong cargo registry.
-rmcp = { version = "3.4.0", default-features = false, features = [
+# API đã đối chiếu lại source 3.9.x sau nâng cấp vá RUSTSEC-2026-0457/0461/0462.
+rmcp = { version = "3.9.0", default-features = false, features = [
   "client",
   "transport-child-process",
   "server",

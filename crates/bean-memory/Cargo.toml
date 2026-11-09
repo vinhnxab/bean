@@ -17,7 +17,7 @@ bean-tools.workspace = true
 bean-types.workspace = true
 chrono.workspace = true
 # `bundled` ⇒ tự build SQLite (không phụ thuộc libsqlite3 hệ thống) và bật FTS5 sẵn.
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
