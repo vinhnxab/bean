@@ -127,6 +127,7 @@
 | Playwright | ⬜ Chưa có | Là tuỳ chọn trong M16 |
 | CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4) |
 | Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
+| K15 Telegram thật | ✅ Smoke tay trên bot thật | Chat end-to-end, confirm inline keyboard (audit `decided_by: telegram:8845250886`), Dangerous không nút phiên, `/stop`, reconnect 2 lần, đồng thời web — chi tiết `docs/known-issues.md` K15 |
 
 ### Ghi chú về warning dependency
 
@@ -192,9 +193,9 @@ cp bean.example.toml bean.toml
    - K17: `real_reflection_skill_draft` (GLM-5.3-flash) — 6 tool call thật, reflection JSON đúng schema, draft được tạo và pass assert; model free flaky (chi tiết trong `docs/known-issues.md` K17).
    - Còn lại: streaming thật (M17) và biến thể Anthropic/Ollama — chưa có key tương ứng.
 
-2. **Telegram bot thật (K15).**
-   - Adapter dùng `MockTransport` và Router thật.
-   - Chưa xác minh long polling, typing, `/stop`, callback approval, reconnect, đồng thời chạy Telegram + Web trên một instance thật.
+2. **Telegram bot thật (K15).** — **ĐÃ ĐÓNG (2026-11-10): smoke test tay trên bot thật pass trọn checklist tương tác.**
+   - Chat thường end-to-end (session 19: "chào bean" → trả lời 4s); tool `Confirm`/`Dangerous` duyệt qua inline keyboard, audit ghi đúng actor `telegram:8845250886`; `/stop` huỷ run giữa chừng sạch; reconnect qua 2 lần restart; web + Telegram một instance.
+   - Còn lại thuộc soak 24h (mục 5) — không phải K15. Callback người lạ chỉ unit test (cần tài khoản thứ hai để smoke tay).
 
 3. **Scheduler thật (M13).**
    - Có test fake clock và smoke một giờ ảo.
@@ -222,7 +223,7 @@ cp bean.example.toml bean.toml
 | Search | K8–K9 | thấp | BM25 chỉ tương đối theo nguồn; cú pháp FTS bị giới hạn |
 | E2E | K11 | trung bình | Thiếu E2E bền vững cho memory save/search |
 | Provider thật | K12, K17 | **đã đóng** (2026-11-09) | Compaction + reflection đã chạy với model thật qua khung eval opt-in (`evals/tasks-real/`, key từ env); còn streaming thật (M17) và Anthropic/Ollama — thiếu key |
-| Telegram | K15 | trung bình | Chưa smoke test bot thật |
+| Telegram | K15 | **đã đóng** (2026-11-10) | Smoke bot thật pass: chat, confirm inline (audit đúng actor), Dangerous, `/stop`, reconnect, đồng thời web; callback người lạ unit-tested |
 | Learning | K16, K19, K20 | trung bình/thấp | Chưa có tín hiệu phàn nàn; draft decision chưa có audit bền vững; scheduler draft chưa có inline approval Telegram |
 | Learning E2E | K18 | trung bình | Chưa có flow E2E task nhiều bước → notification → duyệt skill → run kế tiếp dùng skill |
 | Dependency | K21 | thấp | `proc-macro-error2` future-incompatibility warning qua `aquamarine`/`teloxide` |
