@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::recorder::UsageRecorder;
 use crate::report::MetricsRecord;
-use crate::task::{EvalTask, load_tasks_dir};
+use crate::task::{EvalTask, TaskLlmProvider, load_tasks_dir};
 
 /// Thời gian tối đa chờ reflection tạo draft sau `Final`.
 const REFLECTION_WAIT_MS: u64 = 10_000;
@@ -589,7 +589,40 @@ fn build_provider(
         .ok()
         .filter(|value| !value.trim().is_empty())
         .map(SecretString::from);
-    bean_llm::build_provider(&config.llm, key).context("dựng provider thật cho eval thất bại")
+    let primary = bean_llm::build_provider(&config.llm, key)
+        .context("dựng provider thật cho eval thất bại")?;
+    // Failover (lộ trình mục 4): profile dự phòng khai báo trong task; không có
+    // `[[llm.fallbacks]]` ⇒ attach trả nguyên primary, hành vi y như cũ.
+    let fallbacks = task
+        .llm
+        .fallbacks
+        .iter()
+        .filter_map(|spec| match build_fallback_provider(spec, config) {
+            Ok(provider) => Some(provider),
+            Err(error) => {
+                tracing::warn!(name = %spec.name, error = %error, "không dựng được fallback provider cho eval — bỏ qua");
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(bean_llm::FailoverProvider::attach(primary, fallbacks))
+}
+
+/// Dựng một provider dự phòng từ khai báo của task. Key **chỉ** từ biến môi trường.
+fn build_fallback_provider(
+    spec: &TaskLlmProvider,
+    config: &Config,
+) -> anyhow::Result<Arc<dyn LlmProvider>> {
+    let mut llm = config.llm.clone();
+    llm.provider = spec.provider;
+    llm.model = spec.model.clone();
+    llm.base_url = spec.base_url.clone();
+    llm.api_key_env = spec.api_key_env.clone();
+    let key = std::env::var(&spec.api_key_env)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(SecretString::from);
+    bean_llm::build_provider(&llm, key).context(format!("dựng fallback `{}` thất bại", spec.name))
 }
 
 /// `true` khi task này nên chạy FakeProvider theo lựa chọn của người dùng.

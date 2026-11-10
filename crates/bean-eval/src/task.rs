@@ -68,6 +68,28 @@ pub struct TaskLlm {
     /// Ghi đè `[llm].api_key_env` — tên **biến môi trường**, không bao giờ là giá trị key.
     #[serde(default)]
     pub api_key_env: Option<String>,
+    /// Profile dự phòng cho failover (lộ trình mục 4): provider chính lỗi
+    /// 429/5xx/mạng/401 thì thử lần lượt theo thứ tự khai báo. Key vẫn **chỉ**
+    /// từ tên biến môi trường.
+    #[serde(default)]
+    pub fallbacks: Vec<TaskLlmProvider>,
+}
+
+/// Một provider dự phòng trong `[[llm.fallbacks]]` của task.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskLlmProvider {
+    /// Tên hiển thị trong log failover.
+    pub name: String,
+    /// `anthropic` \| `openai_compat`.
+    pub provider: bean_types::config::LlmProviderKind,
+    /// Model của profile dự phòng (thường khác model chính).
+    pub model: String,
+    /// Base URL (bắt buộc cho `openai_compat` tự host/OpenRouter).
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Tên biến môi trường chứa key.
+    pub api_key_env: String,
 }
 
 impl TaskLlm {

@@ -12,11 +12,12 @@
 //! khi có delta nào (chưa có gì gửi đi nên không mất dữ liệu). Lỗi giữa dòng
 //! đã được trả cho caller thì không thể tua lại — không failover.
 //!
-//! Hạn chế đã biết: `chat_with_model`/`chat_stream_with_model` truyền **nguyên**
-//! chuỗi model override sang fallback — hợp lệ khi các profile dự phòng thuộc cùng
-//! họ model; khác họ thì fallback sẽ trả 4xx (không failover tiếp) và lỗi được báo
-//! thẳng caller. Path chính (`chat`, không override) luôn dùng model riêng của từng
-//! profile nên không bị ảnh hưởng.
+//! Model override (`chat_with_model`): áp dụng **chỉ cho provider chính**. Fallback
+//! luôn chạy model riêng của profile nó — profile dự phòng là một định nghĩa hoàn
+//! chỉnh (provider + model), ép model của primary vào fallback là sai (model free
+//! của OpenRouter không tồn tại trên NVIDIA ⇒ 404). Hệ quả chấp nhận được: compaction
+//!/reflection với `small_model` set mà failover thì chạy trên model của fallback
+//! (có thể đắt hơn) — đúng vẫn hơn rẻ-sai.
 
 use std::sync::Arc;
 
@@ -118,8 +119,17 @@ impl LlmProvider for FailoverProvider {
         model: &str,
     ) -> Result<LlmResponse, LlmError> {
         let mut last: Option<LlmError> = None;
-        for provider in std::iter::once(&self.primary).chain(self.fallbacks.iter()) {
-            match provider.chat_with_model(req, model).await {
+        for (idx, provider) in std::iter::once(&self.primary)
+            .chain(self.fallbacks.iter())
+            .enumerate()
+        {
+            // Override chỉ áp cho primary; fallback chạy model riêng của profile nó.
+            let result = if idx == 0 {
+                provider.chat_with_model(req, model).await
+            } else {
+                provider.chat(req).await
+            };
+            match result {
                 Ok(response) => return Ok(response),
                 Err(error) => {
                     if !should_failover(&error) {
@@ -164,8 +174,17 @@ impl LlmProvider for FailoverProvider {
         model: &str,
     ) -> Result<LlmStream, LlmError> {
         let mut last: Option<LlmError> = None;
-        for provider in std::iter::once(&self.primary).chain(self.fallbacks.iter()) {
-            match provider.chat_stream_with_model(req, model).await {
+        for (idx, provider) in std::iter::once(&self.primary)
+            .chain(self.fallbacks.iter())
+            .enumerate()
+        {
+            // Override chỉ áp cho primary; fallback chạy model riêng của profile nó.
+            let result = if idx == 0 {
+                provider.chat_stream_with_model(req, model).await
+            } else {
+                provider.chat_stream(req).await
+            };
+            match result {
                 Ok(stream) => return Ok(stream),
                 Err(error) => {
                     if !should_failover(&error) {
@@ -193,6 +212,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use bean_types::{Message, StopReason, Usage};
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Debug)]
@@ -339,6 +359,78 @@ mod tests {
         assert!(!should_failover(&LlmError::Cancelled));
         assert!(should_failover(&LlmError::Transport("mạng đứt".into())));
         assert!(should_failover(&LlmError::Timeout));
+    }
+
+    /// Ghi lại đường gọi: `chat` hay `chat_with_model(model)` — dùng để khẳng định
+    /// fallback KHÔNG nhận model override của primary.
+    #[derive(Debug)]
+    struct ModelPathRecorder {
+        /// `Some(status)` = luôn trả `HttpStatus{status}`; `None` = trả Ok.
+        fail_with: Option<u16>,
+        path: Mutex<Vec<String>>,
+    }
+
+    impl ModelPathRecorder {
+        fn result(&self) -> Result<LlmResponse, LlmError> {
+            match self.fail_with {
+                Some(status) => Err(LlmError::HttpStatus {
+                    status,
+                    body: "chết".into(),
+                }),
+                None => Ok(ok_response()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for ModelPathRecorder {
+        async fn chat(&self, _req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
+            self.path.lock().unwrap().push("chat".into());
+            self.result()
+        }
+
+        async fn chat_with_model(
+            &self,
+            _req: ChatRequest<'_>,
+            model: &str,
+        ) -> Result<LlmResponse, LlmError> {
+            self.path
+                .lock()
+                .unwrap()
+                .push(format!("with_model:{model}"));
+            self.result()
+        }
+
+        fn name(&self) -> &'static str {
+            "recorder"
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_ignores_model_override() {
+        let primary = Arc::new(ModelPathRecorder {
+            fail_with: Some(503),
+            path: Mutex::new(vec![]),
+        });
+        let fallback = Arc::new(ModelPathRecorder {
+            fail_with: None,
+            path: Mutex::new(vec![]),
+        });
+        let provider = FailoverProvider::attach(primary.clone(), vec![fallback.clone()]);
+        let response = provider
+            .chat_with_model(req(), "model-của-chính")
+            .await
+            .expect("fallback phải thành công");
+        assert_eq!(response.text.as_deref(), Some("ok"));
+        assert_eq!(
+            *primary.path.lock().unwrap(),
+            ["with_model:model-của-chính"]
+        );
+        assert_eq!(
+            *fallback.path.lock().unwrap(),
+            ["chat"],
+            "fallback phải chạy model riêng của profile nó"
+        );
     }
 
     #[tokio::test]

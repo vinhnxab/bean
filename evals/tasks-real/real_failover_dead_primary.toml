@@ -1,0 +1,38 @@
+# Task eval — failover provider với **provider thật** (opt-in, KHÔNG chạy trong CI).
+#
+# Kiểm chứng lộ trình mục 4 (2026-11-10): provider chính **chết chắc** (base_url trỏ
+# tới cổng 9 — không có gì nghe, connect bị từ chối ngay) đã hết 3 lần retry ⇒
+# `FailoverProvider` chuyển sang profile dự phòng khai báo trong `[[llm.fallbacks]]`
+# ⇒ run vẫn hoàn thành bằng model thật.
+#
+# Vì sao dùng cổng chết thay vì model free flaky: test phải XÁC ĐỊNH — lỗi transport
+# xảy ra ngay, không tốn tiền, không phụ thuộc tâm trạng model free. Kịch bản flaky
+# thật (OpenRouter 503) đã ghi trong K17; task này chứng minh đường failover, còn
+# task `real_reflection_skill_draft` chứng minh chất lượng model.
+#
+# Chạy (key chỉ từ biến môi trường):
+#   set -a; . ~/.bean/secrets.env; set +a
+#   cargo run -q -p bean -- eval run --tasks evals/tasks-real --provider real \
+#     --only real_failover_dead_primary
+id = "real_failover_dead_primary"
+description = "Lộ trình mục 4: provider chính chết (cổng 9) ⇒ failover sang fallback thật, run vẫn kết thúc final."
+prompt = "Trả lời đúng một từ, không giải thích: PONG"
+max_steps = 3
+timeout_seconds = 180
+
+[llm]
+provider = "openai_compat"
+model = "dead-model"
+# Cổng 9 (discard): không có server nào nghe, connect refused ngay sau 3 lần retry.
+base_url = "http://127.0.0.1:9/v1"
+api_key_env = "OPENROUTER_KEY"
+
+[[llm.fallbacks]]
+name = "nvidia-glm"
+provider = "openai_compat"
+model = "z-ai/glm-5.3-flash"
+base_url = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_KEY"
+
+[assert]
+end_reason = "final"

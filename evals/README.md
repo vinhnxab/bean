@@ -39,6 +39,7 @@ giả định:
 |---|---|---|
 | `real_compaction_long_history` | Hội thoại đủ dài kích hoạt compaction với model thật: summary lưu, run không lỗi API | K12 — đã đóng 2026-11-09 |
 | `real_reflection_skill_draft` | Run thật ≥6 tool call ⇒ reflection trả JSON đúng schema ⇒ draft SKILL.md hợp lệ chờ duyệt | K17 — đã đóng 2026-11-09 (openai_compat) |
+| `real_failover_dead_primary` | Provider chính chết chắc (cổng 9) — 3 lần retry ⇒ failover sang `[[llm.fallbacks]]` thật ⇒ run vẫn `final`. Fallback chạy model riêng của profile nó (override chỉ áp cho primary) | lộ trình mục 4 — đã kiểm chứng 2026-11-10 (NVIDIA GLM) |
 
 Chạy (eval **chỉ đọc key từ biến môi trường** — không bao giờ nằm trong file,
 không in giá trị):
