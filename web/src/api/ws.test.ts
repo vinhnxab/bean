@@ -134,9 +134,7 @@ describe("ChatSocket", () => {
       ],
     });
     expect(plan).not.toBeNull();
-    expect(
-      parseServerMessage({ type: "plan", session_id: 1, run_id: "r", steps: [] }),
-    ).not.toBeNull();
+    expect(parseServerMessage({ type: "plan", session_id: 1, run_id: "r", steps: [] })).not.toBeNull();
     expect(
       parseServerMessage({ type: "plan", session_id: 1, run_id: "r", steps: [{ title: "x" }] }),
     ).toBeNull();
