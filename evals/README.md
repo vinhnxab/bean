@@ -61,6 +61,9 @@ Lưu ý với model free (quan sát thật 2026-11-09):
   `bean-eval/src/runner.rs`); model free chậm có khi vượt — tăng nếu cần.
 - Gán K17 cho model khác: sửa `[llm]` trong TOML (provider/model/base_url/
   `api_key_env` là **tên** biến), giữ nguyên phần setup/assert.
+- **Giảm flaky (2026-11-10):** khai báo `[llm].fallback_profiles = ["profile-dự-phòng"]`
+  trong TOML của task — model chính trả 503/401 sau khi hết retry là provider tự
+  chuyển sang profile kế thay vì chết giữa task. Xem `[llm]` trong `bean.example.toml`.
 
 ## Viết task mới
 

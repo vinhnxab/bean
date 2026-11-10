@@ -58,8 +58,14 @@ async fn summarize(
     };
     let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
     ensure_daily_budget(store, &day, config.security.daily_token_budget).await?;
+    // Tác vụ phụ: dùng model rẻ nếu cấu hình (lộ trình mục 4), mặc định về model chính.
+    let summary_model = config
+        .llm
+        .small_model
+        .as_deref()
+        .unwrap_or(&config.llm.model);
     let response = llm
-        .chat_with_model(request, &config.llm.model)
+        .chat_with_model(request, summary_model)
         .await
         .map_err(|err| StoreError::Internal(format!("gọi LLM để tóm tắt thất bại: {err}")))?;
     let usage = record_usage(store, &day, response.usage).await?;

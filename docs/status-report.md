@@ -87,6 +87,8 @@
 - Anthropic Messages API.
 - OpenAI-compatible, hỗ trợ Ollama/vLLM khi có `base_url`.
 - Streaming SSE cho cả hai provider.
+- Failover provider: `[llm].fallback_profiles` — provider chính lỗi 429/5xx/mạng hoặc 401/403 sau khi hết retry thì thử lần lượt profile dự phòng (lộ trình mục 4, 2026-11-10).
+- Model phụ `[llm].small_model` cho tác vụ rẻ (compaction, reflection); prompt caching `[llm].prompt_cache` cho Anthropic.
 - File tools, glob, grep, shell sandbox, web fetch/search, memory, skills, scheduler.
 - MCP client stdio.
 
@@ -128,6 +130,7 @@
 | CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4) |
 | Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
 | K15 Telegram thật | ✅ Smoke tay trên bot thật | Chat end-to-end, confirm inline keyboard (audit `decided_by: telegram:8845250886`), Dangerous không nút phiên, `/stop`, reconnect 2 lần, đồng thời web — chi tiết `docs/known-issues.md` K15 |
+| Failover + model phụ + prompt cache | ✅ Test tự động (chưa chạy thật) | 7 unit test `FailoverProvider` (503/401 failover, Decode không, hết đường trả lỗi cuối, stream trước delta đầu); 11 test validate config; wire test Anthropic: `system` thành block có `cache_control: ephemeral` khi bật, string khi tắt; test reflection dùng `small_model`. Chưa có key Anthropic nên caching chỉ verify bằng wire test; chưa cấu hình `fallback_profiles` thật trên máy đang chạy |
 
 ### Ghi chú về warning dependency
 
@@ -190,8 +193,8 @@ cp bean.example.toml bean.toml
 
 1. **Provider thật (K12/K17).** — **compaction và reflection đã kiểm chứng với model thật (2026-11-09)** qua khung eval opt-in `evals/tasks-real/`:
    - K12: `real_compaction_long_history` (OpenRouter, nemotron free) — hội thoại đủ dài kích hoạt compaction, summary lưu, run sạch; số đo tại `evals/out/metrics.jsonl`.
-   - K17: `real_reflection_skill_draft` (GLM-5.3-flash) — 6 tool call thật, reflection JSON đúng schema, draft được tạo và pass assert; model free flaky (chi tiết trong `docs/known-issues.md` K17).
-   - Còn lại: streaming thật (M17) và biến thể Anthropic/Ollama — chưa có key tương ứng.
+   - K17: `real_reflection_skill_draft` (GLM-5.3-flash) — 6 tool call thật, reflection JSON đúng schema, draft được tạo và pass assert; model free flaky (chi tiết trong `docs/known-issues.md` K17). Đã có phương án giảm flaky: `[llm].fallback_profiles` (2026-11-10) — khai báo profile dự phòng để run tự chuyển khi model free trả 503/401.
+   - Còn lại: streaming thật (M17) và biến thể Anthropic/Ollama — chưa có key tương ứng. Prompt caching Anthropic (2026-11-10) chỉ verify bằng wire test vì cùng lý do.
 
 2. **Telegram bot thật (K15).** — **ĐÃ ĐÓNG (2026-11-10): smoke test tay trên bot thật pass trọn checklist tương tác.**
    - Chat thường end-to-end (session 19: "chào bean" → trả lời 4s); tool `Confirm`/`Dangerous` duyệt qua inline keyboard, audit ghi đúng actor `telegram:8845250886`; `/stop` huỷ run giữa chừng sạch; reconnect qua 2 lần restart; web + Telegram một instance.

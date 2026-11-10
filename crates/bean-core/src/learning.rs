@@ -90,7 +90,14 @@ pub(crate) async fn reflect(args: ReflectionArgs<'_>) -> Result<Option<SkillDraf
         args.config.security.daily_token_budget,
     )
     .await?;
-    let call = args.llm.chat_with_model(request, &args.config.llm.model);
+    // Tác vụ phụ: dùng model rẻ nếu cấu hình (lộ trình mục 4), mặc định về model chính.
+    let reflection_model = args
+        .config
+        .llm
+        .small_model
+        .as_deref()
+        .unwrap_or(&args.config.llm.model);
+    let call = args.llm.chat_with_model(request, reflection_model);
     let response = tokio::select! {
         biased;
         _ = args.cancel.cancelled() => return Ok(None),

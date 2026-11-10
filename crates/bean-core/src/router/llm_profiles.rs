@@ -52,6 +52,20 @@ impl Router {
         get_env(&profile.api_key_env).map(SecretString::from)
     }
 
+    /// Gói provider vừa dựng với chuỗi dự phòng từ `[llm].fallback_profiles`
+    /// (lộ trình "fallback provider"). Không cấu hình dự phòng ⇒ trả nguyên
+    /// `primary` — hành vi y như trước khi có failover.
+    pub(crate) fn attach_llm_failover(
+        &self,
+        config: &bean_types::config::LlmConfig,
+        primary: Arc<dyn LlmProvider>,
+    ) -> Arc<dyn LlmProvider> {
+        let fallbacks = bean_llm::build_fallback_providers(config, &|profile| {
+            self.resolve_profile_api_key(profile)
+        });
+        bean_llm::FailoverProvider::attach(primary, fallbacks)
+    }
+
     /// Danh sách profile có thể switch, kèm trạng thái key + active — đã khử secret.
     ///
     /// # Errors
@@ -378,8 +392,11 @@ impl Router {
             let mut candidate = config.llm.clone();
             candidate.apply_profile(&profile);
             Some(
-                factory(&candidate, api_key)
-                    .map_err(|error| RouterError::LlmProvider(error.to_string()))?,
+                self.attach_llm_failover(
+                    &candidate,
+                    factory(&candidate, api_key)
+                        .map_err(|error| RouterError::LlmProvider(error.to_string()))?,
+                ),
             )
         } else {
             None

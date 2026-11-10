@@ -241,8 +241,20 @@ pub(crate) fn build_provider(
         .resolve_secrets_with(get_secret)
         .context("đọc secret (biến môi trường / secrets.env) thất bại")?;
     let web_search_api_key = secrets.web_search_api_key.clone();
-    let provider = bean_llm::build_provider(&config.llm, secrets.llm_api_key)
+    let primary = bean_llm::build_provider(&config.llm, secrets.llm_api_key)
         .context("dựng provider LLM thất bại (kiểm tra [llm] trong bean.toml)")?;
+    // Failover: key của profile dự phòng resolve cùng thứ tự D19.3, legacy `api_key`
+    // bị bỏ qua (nhất quán với Router::resolve_profile_api_key). Lookup riêng vì
+    // `get_secret` đã move vào `resolve_secrets_with`.
+    let get_secret_fallback = bean_settings::env_first_lookup(snapshot.as_ref());
+    let resolve_profile_key = |profile: &bean_types::config::LlmProfile| {
+        if profile.api_key_env.trim().is_empty() {
+            return None;
+        }
+        get_secret_fallback(&profile.api_key_env).map(SecretString::from)
+    };
+    let fallbacks = bean_llm::build_fallback_providers(&config.llm, &resolve_profile_key);
+    let provider = bean_llm::FailoverProvider::attach(primary, fallbacks);
     Ok((provider, web_search_api_key))
 }
 

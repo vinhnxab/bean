@@ -31,6 +31,15 @@ allowed_models = ["claude-sonnet-5"]
 api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "http://localhost:11434/v1"   # cho openai_compat / Ollama
 max_tokens = 4096
+# Profile dự phòng khi provider chính lỗi 429/5xx/mạng hoặc 401/403 (thử theo thứ tự).
+# Tên phải khớp profile trong [[llm.providers]] (hoặc "default"). Bỏ trống = không failover.
+# fallback_profiles = ["open-router"]
+# Model rẻ cho tác vụ phụ (compaction, reflection) — model mạnh giữ cho vòng chính.
+# Bỏ trống = dùng `model` ở trên cho mọi tác vụ.
+# small_model = "nvidia/nemotron-3.5-super-vl:free"
+# Prompt caching của Anthropic: đánh dấu system prompt là cache ephemeral, giảm mạnh
+# chi phí token lặp lại. Chỉ có tác dụng với provider `anthropic`.
+# prompt_cache = false
 
 [[llm.providers]]
 name = "open-router"

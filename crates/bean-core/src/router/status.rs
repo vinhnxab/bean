@@ -160,8 +160,11 @@ impl Router {
             candidate.model = model.clone();
             candidate
         };
-        let provider = factory(&candidate, api_key)
-            .map_err(|error| RouterError::LlmProvider(error.to_string()))?;
+        let provider = self.attach_llm_failover(
+            &candidate,
+            factory(&candidate, api_key)
+                .map_err(|error| RouterError::LlmProvider(error.to_string()))?,
+        );
         drop(config); // buông read-lock trước khi ghi state + swap.
 
         // 3) Persist TRƯỚC khi đổi RAM — lỗi đĩa ⇒ nguyên trạng cũ, config chưa đổi.

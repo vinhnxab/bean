@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::Result as AnyResult;
 use async_trait::async_trait;
 use bean_core::{Channel, Incoming, MemoryStore, Router, RouterDeps, RouterError};
-use bean_llm::FakeProvider;
+use bean_llm::{ChatRequest, FakeProvider, LlmError, LlmProvider};
 use bean_security::CapWorkspace;
 use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind, skill_tools};
 use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
@@ -57,6 +57,34 @@ impl Tool for Probe {
     }
 }
 
+/// Ghi lại model được yêu cầu qua `chat_with_model` — dùng để kiểm chứng
+/// `[llm].small_model` được dùng cho reflection.
+#[derive(Debug)]
+struct ModelRecordingProvider {
+    inner: FakeProvider,
+    models: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl LlmProvider for ModelRecordingProvider {
+    async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
+        self.inner.chat(req).await
+    }
+
+    async fn chat_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        model: &str,
+    ) -> Result<LlmResponse, LlmError> {
+        self.models.lock().unwrap().push(model.to_string());
+        self.inner.chat(req).await
+    }
+
+    fn name(&self) -> &'static str {
+        "recording"
+    }
+}
+
 fn proposal(name: &str, kind: &str) -> LlmResponse {
     LlmResponse::text_only(
         serde_json::json!({
@@ -90,6 +118,19 @@ async fn fixture(
     SkillCatalog,
     Arc<SentNotifications>,
 ) {
+    fixture_with_llm(Arc::new(FakeProvider::new(responses)), min_tool_calls, None).await
+}
+
+async fn fixture_with_llm(
+    llm: Arc<dyn LlmProvider>,
+    min_tool_calls: u32,
+    small_model: Option<String>,
+) -> (
+    tempfile::TempDir,
+    Arc<Router>,
+    SkillCatalog,
+    Arc<SentNotifications>,
+) {
     let temp = tempfile::tempdir().unwrap();
     let workspace_path = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace_path).unwrap();
@@ -110,6 +151,7 @@ async fn fixture(
     config.agent.allowed_users.push("test:user".into());
     config.learning.min_tool_calls = min_tool_calls;
     config.learning.proposal_interval_minutes = 60;
+    config.llm.small_model = small_model;
     let store = Arc::new(MemoryStore::new());
     let notifications = Arc::new(SentNotifications::default());
     let router = Arc::new(Router::new(RouterDeps {
@@ -119,7 +161,7 @@ async fn fixture(
         config,
         store,
         registry: Arc::new(registry),
-        llm: Arc::new(FakeProvider::new(responses)),
+        llm,
         audit: None,
         skills_index: catalog.index(),
         skills: Some(catalog.clone()),
@@ -190,6 +232,47 @@ async fn eligible_run_creates_reviewable_draft_but_does_not_activate_it() {
     run(&router, &format!("/approve {}", drafts[0].id)).await;
     assert!(catalog.get("release-checklist").is_ok());
     assert!(catalog.list_drafts().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reflection_uses_small_model_when_configured() {
+    let provider = Arc::new(ModelRecordingProvider {
+        inner: FakeProvider::new(vec![
+            tool_calls(5),
+            LlmResponse::text_only("đã hoàn tất"),
+            proposal("small-model-skill", "new"),
+        ]),
+        models: Mutex::new(vec![]),
+    });
+    let (_temp, router, catalog, notifications) =
+        fixture_with_llm(provider.clone(), 5, Some("m-re".into())).await;
+    run(&router, "làm checklist").await;
+    wait_notification(&notifications).await;
+    assert_eq!(catalog.list_drafts().unwrap().len(), 1);
+    // Hai lượt đầu của run chính dùng model mặc định; lượt reflection (cuối)
+    // phải dùng small_model. Block để guard không vượt ra ngoài (lint
+    // `await_holding_lock` phân tích lexical scope).
+    {
+        let models = provider.models.lock().unwrap();
+        assert_eq!(models.len(), 3);
+        assert_eq!(models.last().map(String::as_str), Some("m-re"));
+    }
+
+    // Không cấu hình small_model ⇒ reflection dùng model chính.
+    let provider = Arc::new(ModelRecordingProvider {
+        inner: FakeProvider::new(vec![tool_calls(5), LlmResponse::text_only("xong")]),
+        models: Mutex::new(vec![]),
+    });
+    let (_temp, router, _catalog, _notifications) =
+        fixture_with_llm(provider.clone(), 5, None).await;
+    run(&router, "lần này không có proposal").await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Reflection vẫn được thử (script cạn ⇒ lỗi best-effort) nhưng luôn dùng model chính.
+    {
+        let models = provider.models.lock().unwrap();
+        assert_eq!(models.len(), 3);
+        assert!(models.iter().all(|m| m == &Config::default().llm.model));
+    }
 }
 
 #[tokio::test]

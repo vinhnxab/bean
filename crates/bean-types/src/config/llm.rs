@@ -27,6 +27,19 @@ pub struct LlmConfig {
     /// Các profile khai báo tường minh qua `[[llm.providers]]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<LlmProfile>,
+    /// Chuỗi profile dự phòng khi provider chính lỗi tạm thời (429/5xx/mạng/timeout
+    /// sau khi hết 3 lần retry, hoặc 401/403 key hỏng). Thứ tự = thứ tự thử. Mỗi
+    /// tên phải trùng một `[[llm.providers]]` hoặc `"default"`. Rỗng ⇒ tắt failover.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_profiles: Vec<String>,
+    /// Model nhẹ cho tác vụ phụ (compaction, reflection) — `None` = dùng `model`.
+    /// Dùng để đỡ chi phí: model mạnh cho vòng chính, model rẻ cho việc máy móc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub small_model: Option<String>,
+    /// Bật prompt caching của Anthropic (breakpoint `cache_control` trên system
+    /// prompt — phần lặp lại mỗi lượt). Chỉ có tác dụng với provider `anthropic`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prompt_cache: bool,
     /// Profile đang hoạt động — trạng thái runtime, **không** nằm trong `bean.toml`.
     ///
     /// Được persist riêng ở `data.dir/llm-state.json` (module [`llm_state`]). Rỗng
@@ -226,6 +239,9 @@ impl Default for LlmConfig {
             base_url: None,
             max_tokens: 4096,
             providers: Vec::new(),
+            fallback_profiles: Vec::new(),
+            small_model: None,
+            prompt_cache: false,
             active_profile: DEFAULT_PROFILE_NAME.to_string(),
         }
     }

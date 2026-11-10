@@ -50,7 +50,8 @@ pub fn build_provider(
                 )));
             };
             let provider =
-                AnthropicProvider::new(config.model.clone(), key, config.base_url.as_deref())?;
+                AnthropicProvider::new(config.model.clone(), key, config.base_url.as_deref())?
+                    .with_prompt_cache(config.prompt_cache);
             Ok(Arc::new(provider))
         }
         LlmProviderKind::OpenAiCompat => {
@@ -63,4 +64,37 @@ pub fn build_provider(
             Ok(Arc::new(provider))
         }
     }
+}
+
+/// Dựng chuỗi provider dự phòng từ `[llm].fallback_profiles`.
+///
+/// Mỗi tên được resolve qua [`LlmConfig::profile`] (chấp nhận `"default"` = chính
+/// `[llm]` ngầm định). Profile không dựng được (thiếu key…) thì **bỏ qua và log
+/// cảnh báo** — dự phòng là tiện ích phòng khi sự cố, không được phép làm chết
+/// khởi động vì lỗi cấu hình của chính nó. Provider chính do caller tự dựng và
+/// gói bằng [`FailoverProvider::attach`].
+#[must_use]
+pub fn build_fallback_providers(
+    config: &LlmConfig,
+    resolve_profile_key: &dyn Fn(&bean_types::config::LlmProfile) -> Option<SecretString>,
+) -> Vec<Arc<dyn LlmProvider>> {
+    let mut out = Vec::new();
+    for name in &config.fallback_profiles {
+        let Some(profile) = config.profile(name) else {
+            // validate.rs đã chặn tên lạ lúc khởi động; nếu vẫn tới đây (config bị
+            // sửa tay runtime) thì bỏ qua thay vì chết.
+            tracing::warn!(profile = %name, "fallback profile không tồn tại — bỏ qua");
+            continue;
+        };
+        let mut candidate = config.clone();
+        candidate.apply_profile(&profile);
+        let key = resolve_profile_key(&profile);
+        match build_provider(&candidate, key) {
+            Ok(provider) => out.push(provider),
+            Err(error) => {
+                tracing::warn!(profile = %name, error = %error, "không dựng được fallback provider — bỏ qua");
+            }
+        }
+    }
+    out
 }

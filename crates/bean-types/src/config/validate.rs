@@ -226,6 +226,37 @@ impl Config {
             }
         }
 
+        // `[llm].fallback_profiles`: mỗi tên phải là profile khai báo (hoặc "default"),
+        // không trùng lặp — sai tên là lỗi cấu hình lúc khởi động, không phải lúc 3h sáng.
+        let mut seen_fallbacks = std::collections::HashSet::new();
+        for name in &self.llm.fallback_profiles {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(invalid("llm.fallback_profiles có tên rỗng"));
+            }
+            if name != DEFAULT_PROFILE_NAME
+                && !self
+                    .llm
+                    .providers
+                    .iter()
+                    .any(|profile| profile.name == name)
+            {
+                return Err(invalid(format!(
+                    "llm.fallback_profiles có tên `{name}` không trùng profile nào trong [[llm.providers]]"
+                )));
+            }
+            if !seen_fallbacks.insert(name.to_string()) {
+                return Err(invalid(format!(
+                    "llm.fallback_profiles có tên `{name}` bị trùng"
+                )));
+            }
+        }
+        if let Some(small) = self.llm.small_model.as_deref()
+            && small.trim().is_empty()
+        {
+            return Err(invalid("llm.small_model rỗng — bỏ hẳn hoặc đặt tên model"));
+        }
+
         if self.security.daily_token_budget == 0 {
             return Err(invalid("security.daily_token_budget phải > 0"));
         }

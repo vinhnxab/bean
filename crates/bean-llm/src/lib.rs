@@ -19,6 +19,7 @@
 mod anthropic;
 mod error;
 mod factory;
+mod failover;
 mod fake;
 mod http;
 mod openai_compat;
@@ -28,7 +29,8 @@ mod stream;
 
 pub use anthropic::AnthropicProvider;
 pub use error::LlmError;
-pub use factory::build_provider;
+pub use factory::{build_fallback_providers, build_provider};
+pub use failover::{FailoverProvider, should_failover};
 pub use fake::{FakeProvider, FakeScript};
 pub use http::truncate_body;
 pub use openai_compat::OpenAiCompatProvider;

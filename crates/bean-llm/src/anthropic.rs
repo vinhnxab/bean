@@ -40,6 +40,8 @@ pub struct AnthropicProvider {
     api_key: SecretString,
     model: String,
     client: reqwest::Client,
+    /// Prompt caching (cache_control trên system prompt) — `[llm].prompt_cache`.
+    cache_system: bool,
 }
 
 impl fmt::Debug for AnthropicProvider {
@@ -67,7 +69,16 @@ impl AnthropicProvider {
             api_key,
             model: model.into(),
             client: http::build_client(http::DEFAULT_TIMEOUT)?,
+            cache_system: false,
         })
+    }
+
+    /// Bật prompt caching trên system prompt (`[llm].prompt_cache = true`).
+    /// Chỉ đổi hình dạng body; tính phí do Anthropic quyết — đọc 0.1x, ghi 1.25x.
+    #[must_use]
+    pub fn with_prompt_cache(mut self, enabled: bool) -> Self {
+        self.cache_system = enabled;
+        self
     }
 
     async fn open_stream(&self, body: Value) -> Result<reqwest::Response, LlmError> {
@@ -139,7 +150,7 @@ impl LlmProvider for AnthropicProvider {
         req: ChatRequest<'_>,
         model: &str,
     ) -> Result<LlmResponse, LlmError> {
-        let body = build_request_body(&req, model)?;
+        let body = build_request_body(&req, model, self.cache_system)?;
         let endpoint = self.endpoint.clone();
         let client = self.client.clone();
         let api_key = self.api_key.clone();
@@ -186,7 +197,7 @@ impl LlmProvider for AnthropicProvider {
         req: ChatRequest<'_>,
         model: &str,
     ) -> Result<LlmStream, LlmError> {
-        let mut body = build_request_body(&req, model)?;
+        let mut body = build_request_body(&req, model, self.cache_system)?;
         body["stream"] = Value::Bool(true);
         let response = self.open_stream(body).await?;
         Ok(Box::pin(decode_sse(
@@ -371,7 +382,11 @@ fn stream_index(value: &Value) -> Result<usize, LlmError> {
 ///
 /// # Errors
 /// [`LlmError::Config`] khi message `tool` thiếu `tool_call_id` hoặc danh sách rỗng.
-pub fn build_request_body(req: &ChatRequest<'_>, model: &str) -> Result<Value, LlmError> {
+pub fn build_request_body(
+    req: &ChatRequest<'_>,
+    model: &str,
+    cache_system: bool,
+) -> Result<Value, LlmError> {
     let mut messages: Vec<Value> = Vec::new();
     let mut pending_tool_results: Vec<Value> = Vec::new();
 
@@ -441,7 +456,19 @@ pub fn build_request_body(req: &ChatRequest<'_>, model: &str) -> Result<Value, L
         "messages": messages,
     });
     if !req.system.is_empty() {
-        body["system"] = json!(req.system);
+        // Prompt caching: breakpoint `cache_control` trên system prompt — phần lớn
+        // nhất mỗi lượt (system + bộ nhớ + index skills). Anthropic tính đọc cache
+        // 0.1x giá input; tối thiểu 1024 token mới được cache (không đạt thì API
+        // vẫn nhận block thường, không lỗi).
+        body["system"] = if cache_system {
+            json!([{
+                "type": "text",
+                "text": req.system,
+                "cache_control": { "type": "ephemeral" },
+            }])
+        } else {
+            json!(req.system)
+        };
     }
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req.tools.iter().map(tool_to_wire).collect();

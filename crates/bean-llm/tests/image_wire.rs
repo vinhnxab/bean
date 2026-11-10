@@ -50,6 +50,7 @@ fn anthropic_puts_image_inside_tool_result_block() {
             max_tokens: 256,
         },
         "claude-test",
+        false,
     )
     .expect("dựng body được");
 
@@ -95,6 +96,7 @@ fn anthropic_keeps_plain_tool_result_as_string() {
             max_tokens: 256,
         },
         "claude-test",
+        false,
     )
     .expect("dựng body được");
     let msgs = body["messages"].as_array().expect("messages là mảng");
@@ -205,6 +207,7 @@ fn unknown_media_type_falls_back_instead_of_being_sent() {
             max_tokens: 256,
         },
         "claude-test",
+        false,
     )
     .expect("dựng body được");
     let raw = serde_json::to_string(&anthropic).expect("serialize được");

@@ -42,7 +42,7 @@ fn request<'a>(messages: &'a [Message], tools: &'a [ToolSpec]) -> ChatRequest<'a
 #[test]
 fn body_system_is_separate_field() {
     let messages = [Message::user("xin chào")];
-    let body = build_anthropic_body(&request(&messages, &[]), "claude-test").unwrap();
+    let body = build_anthropic_body(&request(&messages, &[]), "claude-test", false).unwrap();
     assert_eq!(body["model"], "claude-test");
     assert_eq!(body["max_tokens"], 256);
     assert_eq!(body["system"], "bạn là trợ lý");
@@ -53,6 +53,45 @@ fn body_system_is_separate_field() {
     assert_eq!(messages[0]["content"][0]["text"], "xin chào");
     // Không có tool → không có trường tools.
     assert!(body.get("tools").is_none());
+}
+
+#[test]
+fn body_prompt_cache_marks_system_ephemeral() {
+    let messages = [Message::user("xin chào")];
+    let body = build_anthropic_body(&request(&messages, &[]), "m", true).unwrap();
+    let system = body["system"]
+        .as_array()
+        .expect("bật cache ⇒ system phải là mảng block");
+    assert_eq!(system.len(), 1);
+    assert_eq!(system[0]["type"], "text");
+    assert_eq!(system[0]["text"], "bạn là trợ lý");
+    assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
+    // Tắt cache: system là string thuần — `body_system_is_separate_field` đã khẳng định.
+    let plain = build_anthropic_body(&request(&messages, &[]), "m", false).unwrap();
+    assert!(plain["system"].is_string());
+}
+
+#[tokio::test]
+async fn chat_with_prompt_cache_marks_system_ephemeral_on_the_wire() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .and(header("x-api-key", API_KEY))
+        .and(body_partial_json(json!({
+            "system": [{ "type": "text", "cache_control": { "type": "ephemeral" } }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [{ "type": "text", "text": "ok" }],
+            "stop_reason": "end_turn",
+            "usage": { "input_tokens": 3, "output_tokens": 1 }
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = provider_for(&server).with_prompt_cache(true);
+    let messages = [Message::user("xin chào")];
+    let resp = provider.chat(request(&messages, &[])).await.unwrap();
+    assert_eq!(resp.text.as_deref(), Some("ok"));
 }
 
 #[test]
@@ -67,7 +106,7 @@ fn body_assistant_with_tool_calls_then_grouped_tool_results() {
         Message::tool("t1", "nội dung a"),
         Message::tool_error("t2", "không tìm thấy"),
     ];
-    let body = build_anthropic_body(&request(&messages, &[]), "m").unwrap();
+    let body = build_anthropic_body(&request(&messages, &[]), "m", false).unwrap();
     let wire = body["messages"].as_array().unwrap();
     assert_eq!(
         wire.len(),
@@ -105,7 +144,7 @@ fn body_tools_use_input_schema_and_sanitize() {
         }),
     )];
     let messages = [Message::user("x")];
-    let body = build_anthropic_body(&request(&messages, &tools), "m").unwrap();
+    let body = build_anthropic_body(&request(&messages, &tools), "m", false).unwrap();
     let tool = &body["tools"][0];
     assert_eq!(tool["name"], "read_file");
     assert_eq!(tool["description"], "Đọc file");
@@ -123,11 +162,11 @@ fn body_broken_history_is_config_error() {
         Message::assistant(Some("gọi".into()), vec![]),
         Message::user("x"),
     ];
-    let ok = build_anthropic_body(&request(&broken, &[]), "m");
+    let ok = build_anthropic_body(&request(&broken, &[]), "m", false);
     assert!(ok.is_ok());
 
     let empty: [Message; 0] = [];
-    let err = build_anthropic_body(&request(&empty, &[]), "m").unwrap_err();
+    let err = build_anthropic_body(&request(&empty, &[]), "m", false).unwrap_err();
     assert!(matches!(err, LlmError::Config(_)), "{err:?}");
 }
 

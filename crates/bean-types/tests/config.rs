@@ -110,6 +110,19 @@ fn invalid_semantic_values_are_rejected() {
         ),
         ("[llm]\nmodel = \"\"\n", "llm.model"),
         ("[llm]\nmax_tokens = 0\n", "llm.max_tokens"),
+        ("[llm]\nsmall_model = \"\"\n", "llm.small_model"),
+        (
+            "[llm]\nfallback_profiles = [\"khong-ton-tai\"]\n",
+            "llm.fallback_profiles",
+        ),
+        (
+            "[llm]\nfallback_profiles = [\"\"]\n",
+            "llm.fallback_profiles",
+        ),
+        (
+            "[llm]\nfallback_profiles = [\"default\", \"default\"]\n",
+            "llm.fallback_profiles",
+        ),
         ("[learning]\nmin_tool_calls = 0\n", "min_tool_calls"),
         (
             "[learning]\nproposal_interval_minutes = 0\n",
@@ -146,6 +159,27 @@ fn invalid_semantic_values_are_rejected() {
             other => panic!("body {body} phải là Invalid, nhận {other:?}"),
         }
     }
+}
+
+#[test]
+fn fallback_profiles_referencing_existing_profiles_are_accepted() {
+    let body = "
+[llm]
+fallback_profiles = [\"default\", \"spare\"]
+small_model = \"m-re\"
+
+[[llm.providers]]
+name = \"spare\"
+provider = \"openai_compat\"
+model = \"m-2\"
+base_url = \"http://localhost:11434/v1\"
+api_key_env = \"\"
+";
+    let (dir, path) = write_config(body);
+    let config = Config::load(&path).unwrap();
+    assert_eq!(config.llm.fallback_profiles, ["default", "spare"]);
+    assert_eq!(config.llm.small_model.as_deref(), Some("m-re"));
+    drop(dir);
 }
 
 #[test]

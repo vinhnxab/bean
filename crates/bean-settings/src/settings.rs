@@ -279,6 +279,33 @@ pub static SETTINGS: &[SettingEntry] = &[
         desc_vi: "Tên biến môi trường chứa API key (giá trị key dùng `bean secret set`)",
         desc_en: "Env var name holding the API key (value via `bean secret set`)",
     },
+    SettingEntry {
+        path: "llm.fallback_profiles",
+        kind: SettingKind::StrList,
+        tier: SettingTier::B,
+        apply: SettingApply::Restart,
+        store: SettingStore::BeanToml,
+        desc_vi: "Profile dự phòng khi provider chính lỗi 429/5xx/401 (theo thứ tự khai báo)",
+        desc_en: "Fallback profiles tried when the primary provider fails (429/5xx/401)",
+    },
+    SettingEntry {
+        path: "llm.small_model",
+        kind: SettingKind::OptStr,
+        tier: SettingTier::B,
+        apply: SettingApply::Restart,
+        store: SettingStore::BeanToml,
+        desc_vi: "Model rẻ cho tác vụ phụ (compaction, reflection); bỏ trống = dùng model chính",
+        desc_en: "Cheap model for auxiliary tasks (compaction, reflection); empty = main model",
+    },
+    SettingEntry {
+        path: "llm.prompt_cache",
+        kind: SettingKind::Bool,
+        tier: SettingTier::B,
+        apply: SettingApply::Restart,
+        store: SettingStore::BeanToml,
+        desc_vi: "Bật prompt caching của Anthropic cho system prompt (giảm chi phí)",
+        desc_en: "Enable Anthropic prompt caching for the system prompt (cost reduction)",
+    },
     // ---- [tools] ----
     SettingEntry {
         path: "tools.enabled",
@@ -1453,6 +1480,9 @@ pub fn value_from_config(config: &Config, entry: &SettingEntry) -> String {
         "llm.base_url" => config.llm.base_url.clone().unwrap_or_default(),
         "llm.allowed_models" => format!("[{}]", config.llm.allowed_models.join(", ")),
         "llm.api_key_env" => config.llm.api_key_env.clone(),
+        "llm.fallback_profiles" => format!("[{}]", config.llm.fallback_profiles.join(", ")),
+        "llm.small_model" => config.llm.small_model.clone().unwrap_or_default(),
+        "llm.prompt_cache" => config.llm.prompt_cache.to_string(),
         // ---- [tools] ----
         "tools.enabled" => format!("[{}]", config.tools.enabled.join(", ")),
         "tools.web_search.provider" => {
