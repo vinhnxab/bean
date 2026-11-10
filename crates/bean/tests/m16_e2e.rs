@@ -274,3 +274,137 @@ async fn m16_login_chat_confirm_stop_reconnect_and_final() {
         .unwrap();
     assert!(status.success(), "SIGTERM phải shutdown êm: {status:?}");
 }
+
+/// (D25) Kế hoạch bước phải tới được **trên dây WebSocket** từ binary thật với
+/// kịch bản fake-llm gọi `update_plan`. Regress: whitelist biên TS thiếu case
+/// `plan` nuốt im lặng event — server phát đúng nhưng UI không bao giờ thấy;
+/// test này chốt phía server của sợi dây (phía client chốt ở ws.test.ts).
+#[tokio::test]
+async fn plan_events_reach_the_ws_wire_from_real_binary() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("data");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let addr = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let origin = format!("http://{addr}");
+    let mut config = Config::default();
+    config.data.dir = data.clone();
+    config.agent.workspace = workspace;
+    config.agent.allowed_users = vec!["web:admin".into()];
+    config.tools.enabled = vec!["files".into()];
+    config.learning.enabled = false;
+    config.telegram.enabled = false;
+    config.web.public_origin = origin.clone();
+    config.web.bind = addr;
+    set_password(&data, PASSWORD, None).unwrap();
+    let config_path = temp.path().join("bean.toml");
+    std::fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+    let script_path = temp.path().join("fake.json");
+    let script = json!({ "responses": [
+        {
+            "tool_calls": [{ "id": "p1", "name": "update_plan", "args": { "steps": [
+                { "title": "Xem workspace", "status": "done" },
+                { "title": "Tạo ghi chú", "status": "in_progress" },
+                { "title": "Đọc lại", "status": "pending" }
+            ] } }],
+            "stop": "tool_use"
+        },
+        {
+            "tool_calls": [{ "id": "p2", "name": "list_dir", "args": {} }],
+            "stop": "tool_use"
+        },
+        {
+            "tool_calls": [{ "id": "p3", "name": "update_plan", "args": { "steps": [
+                { "title": "Xem workspace", "status": "done" },
+                { "title": "Tạo ghi chú", "status": "done" },
+                { "title": "Đọc lại", "status": "done" }
+            ] } }],
+            "stop": "tool_use"
+        },
+        { "text": "hoàn thành cả ba bước", "stop": "end_turn" }
+    ] });
+    std::fs::write(&script_path, script.to_string()).unwrap();
+    let (child, addr) = start_server(&config_path, &script_path, addr).await;
+    let client = reqwest::Client::new();
+    let cookie = login(&client, &origin).await;
+    let response = client
+        .post(format!("{origin}/api/sessions"))
+        .header(ORIGIN, &origin)
+        .header(CONTENT_TYPE, "application/json")
+        .header("Cookie", &cookie)
+        .body(json!({ "title": "Plan E2E" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let session: Value = response.json().await.unwrap();
+    let session_id = session["id"].as_i64().unwrap();
+    let mut socket = connect_ws(addr, &origin, &cookie).await;
+    assert!(matches!(
+        next_event(&mut socket).await,
+        ServerMsg::Sync { .. }
+    ));
+    send(
+        &mut socket,
+        json!({ "type": "start", "session_id": session_id, "text": "làm kế hoạch" }),
+    )
+    .await;
+
+    // Gom mọi frame plan cho tới Final: kỳ vọng 2 snapshot đúng nội dung.
+    let mut plans: Vec<Vec<(String, String)>> = Vec::new();
+    loop {
+        match next_event(&mut socket).await {
+            ServerMsg::Plan { steps, .. } => {
+                plans.push(
+                    steps
+                        .into_iter()
+                        .map(|step| {
+                            let status = match step.status {
+                                bean_web::PlanStepStatusDto::Pending => "pending",
+                                bean_web::PlanStepStatusDto::InProgress => "in_progress",
+                                bean_web::PlanStepStatusDto::Done => "done",
+                            };
+                            (step.title, status.to_string())
+                        })
+                        .collect(),
+                );
+            }
+            ServerMsg::Final { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        plans.len(),
+        2,
+        "phải nhận đúng 2 frame plan trên dây, nhận được: {plans:?}"
+    );
+    assert_eq!(
+        plans[0],
+        vec![
+            ("Xem workspace".into(), "done".into()),
+            ("Tạo ghi chú".into(), "in_progress".into()),
+            ("Đọc lại".into(), "pending".into())
+        ]
+    );
+    assert_eq!(
+        plans[1],
+        vec![
+            ("Xem workspace".into(), "done".into()),
+            ("Tạo ghi chú".into(), "done".into()),
+            ("Đọc lại".into(), "done".into())
+        ]
+    );
+
+    let pid = child.id().unwrap().to_string();
+    let _ = tokio::process::Command::new("kill")
+        .args(["-TERM", pid.as_str()])
+        .status()
+        .await
+        .unwrap()
+        .success();
+    drop(socket);
+}
