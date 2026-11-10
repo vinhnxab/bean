@@ -10,6 +10,25 @@ fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_bean")
 }
 
+/// Config tạm với `data.dir` riêng cho một lần chạy binary — giữ `TempDir` sống tới
+/// khi caller drop. Trả `None` khi caller đã tự truyền `--config` (tự cách ly).
+fn isolate_data_dir(args: &[&str]) -> Option<(tempfile::TempDir, std::path::PathBuf)> {
+    if args
+        .iter()
+        .any(|arg| *arg == "--config" || arg.starts_with("--config="))
+    {
+        return None;
+    }
+    let dir = tempfile::tempdir().expect("tạo thư mục tạm thất bại");
+    let config_path = dir.path().join("bean.toml");
+    std::fs::write(
+        &config_path,
+        format!("[data]\ndir = \"{}\"\n", dir.path().join("data").display()),
+    )
+    .expect("ghi cấu hình tạm thất bại");
+    Some((dir, config_path))
+}
+
 /// Chạy binary với stdin cho trước, trả về (mã thoát, stdout, stderr).
 fn run_with_stdin(args: &[&str], stdin: &str) -> (i32, String, String) {
     run_with_stdin_env(args, stdin, &[])
@@ -18,7 +37,15 @@ fn run_with_stdin(args: &[&str], stdin: &str) -> (i32, String, String) {
 /// Như `run_with_stdin`, kèm việc **xoá** biến môi trường (phòng khi máy test có sẵn
 /// `ANTHROPIC_API_KEY` — test phải độc lập với môi trường đó).
 fn run_with_stdin_env(args: &[&str], stdin: &str, env_remove: &[&str]) -> (i32, String, String) {
+    // Mỗi lần chạy binary phải có `data.dir` riêng: không truyền `--config` thì bean
+    // dùng `~/.bean` thật — các test chạy song song cùng mở một DB gây flake
+    // "database is locked" (CI 2026-11-10, known-issues mục 4) và ghi dữ liệu test
+    // vào DB production khi chạy test trên máy đã cài Bean.
+    let isolated = isolate_data_dir(args);
     let mut command = Command::new(bin());
+    if let Some((_, config_path)) = &isolated {
+        command.arg("--config").arg(config_path);
+    }
     command.args(args);
     for variable in env_remove {
         command.env_remove(variable);
