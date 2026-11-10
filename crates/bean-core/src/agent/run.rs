@@ -1,7 +1,9 @@
 //! Vòng lặp chính: [`Agent::run`] gom text/tool-call từng bước, chống lặp,
 //! giới hạn ngân sách và kết thúc lượt bằng thông báo (`finish_with_notice`).
 //! Kèm [`StreamResponseBuilder`] lắp ráp deltas khi provider streaming.
+//! Phân loại/nhóm tool song song nằm ở `parallel`.
 
+use super::parallel::{ToolSegment, partition_tool_calls};
 use super::*;
 
 #[derive(Debug, Default)]
@@ -118,7 +120,7 @@ impl<'a> Agent<'a> {
         append_run_message(
             store,
             session,
-            &mut state.transcript,
+            &state.transcript,
             Message::user(turn_input.clone()),
         )
         .await?;
@@ -128,11 +130,11 @@ impl<'a> Agent<'a> {
                 return finish_with_notice(
                     store,
                     session,
-                    state.transcript,
+                    state.take_transcript().await,
                     budget_notice(used, limit),
                     EndReason::BudgetExceeded,
                     state.tool_call_count,
-                    state.loaded_skills,
+                    state.loaded_skills_snapshot().await,
                 )
                 .await;
             }
@@ -200,11 +202,11 @@ impl<'a> Agent<'a> {
                         return finish_with_notice(
                             store,
                             session,
-                            state.transcript,
+                            state.take_transcript().await,
                             budget_notice(used, limit),
                             EndReason::BudgetExceeded,
                             state.tool_call_count,
-                            state.loaded_skills,
+                            state.loaded_skills_snapshot().await,
                         )
                         .await;
                     }
@@ -254,11 +256,11 @@ impl<'a> Agent<'a> {
                 return finish_with_notice(
                     store,
                     session,
-                    state.transcript,
+                    state.take_transcript().await,
                     budget_notice(used, role_budget),
                     EndReason::BudgetExceeded,
                     state.tool_call_count,
-                    state.loaded_skills,
+                    state.loaded_skills_snapshot().await,
                 )
                 .await;
             }
@@ -278,19 +280,18 @@ impl<'a> Agent<'a> {
                 return finish_with_notice(
                     store,
                     session,
-                    state.transcript,
+                    state.take_transcript().await,
                     empty_response_notice(resp.stop),
                     EndReason::EmptyResponse,
                     state.tool_call_count,
-                    state.loaded_skills,
+                    state.loaded_skills_snapshot().await,
                 )
                 .await;
             }
 
             let assistant_message = Message::from_response(&resp);
             let message_id =
-                append_run_message(store, session, &mut state.transcript, assistant_message)
-                    .await?;
+                append_run_message(store, session, &state.transcript, assistant_message).await?;
 
             if is_final {
                 return Ok(RunOutcome {
@@ -298,8 +299,8 @@ impl<'a> Agent<'a> {
                     message_id: Some(message_id),
                     ended: EndReason::Final,
                     tool_call_count: state.tool_call_count,
-                    loaded_skills: state.loaded_skills.into_iter().collect(),
-                    transcript: state.transcript,
+                    loaded_skills: state.loaded_skills_snapshot().await.into_iter().collect(),
+                    transcript: state.take_transcript().await,
                     audio_base64: None,
                     mime: None,
                 });
@@ -307,16 +308,33 @@ impl<'a> Agent<'a> {
             // Text "suy nghĩ" của model khi vẫn còn gọi tool đã được phát theo từng delta
             // trong vòng stream; không phát lại toàn bộ để tránh UI nhân đôi văn bản.
 
-            state.repeated_tool = None;
-            for call in resp.tool_calls {
-                state.tool_call_count = state.tool_call_count.saturating_add(1);
-                self.run_tool_call(&turn, &mut state, session_policy, &call)
-                    .await?;
+            *state.repeated_tool.lock().await = None;
+            // (Lộ trình mục 5a) Các tool `Safe` **liên tiếp** chạy song song (chặn
+            // trần `MAX_PARALLEL_TOOL_CALLS`); tool `Confirm`/`Dangerous` luôn tuần tự
+            // — mỗi xác nhận phải hiện riêng, hai thẻ confirm song song là UX tệ và
+            // càng nhiều đường ghi trạng thái càng khó kiểm soát.
+            for segment in
+                partition_tool_calls(&resp.tool_calls, registry, config.agent.parallel_safe_tools)
+            {
+                match segment {
+                    ToolSegment::Single(call) => {
+                        state.tool_call_count = state.tool_call_count.saturating_add(1);
+                        self.run_tool_call(&turn, &state, session_policy, call)
+                            .await?;
+                    }
+                    ToolSegment::Parallel(calls) => {
+                        for _ in &calls {
+                            state.tool_call_count = state.tool_call_count.saturating_add(1);
+                        }
+                        self.run_tool_group(&turn, &state, session_policy, &calls)
+                            .await?;
+                    }
+                }
             }
             if cancel.is_cancelled() {
                 return Err(AgentError::Cancelled);
             }
-            if let Some(tool) = state.repeated_tool.take() {
+            if let Some(tool) = state.repeated_tool.lock().await.take() {
                 return Err(AgentError::RepeatFailure(tool));
             }
         }
@@ -328,11 +346,11 @@ impl<'a> Agent<'a> {
         finish_with_notice(
             store,
             session,
-            state.transcript,
+            state.take_transcript().await,
             text,
             EndReason::MaxSteps,
             state.tool_call_count,
-            state.loaded_skills,
+            state.loaded_skills_snapshot().await,
         )
         .await
     }
@@ -347,13 +365,11 @@ async fn finish_with_notice(
     tool_call_count: usize,
     loaded_skills: BTreeSet<String>,
 ) -> Result<RunOutcome, AgentError> {
-    let message_id = append_run_message(
-        store,
-        session,
-        &mut transcript,
-        Message::assistant(Some(text.clone()), Vec::new()),
-    )
-    .await?;
+    // finish_with_notice sở hữu Vec riêng (đã take từ TurnState) nên ghi trực tiếp;
+    // helper `append_run_message` chỉ nhận khoá transcript của TurnState.
+    let message = Message::assistant(Some(text.clone()), Vec::new());
+    let message_id = store.append(session, message.clone()).await?;
+    transcript.push(message);
     Ok(RunOutcome {
         text,
         message_id: Some(message_id),

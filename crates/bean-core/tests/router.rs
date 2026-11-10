@@ -639,7 +639,14 @@ async fn cancel_keeps_every_tool_call_paired() {
             break;
         }
     }
-    assert_eq!(probe.calls.load(Ordering::SeqCst), 1);
+    // (Lộ trình mục 5a) Cả hai tool `Safe` được dispatch song song nên đều đã bắt đầu
+    // trước khi huỷ tới — số lần chạy có thể là 1 hoặc 2. Bất biến quan trọng là phía
+    // dưới: MỌI tool_call đều có result và lịch sử không hỏng cặp.
+    assert!(
+        (1..=2).contains(&probe.calls.load(Ordering::SeqCst)),
+        "probe.calls = {}",
+        probe.calls.load(Ordering::SeqCst)
+    );
 
     let session = store
         .ensure_session_for_user("cli", "local", "cli:local", "")

@@ -801,3 +801,24 @@ tar-slip bằng header ustar thô, ghi đè binary atomic, artifact theo nền t
 (gồm 6 test thẻ Update: không gọi lúc mount, available/up-to-date/noArtifact,
 lỗi 502, `notes` chứa `<script>` render nguyên văn dạng text) + `pnpm biome
 check` + `pnpm tsc --noEmit` + `pnpm build` xanh.
+
+## 24. Chạy tool song song cho nhóm Safe (D24.x — 2026-11-10, lộ trình chất lượng mục 5a)
+
+Vòng lặp agent trước đây thực thi tool call **tuần tự** dù model phát nhiều call
+trong một lượt. Với các tool đọc (`read_file`, `grep`, `glob`, `web_fetch`…)
+điều đó chỉ làm chậm. Bật song song cho đúng nhóm an toàn, giữ chặt phần còn lại.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D24.1 | Chỉ tool tính ra `Risk::Safe` **liên tiếp** trong cùng lượt model được chạy song song (`partition_tool_calls`); tool `Confirm`/`Dangerous` luôn tuần tự, không xen vào giữa nhóm | Confirm cần người dùng duyệt từng thẻ — hai thẻ xác nhận song song là UX tệ; xen một call ghi vào giữa nhóm đọc phá giả định "call trước đã xong" của model khi viết call sau | Batch [safe, confirm, safe] chạy: 2 safe song song → confirm → 1 safe, đúng thứ tự tương đối |
+| D24.2 | Trần cứng `MAX_PARALLEL_TOOL_CALLS = 4` bằng semaphore trong nhóm | Model có thể phát cả chục call; không chặn sẽ dồn hàng chục đọc file/grep lên máy cùng lúc | Trần cố định (chưa cấu hình được) — đủ cho máy cá nhân |
+| D24.3 | Trạng thái chung của lượt (`transcript`, chống lặp, `loaded_skills`, `repeated_tool`) chuyển sang `Arc<tokio::sync::Mutex>`; găng RBAC/runtime-toggle/chống-lặp vẫn chạy tuần tự theo thứ tự call; `tool_call_count` chỉ do vòng lặp ghi | Giữ nguyên 100% luồng kiểm soát của `run_tool_call` thay vì tái cấu trúc 20 đường return; khoá chỉ giữ cho phần ghi đồng bộ, không giữ qua `.await` | Thứ tự hoàn tất trong nhóm không xác định — xử lý bằng D24.4 và kiểm thử theo-id thay vì theo-vị-trí |
+| D24.4 | Context builder chuẩn hoá thứ tự tool result theo `tool_calls` của assistant (`context::stabilize_tool_order`) trước khi cắt ngân sách; result có id lạ giữ nguyên vị trí | DB ghi theo thứ tự hoàn tất; Anthropic ghép các `tool_result` vào một message `user` và khuyến nghị thứ tự khớp `tool_use` | UI lịch sử (REST) vẫn hiện thứ tự DB — thẻ tool tự ánh xạ theo id nên không ảnh hưởng |
+| D24.5 | Lượt bị **huỷ** không cộng vào sổ chống lặp và không nhận gợi ý "thất bại 2 lần" | Huỷ là quyết định của người dùng, không phải lỗi của model; hai call giống nhau bị huỷ song song sẽ bị đếm thành 2 thất bại → gợi ý sai gắn vào result huỷ (bug thật bắt được trong test cancel) | Timeout vẫn tính là thất bại (giữ hành vi cũ — tool không xong việc dù không do model) |
+| D24.6 | Kill-switch `[agent].parallel_safe_tools = true` (mặc định bật), settings tầng A | Hành vi vòng lặp thay đổi lần đầu sau M3 — cần nút tắt không cần build lại | Khoá declared Hot như các khoá `[agent]` khác nhưng hiệu lực ở lần restart kế (agent đọc snapshot config lúc khởi động — nhất quán với `agent.max_steps`) |
+
+**Kiểm chứng:** `cargo test -p bean-core` 171 test (thêm: đo `max_active` chứng
+minh 2 Safe chạy đồng thời, kill-switch chạy tuần tự, batch trộn Safe+Confirm
+chỉ hỏi 1 xác nhận, 4 test phân nhóm, 3 test chuẩn hoá thứ tự; sửa test cancel
+theo ngữ nghĩa mới) + `make check` xanh toàn phần. Flake `bean-scan` "Text file
+busy" tái diễn 1 lần trong `make check` — đã ghi known-issues mục 4.

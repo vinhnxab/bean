@@ -254,6 +254,90 @@ fn probe_call(id: &str) -> ToolCall {
     ToolCall::new(id, "probe", serde_json::json!({}))
 }
 
+fn named_call(id: &str, name: &str) -> ToolCall {
+    ToolCall::new(id, name, serde_json::json!({}))
+}
+
+/// Tool đo song song (lộ trình mục 5a): đếm số call đang chạy đồng thời qua
+/// `active`/`max_active` — chạy thật tuần tự thì `max_active` luôn là 1.
+struct ConcurrencyTool {
+    name: &'static str,
+    risk: Risk,
+    delay: Duration,
+    active: AtomicUsize,
+    max_active: AtomicUsize,
+    calls: AtomicUsize,
+}
+
+impl ConcurrencyTool {
+    fn safe(name: &'static str, delay: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            name,
+            risk: Risk::Safe,
+            delay,
+            active: AtomicUsize::new(0),
+            max_active: AtomicUsize::new(0),
+            calls: AtomicUsize::new(0),
+        })
+    }
+
+    fn confirm(name: &'static str) -> Arc<Self> {
+        Arc::new(Self {
+            name,
+            risk: Risk::Confirm,
+            delay: Duration::ZERO,
+            active: AtomicUsize::new(0),
+            max_active: AtomicUsize::new(0),
+            calls: AtomicUsize::new(0),
+        })
+    }
+
+    fn max_active(&self) -> usize {
+        self.max_active.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl Tool for ConcurrencyTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::new(
+            self.name,
+            "tool đo song song cho test",
+            serde_json::json!({"type": "object"}),
+        )
+    }
+
+    fn risk(&self, _args: &serde_json::Value) -> Risk {
+        self.risk
+    }
+
+    async fn call(&self, _ctx: &ToolCtx, _args: serde_json::Value) -> Result<String, ToolError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_active.fetch_max(now, Ordering::SeqCst);
+        tokio::time::sleep(self.delay).await;
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok("ok-parallel".into())
+    }
+}
+
+impl std::fmt::Debug for ConcurrencyTool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ConcurrencyTool")
+    }
+}
+
+/// Registry nhiều tool + workspace tạm (bản đa-tool của `registry_with`).
+fn registry_with_tools(tools: Vec<Arc<dyn Tool>>) -> (tempfile::TempDir, ToolRegistry) {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = Arc::new(CapWorkspace::open(dir.path().to_path_buf()).unwrap());
+    let mut reg = ToolRegistry::with_workspace(ws);
+    for tool in tools {
+        reg.register(tool).unwrap();
+    }
+    (dir, reg)
+}
+
 /// Registry + workspace tạm. Trả về `TempDir` để test giữ thư mục sống đủ lâu
 /// (khi `TempDir` bị drop, thư mục tạm bị xoá).
 fn registry_with(tool: Arc<dyn Tool>) -> (tempfile::TempDir, ToolRegistry) {
@@ -931,4 +1015,117 @@ async fn system_prompt_is_sent_once_via_system_field() {
     );
     assert_eq!(first.roles.first().copied(), Some(Role::User));
     assert_eq!(first.first_text.as_deref(), Some("xin chào"));
+}
+
+/// (Lộ trình mục 5a) Hai tool `Safe` liên tiếp trong cùng lượt model chạy **song song**:
+/// đo bằng số call đồng thời tối đa, và mọi result đều được ghi đủ cặp.
+#[tokio::test]
+async fn parallel_safe_tools_run_concurrently() {
+    let safe = ConcurrencyTool::safe("probe", Duration::from_millis(150));
+    let (_ws, reg) = registry_with_tools(vec![safe.clone() as Arc<dyn Tool>]);
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let out = turn(
+        vec![
+            tool_resp(vec![probe_call("p1"), probe_call("p2")]),
+            text_resp("xong"),
+        ],
+        &reg,
+        &io,
+        &store,
+        &cfg(5),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "xong");
+    assert_eq!(safe.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        safe.max_active(),
+        2,
+        "hai tool Safe liên tiếp phải chạy đồng thời"
+    );
+    let results = tool_messages(&store).await;
+    assert_eq!(results.len(), 2, "mọi tool call phải có result");
+    let ids: Vec<String> = results
+        .iter()
+        .filter_map(|m| m.tool_call_id.clone())
+        .collect();
+    assert!(ids.contains(&"p1".to_string()) && ids.contains(&"p2".to_string()));
+}
+
+/// Tắt `agent.parallel_safe_tools` ⇒ hoàn toàn tuần tự như trước (kill-switch).
+#[tokio::test]
+async fn parallel_safe_tools_disabled_runs_sequentially() {
+    let safe = ConcurrencyTool::safe("probe", Duration::from_millis(120));
+    let (_ws, reg) = registry_with_tools(vec![safe.clone() as Arc<dyn Tool>]);
+    let io = TestIo::new(None);
+    let store = MemoryStore::new();
+    let mut config = cfg(5);
+    config.agent.parallel_safe_tools = false;
+    turn(
+        vec![
+            tool_resp(vec![probe_call("p1"), probe_call("p2")]),
+            text_resp("xong"),
+        ],
+        &reg,
+        &io,
+        &store,
+        &config,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        safe.max_active(),
+        1,
+        "tắt cấu hình ⇒ không bao giờ chạy đồng thời"
+    );
+}
+
+/// Nhóm song song chỉ gồm tool `Safe` **liên tiếp**: [safe, safe, confirm] chạy
+/// hai tool Safe đồng thời rồi tool Confirm tuần tự — chỉ tool Confirm được hỏi,
+/// và từ chối vẫn ghi result lỗi đúng cặp.
+#[tokio::test]
+async fn parallel_group_then_confirm_stays_sequential() {
+    let safe = ConcurrencyTool::safe("probe", Duration::from_millis(120));
+    let gate = ConcurrencyTool::confirm("gate");
+    let (_ws, reg) = registry_with_tools(vec![
+        safe.clone() as Arc<dyn Tool>,
+        gate.clone() as Arc<dyn Tool>,
+    ]);
+    // Deny ngay: tool Confirm phải bị chặn mà không chờ timeout.
+    let io = TestIo::new(Some(Decision::Deny));
+    let store = MemoryStore::new();
+    turn(
+        vec![
+            tool_resp(vec![
+                probe_call("p1"),
+                probe_call("p2"),
+                named_call("g1", "gate"),
+            ]),
+            text_resp("xong"),
+        ],
+        &reg,
+        &io,
+        &store,
+        &cfg(5),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        io.confirm_count.load(Ordering::SeqCst),
+        1,
+        "chỉ tool Confirm được hỏi xác nhận"
+    );
+    assert_eq!(
+        safe.max_active(),
+        2,
+        "hai tool Safe vẫn chạy đồng thời trước tool Confirm"
+    );
+    let results = tool_messages(&store).await;
+    assert_eq!(results.len(), 3, "mọi tool call phải có result");
+    let denied = results
+        .iter()
+        .find(|m| m.tool_call_id.as_deref() == Some("g1"))
+        .unwrap();
+    assert!(denied.is_error, "bị từ chối ⇒ result là lỗi");
 }

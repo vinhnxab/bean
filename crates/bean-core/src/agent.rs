@@ -31,9 +31,14 @@ use crate::run_io::{Decision, RunIo};
 const MAX_TOOL_OUTPUT_CHARS: usize = 20_000;
 const CANCELLED_MSG: &str = "[bị người dùng huỷ]";
 const CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
+/// Trần số tool `Safe` chạy đồng thời trong một nhóm song song — model có thể
+/// phát cả chục call trong một lượt; không chặn sẽ dồn hàng chục đọc file/grep
+/// lên máy cùng lúc (lộ trình mục 5a).
+const MAX_PARALLEL_TOOL_CALLS: usize = 4;
 type RepeatKey = (String, String);
 
 mod error;
+mod parallel;
 mod run;
 mod tool_call;
 
@@ -140,24 +145,49 @@ pub struct Turn<'a> {
 /// Tách riêng khỏi [`Agent`] (bất biến theo tiến trình) và [`Turn`] (đầu vào của lượt)
 /// để vòng lặp không phải truyền tay hàng chục tham số `&mut`. Đây cũng là ranh giới
 /// tự nhiên để rút [`Agent::run_tool_call`] khỏi [`Agent::run`] mà không đụng logic.
+///
+/// # Chạy song song (lộ trình mục 5a)
+///
+/// Nhóm tool `Safe` liên tiếp chạy đồng thời nên các phần trạng thái dùng chung nằm
+/// sau `Arc<tokio::sync::Mutex>` (khoá chờ async, không poisoning): từng task tool
+/// cầm `&TurnState` bất biến và tự đồng bộ hoá. Đoạn găng (RBAC, runtime toggle,
+/// chống lặp) vẫn chạy tuần tự theo thứ tự call trong response; các lần ghi sau
+/// thực thi (đếm thất bại, cờ untrusted, transcript) tới khi từng task hoàn tất —
+/// thứ tự hoàn tất trong nhóm song song là không xác định, nhưng **mọi** kết quả
+/// đều được ghi và context builder chuẩn hoá lại thứ tự tool result theo thứ tự
+/// `tool_calls` của assistant (xem `context::stabilize_tool_order`).
 #[derive(Debug, Default)]
 struct TurnState {
     /// Lịch sử của lượt (mirror DB; đồng thời là nguồn sự thật cho `RunOutcome`).
-    transcript: Vec<Message>,
+    transcript: Arc<tokio::sync::Mutex<Vec<Message>>>,
     /// Tổng số tool call đã chạy trong lượt (báo cáo + chống lặp).
+    ///
+    /// Chỉ [`Agent::run`] ghi (tuần tự trước khi chạy từng call/nhóm) nên không cần khoá.
     tool_call_count: usize,
     /// Skill đã nạp qua `load_skill` trong lượt này (đưa vào `RunOutcome`).
-    loaded_skills: BTreeSet<String>,
+    loaded_skills: Arc<tokio::sync::Mutex<BTreeSet<String>>>,
     /// Số lần `(tool, args)` thất bại liên tiếp (chống lặp, agents.md mục 6).
-    failure_counts: HashMap<RepeatKey, u32>,
+    failure_counts: Arc<tokio::sync::Mutex<HashMap<RepeatKey, u32>>>,
     /// `(tool, args)` vừa thất bại — cờ "đang lặp ngay" cho lần gọi kế tiếp.
-    consecutive_same_failure: Option<RepeatKey>,
+    consecutive_same_failure: Arc<tokio::sync::Mutex<Option<RepeatKey>>>,
     /// Cờ "lượt này đã đọc nội dung không tin cậy" (mục 15.4), dùng chung cho **mọi**
     /// tool trong lượt: một tool result chứa `<untrusted_content>` ⇒ mọi tool `Confirm`
     /// trở lên phải hỏi lại.
     untrusted_seen: Arc<AtomicBool>,
     /// Tool vừa thất bại 2 lần giống hệt nhau ⇒ kết thúc run bằng [`AgentError::RepeatFailure`].
-    repeated_tool: Option<String>,
+    repeated_tool: Arc<tokio::sync::Mutex<Option<String>>>,
+}
+
+impl TurnState {
+    /// Rút toàn bộ transcript ra khi kết thúc lượt — mirror không dùng nữa.
+    async fn take_transcript(&self) -> Vec<Message> {
+        std::mem::take(&mut *self.transcript.lock().await)
+    }
+
+    /// Snapshot skill đã nạp trong lượt (kết thúc lượt).
+    async fn loaded_skills_snapshot(&self) -> BTreeSet<String> {
+        self.loaded_skills.lock().await.clone()
+    }
 }
 
 /// Lý do run kết thúc bình thường.
@@ -246,10 +276,13 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
 async fn append_run_message(
     store: &dyn Store,
     session: bean_types::SessionId,
-    transcript: &mut Vec<Message>,
+    transcript: &tokio::sync::Mutex<Vec<Message>>,
     message: Message,
 ) -> Result<i64, crate::store::StoreError> {
+    // Ghi DB **trước** rồi mới push mirror: khoá chỉ giữ cho lần push đồng bộ,
+    // không giữ qua `.await` (mục 22.7). Thứ tự ghi DB của các tool result chạy
+    // song song là thứ tự hoàn tất; context builder chuẩn hoá lại theo tool_use.
     let id = store.append(session, message.clone()).await?;
-    transcript.push(message);
+    transcript.lock().await.push(message);
     Ok(id)
 }

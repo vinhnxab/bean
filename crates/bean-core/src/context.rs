@@ -16,7 +16,7 @@ use bean_memory::safe_cut::extend_start_backwards;
 use bean_tools::WorkspaceFs;
 use bean_tools::untrusted::{MAX_WRAPPED_OUTPUT_CHARS, wrap_bounded};
 use bean_types::config::Config;
-use bean_types::{Message, SessionId};
+use bean_types::{Message, Role, SessionId};
 
 use crate::store::{Store, StoreError};
 
@@ -195,7 +195,7 @@ async fn build_full(
     }
 
     let history = store.history(session, None, 0).await?;
-    let messages = trim_history(&history, options.context_budget);
+    let messages = trim_history(&stabilize_tool_order(&history), options.context_budget);
     Ok(TurnContext {
         system,
         messages,
@@ -231,6 +231,52 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 ///
 /// M26: ngân sách tính bằng **token** qua [`message_token_cost`] thay vì số ký tự
 /// thô, để ảnh dùng định phí riêng thay vì bị tính theo `chars/4` của base64.
+/// Sắp lại thứ tự các tool result chạy **song song** theo thứ tự `tool_calls` của
+/// assistant trước đó (lộ trình mục 5a).
+///
+/// Một nhóm tool chạy đồng thời ghi DB theo thứ tự hoàn tất — không xác định — nên
+/// message `Tool` trong lịch sử có thể lộn xộn. Provider (Anthropic ghép chúng thành
+/// một message `user` chứa các block `tool_result`) ghép theo thứ tự lịch sử, và
+/// Anthropic khuyến khích thứ tự `tool_result` khớp thứ tự `tool_use`. Chuẩn hoá ở
+/// một điểm duy nhất trước khi cắt ngân sách để mọi provider cùng hưởng.
+///
+/// Result có id không khớp `tool_calls` nào (history hỏng cặp, đã bị cắt lêch) giữ
+/// nguyên vị trí — không đánh mất message vì lý do sắp xếp.
+#[must_use]
+fn stabilize_tool_order(history: &[Message]) -> Vec<Message> {
+    let mut out = Vec::with_capacity(history.len());
+    let mut index = 0;
+    while index < history.len() {
+        let message = &history[index];
+        if message.role != Role::Assistant || message.tool_calls.len() < 2 {
+            out.push(message.clone());
+            index += 1;
+            continue;
+        }
+        // Đoạn các tool result ngay sau assistant: đưa chúng về thứ tự tool_calls.
+        let mut block_end = index + 1;
+        while block_end < history.len() && history[block_end].role == Role::Tool {
+            block_end += 1;
+        }
+        if block_end == index + 1 {
+            out.push(message.clone());
+            continue;
+        }
+        out.push(message.clone());
+        let expected: Vec<&str> = message.tool_calls.iter().map(|c| c.id.as_str()).collect();
+        let mut block: Vec<&Message> = history[index + 1..block_end].iter().collect();
+        block.sort_by_key(|result| {
+            expected
+                .iter()
+                .position(|id| Some(*id) == result.tool_call_id.as_deref())
+                .unwrap_or(usize::MAX)
+        });
+        out.extend(block.into_iter().cloned());
+        index = block_end;
+    }
+    out
+}
+
 pub fn trim_history(history: &[Message], budget_tokens: u32) -> Vec<Message> {
     if history.is_empty() {
         return Vec::new();
@@ -264,6 +310,65 @@ mod tests {
     use super::{MAX_MEMORY_FILE_CHARS, MEMORY_FILE, USER_FILE, build, trim_history};
     use crate::store::MemoryStore;
     use bean_memory::traits::{MessageStore, SessionStore};
+
+    fn tool_call(id: &str) -> ToolCall {
+        ToolCall::new(id, "probe", serde_json::json!({}))
+    }
+
+    /// (Lộ trình mục 5a) Result ghi DB theo thứ tự hoàn tất — chuẩn hoá phải đưa
+    /// về đúng thứ tự `tool_calls` của assistant.
+    #[test]
+    fn stabilize_reorders_parallel_tool_results_to_match_tool_use() {
+        let history = vec![
+            Message::user("chạy ba tool"),
+            Message::assistant(None, vec![tool_call("a"), tool_call("b"), tool_call("c")]),
+            Message::tool("c", "kết quả c"),
+            Message::tool("a", "kết quả a"),
+            Message::tool("b", "kết quả b"),
+        ];
+        let ordered = super::stabilize_tool_order(&history);
+        let ids: Vec<Option<&str>> = ordered[2..]
+            .iter()
+            .map(|m| m.tool_call_id.as_deref())
+            .collect();
+        assert_eq!(ids, vec![Some("a"), Some("b"), Some("c")]);
+    }
+
+    /// Result có id lạ (không khớp tool_call nào) không bị đánh mất — đẩy về cuối
+    /// theo thứ tự ổn định, các id hợp lệ vẫn đứng đúng chỗ.
+    #[test]
+    fn stabilize_keeps_unknown_tool_result_ids() {
+        let history = vec![
+            Message::user("hai tool"),
+            Message::assistant(None, vec![tool_call("a"), tool_call("b")]),
+            Message::tool("zz-không-tồn-tại", "result lạ"),
+            Message::tool("b", "kết quả b"),
+            Message::tool("a", "kết quả a"),
+        ];
+        let ordered = super::stabilize_tool_order(&history);
+        let ids: Vec<Option<&str>> = ordered[2..]
+            .iter()
+            .map(|m| m.tool_call_id.as_deref())
+            .collect();
+        assert_eq!(ids, vec![Some("a"), Some("b"), Some("zz-không-tồn-tại")]);
+    }
+
+    /// Lịch sử tuần tự (một tool mỗi lượt) đi qua không đổi.
+    #[test]
+    fn stabilize_leaves_sequential_history_untouched() {
+        let history = vec![
+            Message::user("một tool"),
+            Message::assistant(None, vec![tool_call("a")]),
+            Message::tool("a", "kết quả a"),
+            Message::assistant(Some("xong".into()), Vec::new()),
+        ];
+        let ordered = super::stabilize_tool_order(&history);
+        assert_eq!(ordered.len(), history.len());
+        for (before, after) in history.iter().zip(ordered.iter()) {
+            assert_eq!(before.tool_call_id, after.tool_call_id);
+            assert_eq!(before.role, after.role);
+        }
+    }
 
     fn workspace(dir: &TempDir) -> CapWorkspace {
         CapWorkspace::open(dir.path().to_path_buf()).unwrap()

@@ -10,6 +10,10 @@ workspace = "./workspace"
 max_steps = 25
 context_budget_tokens = 100000
 timezone = "Asia/Ho_Chi_Minh"
+# Chạy song song các tool an toàn (Safe) liên tiếp trong cùng lượt model —
+# nhiều lệnh đọc độc lập (read_file, grep, web_fetch…) hoàn thành nhanh hơn.
+# Tool Confirm/Dangerous vẫn luôn tuần tự. Mặc định: true.
+parallel_safe_tools = true
 # Lớp kiểm tra thứ hai ở lõi, ngoài allowlist của từng kênh (mục 10).
 allowed_users = ["web:admin", "cli:local", "telegram:123456789"]
 # M21 — map user identity -> tên role trong [[roles]].

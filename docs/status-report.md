@@ -89,6 +89,7 @@
 - Streaming SSE cho cả hai provider.
 - Failover provider: `[llm].fallback_profiles` — provider chính lỗi 429/5xx/mạng hoặc 401/403 sau khi hết retry thì thử lần lượt profile dự phòng (lộ trình mục 4, 2026-11-10).
 - Model phụ `[llm].small_model` cho tác vụ rẻ (compaction, reflection); prompt caching `[llm].prompt_cache` cho Anthropic.
+- Tool song song: các tool `Safe` liên tiếp trong cùng lượt model chạy đồng thời (trần 4, semaphore); `Confirm`/`Dangerous` luôn tuần tự; kill-switch `[agent].parallel_safe_tools`. Context chuẩn hoá thứ tự tool result theo `tool_use` (lộ trình mục 5a, D24, 2026-11-10).
 - File tools, glob, grep, shell sandbox, web fetch/search, memory, skills, scheduler.
 - MCP client stdio.
 
@@ -132,6 +133,7 @@
 | K15 Telegram thật | ✅ Smoke tay trên bot thật | Chat end-to-end, confirm inline keyboard (audit `decided_by: telegram:8845250886`), Dangerous không nút phiên, `/stop`, reconnect 2 lần, đồng thời web — chi tiết `docs/known-issues.md` K15 |
 | Failover + model phụ + prompt cache | ✅ Đã kiểm chứng với model thật | Task eval `real_failover_dead_primary` (opt-in, key từ env): primary chết chắc (cổng 9) — 3 lần retry ~9s → log "chuyển sang provider dự phòng" → fallback NVIDIA GLM-5.3-flash trả lời bằng model riêng của profile nó → run kết thúc `final` (1599/52 token). Bug thật bắt được trong lần chạy đầu: fallback nhận model override của primary (`dead-model`) → 404; đã sửa — override chỉ áp cho primary, fallback luôn chạy model riêng (test `fallback_ignores_model_override`). Máy đang chạy đã bật `fallback_profiles = ["open-router"]`, restart `beanctl` sạch, banner CLI `provider: failover` |
 | 7 unit test `FailoverProvider` + wire cache Anthropic | ✅ Pass | 503/401 failover, Decode không failover, hết đường trả lỗi cuối, stream trước delta đầu, fallback bỏ qua model override; `system` có `cache_control: ephemeral` khi bật, string khi tắt; reflection dùng `small_model` (test ghi lại model) |
+| Tool song song (mục 5a lộ trình) | ✅ Pass | 171 test bean-core: đo `max_active` chứng minh 2 Safe chạy đồng thời; kill-switch chạy tuần lại; batch trộn Safe+Confirm chỉ hỏi 1 xác nhận; 4 test phân nhóm (`partition_tool_calls`); 3 test chuẩn hoá thứ tự; test cancel giữ cặp theo ngữ nghĩa mới. Bug thật bắt được: huỷ bị đếm như lỗi tool → gợi ý "thất bại 2 lần" gắn sai vào result huỷ (D24.5, đã sửa) |
 
 ### Ghi chú về warning dependency
 
@@ -288,8 +290,8 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [x] `make e2e` và scheduler smoke xanh.
 - [x] Release có UI nhúng và headless build thành công.
 - [x] M17(A) streaming token hoàn thành.
-- [x] Provider thật đã smoke test (OpenRouter qua `openai_compat`, 2026-11-02; Telegram thật vẫn ⬜).
-- [ ] Telegram bot thật đã smoke test.
+- [x] Provider thật đã smoke test (OpenRouter qua `openai_compat`, 2026-11-02).
+- [x] Telegram bot thật đã smoke test (K15, 2026-11-10 — chat, confirm, `/stop`, reconnect).
 - [ ] Scheduler thật đã kiểm chứng.
 - [ ] MCP server bên thứ ba đã kiểm thử.
 - [x] S1 đã xử lý (2026-09-26).

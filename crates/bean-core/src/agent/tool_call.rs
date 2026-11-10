@@ -17,7 +17,7 @@ impl<'a> Agent<'a> {
     pub(super) async fn run_tool_call(
         &self,
         turn: &Turn<'_>,
-        state: &mut TurnState,
+        state: &TurnState,
         session_policy: &SessionPolicy,
         call: &ToolCall,
     ) -> Result<(), AgentError> {
@@ -51,7 +51,7 @@ impl<'a> Agent<'a> {
             append_run_message(
                 store,
                 session,
-                &mut state.transcript,
+                &state.transcript,
                 Message::tool_error(call.id.clone(), message.clone()),
             )
             .await?;
@@ -74,7 +74,7 @@ impl<'a> Agent<'a> {
             append_run_message(
                 store,
                 session,
-                &mut state.transcript,
+                &state.transcript,
                 Message::tool_error(call.id.clone(), message.clone()),
             )
             .await?;
@@ -103,7 +103,7 @@ impl<'a> Agent<'a> {
             append_run_message(
                 store,
                 session,
-                &mut state.transcript,
+                &state.transcript,
                 Message::tool_error(call.id.clone(), message.clone()),
             )
             .await?;
@@ -119,7 +119,7 @@ impl<'a> Agent<'a> {
             append_run_message(
                 store,
                 session,
-                &mut state.transcript,
+                &state.transcript,
                 Message::tool_error(call.id.clone(), CANCELLED_MSG),
             )
             .await?;
@@ -137,7 +137,7 @@ impl<'a> Agent<'a> {
                 append_run_message(
                     store,
                     session,
-                    &mut state.transcript,
+                    &state.transcript,
                     Message::tool_error(call.id.clone(), message.clone()),
                 )
                 .await?;
@@ -156,9 +156,13 @@ impl<'a> Agent<'a> {
 
         let args_hash = hash_args(&call.args);
         let key = (call.name.clone(), args_hash);
-        if state.failure_counts.get(&key).copied().unwrap_or(0) >= 2
-            && state.consecutive_same_failure.as_ref() == Some(&key)
-        {
+        // Khoá chùm ngắn, không giữ qua `.await`: găng chống lặp chỉ đọc hai map rồi thoát.
+        let repeat_guard_tripped = {
+            let counts = state.failure_counts.lock().await;
+            let consecutive = state.consecutive_same_failure.lock().await;
+            counts.get(&key).copied().unwrap_or(0) >= 2 && consecutive.as_ref() == Some(&key)
+        };
+        if repeat_guard_tripped {
             let hint = format!(
                 "Tool `{}` với cùng tham số đã thất bại 2 lần liên tiếp. Hãy thử cách khác.",
                 call.name
@@ -166,12 +170,12 @@ impl<'a> Agent<'a> {
             append_run_message(
                 store,
                 session,
-                &mut state.transcript,
+                &state.transcript,
                 Message::tool_error(call.id.clone(), hint.clone()),
             )
             .await?;
             io.on_tool_end(&call.id, &call.name, false, &hint);
-            state.repeated_tool = Some(call.name.clone());
+            *state.repeated_tool.lock().await = Some(call.name.clone());
             return Ok(());
         }
 
@@ -191,7 +195,7 @@ impl<'a> Agent<'a> {
                     append_run_message(
                         store,
                         session,
-                        &mut state.transcript,
+                        &state.transcript,
                         Message::tool_error(call.id.clone(), CANCELLED_MSG),
                     )
                     .await?;
@@ -237,7 +241,7 @@ impl<'a> Agent<'a> {
                         append_run_message(
                             store,
                             session,
-                            &mut state.transcript,
+                            &state.transcript,
                             Message::tool_error(call.id.clone(), message.clone()),
                         )
                         .await?;
@@ -257,7 +261,7 @@ impl<'a> Agent<'a> {
                         append_run_message(
                             store,
                             session,
-                            &mut state.transcript,
+                            &state.transcript,
                             Message::tool_error(call.id.clone(), message.clone()),
                         )
                         .await?;
@@ -347,15 +351,26 @@ impl<'a> Agent<'a> {
             audit.error = Some(output.chars().take(300).collect());
         }
         record_audit(audit_log.as_ref(), &audit);
-        let mut failed_twice = false;
-        if !ok {
-            let count = state.failure_counts.entry(key.clone()).or_insert(0);
+        // Cập nhật sổ chống lặp (mục 6). Trong nhóm song song, các task hoàn tất
+        // theo thứ tự không xác định nên thứ tự cập nhật hai map này cũng vậy —
+        // hành vi chặn lặp vẫn đúng cho các lượt **sau** nhóm; số thất bại cộng dồn
+        // nguyên xác (saturating) nên không mất dữ liệu.
+        //
+        // Lượt bị **huỷ** không cộng sổ: đó là quyết định của người dùng, không phải
+        // lỗi của model — cộng vào sẽ khiến hai call giống nhau bị huỷ song song
+        // (lộ trình mục 5a) tính là "thất bại 2 lần" và gắn gợi ý sai vào result huỷ.
+        let failed_twice = if cancelled {
+            false
+        } else if !ok {
+            let mut counts = state.failure_counts.lock().await;
+            let count = counts.entry(key.clone()).or_insert(0);
             *count = count.saturating_add(1);
-            failed_twice = *count >= 2;
-            state.consecutive_same_failure = Some(key);
+            *state.consecutive_same_failure.lock().await = Some(key);
+            *count >= 2
         } else {
-            state.consecutive_same_failure = None;
-        }
+            *state.consecutive_same_failure.lock().await = None;
+            false
+        };
         let output = if failed_twice {
             // Chèn gợi ý ngay trong tool result sau 2 lần thất bại giống nhau (mục 6).
             format!("{output}\n[Gợi ý] Hai lần gọi giống nhau đều thất bại — hãy thử cách khác.")
@@ -369,12 +384,12 @@ impl<'a> Agent<'a> {
             (true, None) => Message::tool(call.id.clone(), output.clone()),
             (false, _) => Message::tool_error(call.id.clone(), output.clone()),
         };
-        append_run_message(store, session, &mut state.transcript, result_message).await?;
+        append_run_message(store, session, &state.transcript, result_message).await?;
         if ok
             && call.name == "load_skill"
             && let Some(name) = call.args.get("name").and_then(serde_json::Value::as_str)
         {
-            state.loaded_skills.insert(name.to_string());
+            state.loaded_skills.lock().await.insert(name.to_string());
         }
         io.on_tool_end(&call.id, &call.name, ok, &output);
         if cancelled {

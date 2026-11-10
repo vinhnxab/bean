@@ -409,6 +409,15 @@ pub static SETTINGS: &[SettingEntry] = &[
         desc_en: "Token budget for the model context",
     },
     SettingEntry {
+        path: "agent.parallel_safe_tools",
+        kind: SettingKind::Bool,
+        tier: SettingTier::A,
+        apply: SettingApply::Hot,
+        store: SettingStore::BeanToml,
+        desc_vi: "Chạy song song các tool an toàn (Safe) liên tiếp trong một lượt model",
+        desc_en: "Run consecutive Safe tools in parallel within one model step",
+    },
+    SettingEntry {
         path: "agent.allowed_users",
         kind: SettingKind::StrList,
         tier: SettingTier::B,
@@ -1506,6 +1515,7 @@ pub fn value_from_config(config: &Config, entry: &SettingEntry) -> String {
         // ---- [agent] / [data] ----
         "agent.timezone" => config.agent.timezone.clone(),
         "agent.max_steps" => config.agent.max_steps.to_string(),
+        "agent.parallel_safe_tools" => config.agent.parallel_safe_tools.to_string(),
         "agent.context_budget_tokens" => config.agent.context_budget_tokens.to_string(),
         "agent.allowed_users" => format!("[{}]", config.agent.allowed_users.join(", ")),
         "agent.workspace" => config.agent.workspace.display().to_string(),

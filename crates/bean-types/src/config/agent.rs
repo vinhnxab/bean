@@ -26,6 +26,10 @@ pub struct AgentConfig {
     pub timezone: String,
     /// Lớp kiểm tra thứ hai ở lõi, ngoài allowlist của từng kênh (mục 10).
     pub allowed_users: Vec<String>,
+    /// Chạy song song các tool `Risk::Safe` liên tiếp trong cùng một lượt model
+    /// (lộ trình chất lượng mục 5a). Tool `Confirm`/`Dangerous` vẫn tuần tự —
+    /// mỗi xác nhận phải hiện riêng cho người dùng.
+    pub parallel_safe_tools: bool,
     /// Map `user_id` (`telegram:<id>`, `web:admin`, `cli:local`) → tên role (M21.3).
     ///
     /// User **không** có trong map này dùng role mặc định
@@ -45,6 +49,7 @@ impl Default for AgentConfig {
             context_budget_tokens: 100_000,
             timezone: "Asia/Ho_Chi_Minh".to_string(),
             allowed_users: vec!["web:admin".to_string(), "cli:local".to_string()],
+            parallel_safe_tools: true,
             user_roles: BTreeMap::new(),
         }
     }
