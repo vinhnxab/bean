@@ -846,3 +846,13 @@ web 233 test (chat store 3 test plan: ghi đè/final xoá, dedupe, `applySync`
 khôi phục; PlanCard render) + `pnpm tsc` + `biome check` + `pnpm build` xanh.
 `make check` dừng duy nhất ở gate `git diff` của `make types` vì generated
 chưa commit — hết khi commit generated cùng code.
+
+**Bug thật bắt được khi kiểm chứng với model thật (2026-11-10):** model gọi
+`update_plan` đúng 4 lần (audit log), server phát sự kiện đúng, nhưng thẻ kế
+hoạch không hiện — `parseServerMessage` ở `web/src/api/ws.ts` là **whitelist
+tay** ở biên client và thiếu `case "plan"`, `default` nuốt im lặng. Lỗi cùng
+lớp với "match enum exhaustive phải vá hết mọi chỗ": thêm variant mới phải vá
+luôn biên xác thực TS. Vá + test regress tại biên (plan hợp lệ qua, bước sai
+`status`/thiếu field bị loại). Bài học: test store gọi thẳng
+`applyServerMessage` nên không chặn được drift ở biên — mọi variant mới của
+`ServerMsg` phải có test qua `parseServerMessage`.

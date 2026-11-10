@@ -54,6 +54,14 @@ function isRunningInfo(value: unknown): boolean {
   return isRecord(value) && hasNumber(value, "session_id") && hasString(value, "run_id");
 }
 
+function isPlanStep(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasString(value, "title") &&
+    (value.status === "pending" || value.status === "in_progress" || value.status === "done")
+  );
+}
+
 /** Kiểm tra wire JSON ở biên trước khi đưa event vào store. */
 export function parseServerMessage(raw: unknown): ServerMsg | null {
   if (!isRecord(raw) || typeof raw.type !== "string") return null;
@@ -97,6 +105,13 @@ export function parseServerMessage(raw: unknown): ServerMsg | null {
           hasString(raw, "id") &&
           typeof raw.ok === "boolean" &&
           hasString(raw, "output_preview")
+        );
+      case "plan":
+        return (
+          hasNumber(raw, "session_id") &&
+          hasString(raw, "run_id") &&
+          Array.isArray(raw.steps) &&
+          raw.steps.every(isPlanStep)
         );
       case "confirm_request":
         return isPendingConfirm(raw);

@@ -120,6 +120,37 @@ describe("ChatSocket", () => {
     ).toBeNull();
   });
 
+  it("nhận event plan hợp lệ và bỏ bước sai shape (D25)", () => {
+    // Regress: whitelist biên thiếu case "plan" nên mọi event Plan bị nuốt im
+    // lặng — thẻ kế hoạch không bao giờ hiện dù server đã phát sự kiện thật.
+    const plan = parseServerMessage({
+      type: "plan",
+      session_id: 20,
+      run_id: "run-1",
+      steps: [
+        { title: "Xem workspace", status: "done" },
+        { title: "Tạo ghi-chu.md", status: "in_progress" },
+        { title: "Đọc lại", status: "pending" },
+      ],
+    });
+    expect(plan).not.toBeNull();
+    expect(
+      parseServerMessage({ type: "plan", session_id: 1, run_id: "r", steps: [] }),
+    ).not.toBeNull();
+    expect(
+      parseServerMessage({ type: "plan", session_id: 1, run_id: "r", steps: [{ title: "x" }] }),
+    ).toBeNull();
+    expect(
+      parseServerMessage({
+        type: "plan",
+        session_id: 1,
+        run_id: "r",
+        steps: [{ title: "x", status: "hoàn tất" }],
+      }),
+    ).toBeNull();
+    expect(parseServerMessage({ type: "plan", session_id: 1, run_id: "r" })).toBeNull();
+  });
+
   it("nhận sự kiện lỗi có session_id là number (shape server Option<i64>)", () => {
     // Regress: guard cũ dùng hasNullableString cho session_id nên error thật
     // (session_id number) bị loại ở biên — UI kẹt "Đang suy nghĩ" vĩnh viễn.
