@@ -58,11 +58,13 @@ jobs:
       # Flake đã lặp 2 lần (2026-11-09, 2026-11-10) mà log job cần đăng nhập mới đọc
       # được. In dòng lỗi vào annotations (::error::) — hiển thị ngay trên trang run,
       # không cần đăng nhập — để bắt đúng test flaky thay vì fix mù.
+      # `-A 3` kèm 3 dòng sau panic để thấy nội dung assert (vd `stdout:` của test CLI
+      # — flake lần 3 `61d5080` bị cắt mất phần này nên không chẩn đoán được).
       - name: Tóm tắt test fail ra annotations
         if: failure()
         run: |
-          grep -E "panicked at|test result: FAILED|^error(\[|:)|failures:" check-rust.log \
-            | head -30 \
+          grep -E "panicked at|test result: FAILED|^error(\[|:)|failures:" -A 3 check-rust.log \
+            | head -60 \
             | while IFS= read -r line; do echo "::error::$line"; done
           exit 0
 
@@ -87,7 +89,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: make check-web
-        run: make check-web
+        run: |
+          set -o pipefail
+          make check-web 2>&1 | tee check-web.log
+
+      # Flake TasksPage đã lặp 2 lần (2026-11-10) — in test fail + vài dòng kề
+      # (diff assertion) ra annotations để chẩn đoán không cần đăng nhập.
+      - name: Tóm tắt test fail ra annotations
+        if: failure()
+        run: |
+          grep -E "FAIL |✗|AssertionError|Expected|Received" -A 6 check-web.log \
+            | head -60 \
+            | while IFS= read -r line; do echo "::error::$line"; done
+          exit 0
 
   eval:
     name: eval baseline (fake)
