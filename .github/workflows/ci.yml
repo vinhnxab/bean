@@ -51,7 +51,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: make check-rust
-        run: make check-rust
+        run: |
+          set -o pipefail
+          make check-rust 2>&1 | tee check-rust.log
+
+      # Flake đã lặp 2 lần (2026-11-09, 2026-11-10) mà log job cần đăng nhập mới đọc
+      # được. In dòng lỗi vào annotations (::error::) — hiển thị ngay trên trang run,
+      # không cần đăng nhập — để bắt đúng test flaky thay vì fix mù.
+      - name: Tóm tắt test fail ra annotations
+        if: failure()
+        run: |
+          grep -E "panicked at|test result: FAILED|^error(\[|:)|failures:" check-rust.log \
+            | head -30 \
+            | while IFS= read -r line; do echo "::error::$line"; done
+          exit 0
 
   web:
     name: check-web
