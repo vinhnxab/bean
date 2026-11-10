@@ -71,16 +71,14 @@ describe("chat event state", () => {
       index: 1,
       reset: false,
     });
-    useChatStore
-      .getState()
-      .applySync(
-        {
-          type: "sync",
-          running: [{ session_id: 1, run_id: "run-1", role: null, plan: [] }],
-          pending_confirms: [],
-        },
-        true,
-      );
+    useChatStore.getState().applySync(
+      {
+        type: "sync",
+        running: [{ session_id: 1, run_id: "run-1", role: null, plan: [] }],
+        pending_confirms: [],
+      },
+      true,
+    );
     expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Xin");
 
     useChatStore.getState().applyServerMessage({
@@ -175,16 +173,14 @@ describe("chat event state", () => {
   it("applySync ghi đè interrupted bằng run thật server đang chạy", () => {
     useChatStore.getState().reset();
     useChatStore.getState().markSubmitting(3);
-    useChatStore
-      .getState()
-      .applySync(
-        {
-          type: "sync",
-          running: [{ session_id: 3, run_id: "run-3", role: null, plan: [] }],
-          pending_confirms: [],
-        },
-        true,
-      );
+    useChatStore.getState().applySync(
+      {
+        type: "sync",
+        running: [{ session_id: 3, run_id: "run-3", role: null, plan: [] }],
+        pending_confirms: [],
+      },
+      true,
+    );
     const run = useChatStore.getState().runsBySession[3];
     expect(run?.status).toBe("running");
     expect(run?.runId).toBe("run-3");
@@ -238,29 +234,25 @@ describe("chat event state", () => {
       useChatStore.getState().reset();
       useChatStore.getState().markSubmitting(1);
       const startedAt = useChatStore.getState().runsBySession[1]?.startedAt;
-      useChatStore
-        .getState()
-        .applySync(
-          {
-            type: "sync",
-            running: [{ session_id: 1, run_id: "run-1", role: null, plan: [] }],
-            pending_confirms: [],
-          },
-          true,
-        );
+      useChatStore.getState().applySync(
+        {
+          type: "sync",
+          running: [{ session_id: 1, run_id: "run-1", role: null, plan: [] }],
+          pending_confirms: [],
+        },
+        true,
+      );
       expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(startedAt);
 
       vi.advanceTimersByTime(5000);
-      useChatStore
-        .getState()
-        .applySync(
-          {
-            type: "sync",
-            running: [{ session_id: 1, run_id: "run-9", role: null, plan: [] }],
-            pending_confirms: [],
-          },
-          true,
-        );
+      useChatStore.getState().applySync(
+        {
+          type: "sync",
+          running: [{ session_id: 1, run_id: "run-9", role: null, plan: [] }],
+          pending_confirms: [],
+        },
+        true,
+      );
       expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(Date.parse("2026-10-21T08:00:05Z"));
     } finally {
       vi.useRealTimers();
