@@ -502,6 +502,7 @@ impl EventCollector {
                 }
                 RunEvent::Queued { .. }
                 | RunEvent::TextDelta { .. }
+                | RunEvent::Plan { .. }
                 | RunEvent::ConfirmResolved { .. }
                 | RunEvent::VoiceResponse { .. } => {}
             }

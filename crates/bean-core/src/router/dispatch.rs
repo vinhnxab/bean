@@ -69,6 +69,22 @@ impl Router {
         let _ = self.inner.events.send(event);
     }
 
+    /// Lưu kế hoạch bước mới nhất của run (D25) rồi phát sự kiện.
+    ///
+    /// Phải lưu **trước** khi phát: client nối lại giữa chừng lấy kế hoạch từ
+    /// `Sync` (`running[].plan`), không phải từ các sự kiện đã mất. Kế hoạch chỉ
+    /// là trạng thái sống — biến mất cùng [`ActiveRun`] khi run kết thúc.
+    pub(super) fn set_plan(&self, run_id: &RunId, session_id: SessionId, steps: Vec<PlanStep>) {
+        if let Ok(mut state) = lock(&self.inner.state) {
+            state.queue.set_plan(run_id, steps.clone());
+        }
+        self.emit(RunEvent::Plan {
+            session_id,
+            run_id: run_id.clone(),
+            steps,
+        });
+    }
+
     pub(super) fn emit_error(&self, queued: &QueuedRun, code: &str, message: &str) {
         self.emit(RunEvent::Error {
             session_id: queued.session_id,

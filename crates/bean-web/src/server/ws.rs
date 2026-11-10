@@ -27,7 +27,9 @@ use bean_core::{Decision, Incoming, Router};
 use bean_types::{Config, Risk, RunEvent, SessionId};
 use tokio::sync::{OwnedSemaphorePermit, broadcast};
 
-use crate::api_types::{ClientMsg, DecisionDto, PendingConfirm, RiskDto, RunningInfo, ServerMsg};
+use crate::api_types::{
+    ClientMsg, DecisionDto, PendingConfirm, PlanStepDto, RiskDto, RunningInfo, ServerMsg,
+};
 
 use super::{
     ApiFailure, MAX_WS_MESSAGE_BYTES, WS_HEARTBEAT, WS_IDLE_TIMEOUT, WebState, cookie_token,
@@ -295,6 +297,7 @@ fn sync_msg(router: &Router, config: &Config, user_id: &str) -> ServerMsg {
                 session_id: item.session_id.get(),
                 run_id: item.run_id.as_str().to_string(),
                 role: item.role,
+                plan: item.plan.into_iter().map(PlanStepDto::from_core).collect(),
             })
             .collect(),
         pending_confirms: snapshot
@@ -405,6 +408,15 @@ fn map_run_event(event: RunEvent) -> Option<ServerMsg> {
             id,
             ok,
             output_preview,
+        },
+        RunEvent::Plan {
+            session_id,
+            run_id,
+            steps,
+        } => ServerMsg::Plan {
+            session_id: session_id.get(),
+            run_id: run_id.as_str().into(),
+            steps: steps.into_iter().map(PlanStepDto::from_core).collect(),
         },
         RunEvent::ConfirmRequest {
             session_id,

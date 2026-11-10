@@ -822,3 +822,27 @@ minh 2 Safe chạy đồng thời, kill-switch chạy tuần tự, batch trộn 
 chỉ hỏi 1 xác nhận, 4 test phân nhóm, 3 test chuẩn hoá thứ tự; sửa test cancel
 theo ngữ nghĩa mới) + `make check` xanh toàn phần. Flake `bean-scan` "Text file
 busy" tái diễn 1 lần trong `make check` — đã ghi known-issues mục 4.
+
+## 25. Kế hoạch có cấu trúc — tool `update_plan` (D25.x — 2026-11-10, lộ trình chất lượng mục 5b)
+
+Nhiệm vụ dài nhiều bước dễ lạc hướng: model quên các bước còn lại hoặc làm trùng
+bước đã xong. Thêm cơ chế todo/plan mà model tự cập nhật được, người dùng nhìn
+thấy tiến độ lúc đang chạy — không phải đoán từ các thẻ tool rời rạc.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D25.1 | Tool `update_plan` (`Risk::Safe`, không chạm file/mạng/DB): model gửi **snapshot toàn bộ** danh sách bước mỗi lần gọi — không có API "thêm/xoá một bước"; giới hạn 1..=20 bước, tiêu đề 1..=200 ký tự (đếm theo **char** Unicode, không byte) | Snapshot ghi đè luôn khớp một nguồn chân lý duy nhất; model không phải ghi nhớ diff; trần chặn plan phình thành hệ thống quản lý công việc và vượt preview ~2.000 ký tự | Model lỡ bỏ bước cũ khi gửi lại thì kế hoạch mất bước đó — chấp nhận, vì đổi lại trạng thái luôn rõ ràng |
+| D25.2 | Agent loop phát `RunEvent::Plan` qua `RunIo::on_plan` **trước khi** tool chạy; parse ở loop và tool dùng **một nguồn chân lý** `validate_steps` — kế hoạch vi phạm ràng buộc (rỗng, quá trần, tiêu đề sai) không bao giờ ra UI, tool trả lỗi rõ ràng cho model tự sửa | UI cập nhật tức thì không chờ tool xong; bug thật bắt được khi viết test: `parse_plan_steps` bản đầu chỉ kiểm schema, `steps: []` lọt qua và được phát ra UI | Parse hai lần (loop + tool) là chấp nhận có chủ đích — rẻ, và tool vẫn là chốt chặn cuối |
+| D25.3 | Plan là **trạng thái sống theo run**, không ghi DB: Router lưu vào `ActiveRun` **trước khi emit**; `Sync` khi WS nối lại trả plan mới nhất trong `RunningInfo`; `final`/`error` xoá sạch | Plan chết cùng run — không phải dữ liệu lịch sử cần bền vững; reconnect không cần phát lại sự kiện, chỉ cần snapshot | Tab mở giữa chừng thấy plan nhưng xem lại lịch sử (REST) không thấy — đúng ý, lịch sử giữ cặp tool_use/tool_result chuẩn |
+| D25.4 | Tool đăng ký **luôn bật**, không thuộc group `[tools].enabled` — đăng ký trực tiếp trong `build_registry` | Plan là bộ phận của vòng lặp agent (như system prompt), không phải năng lực tùy chọn; tắt nhầm làm model mất khả năng tự tổ chức | Không tắt được riêng tool này — chấp nhận vì Safe và vô hại |
+| D25.5 | Kênh hiển thị: web thẻ kế hoạch (progress `x/y`, bước done gạch ngang, bước đang làm spinner); CLI và Telegram **bỏ qua** sự kiện Plan; eval runner no-op | CLI/Telegram là dòng chữ tuần tự — in plan mỗi lần cập nhật thành spam; web là kênh chính cho nội dung sống | Người dùng Telegram không thấy plan — giảm dần khi cần, giữ log tool như cũ |
+| D25.6 | UI dedupe event theo nội dung snapshot (`plan:{run_id}:{JSON.stringify(steps)}`) trong danh sách 500 key gần nhất; case `plan` **thay toàn bộ** `run.plan` | WS lag/broadcast lặp không được nhân đôi bước; snapshot ghi đè đúng nghĩa | Hai snapshot liền kế giống nhau byte-để-byte bị nuốt — vô hại vì nội dung đã hiển thị rồi |
+
+**Kiểm chứng:** `cargo test -p bean-tools` (5 test plan: parse hợp lệ, sai
+schema/ràng buộc → None, trần 200 ký tự theo char, tóm tắt đếm đúng) +
+`cargo test -p bean-core --test agent_loop` (2 test mới: plan hợp lệ phát qua
+`on_plan` và giữ cặp tool_use/tool_result trong lịch sử; args sai không phát) +
+web 233 test (chat store 3 test plan: ghi đè/final xoá, dedupe, `applySync`
+khôi phục; PlanCard render) + `pnpm tsc` + `biome check` + `pnpm build` xanh.
+`make check` dừng duy nhất ở gate `git diff` của `make types` vì generated
+chưa commit — hết khi commit generated cùng code.

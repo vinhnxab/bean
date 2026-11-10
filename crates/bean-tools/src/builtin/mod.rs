@@ -9,6 +9,7 @@
 
 pub mod files;
 pub mod memory_query;
+pub mod plan;
 
 /// Tên nhóm tool file trong `[tools] enabled` (xem `bean_types::config::KNOWN_TOOL_GROUPS`).
 pub const GROUP_FILES: &str = "files";

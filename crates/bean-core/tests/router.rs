@@ -97,6 +97,7 @@ fn event_uses_run(event: &RunEvent, run_id: &RunId) -> bool {
         | RunEvent::TextDelta { run_id: id, .. }
         | RunEvent::ToolStart { run_id: id, .. }
         | RunEvent::ToolEnd { run_id: id, .. }
+        | RunEvent::Plan { run_id: id, .. }
         | RunEvent::ConfirmRequest { run_id: id, .. }
         | RunEvent::ConfirmResolved { run_id: id, .. }
         | RunEvent::Final { run_id: id, .. }

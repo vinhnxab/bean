@@ -683,6 +683,40 @@ pub struct RunningInfo {
     pub run_id: String,
     /// Role sở hữu run; `null` khi RBAC tắt.
     pub role: Option<String>,
+    /// Kế hoạch bước mới nhất của run (D25); rỗng khi model chưa gọi `update_plan`.
+    pub plan: Vec<PlanStepDto>,
+}
+
+/// Một bước kế hoạch (D25). Snapshot ghi đè toàn bộ — client thay danh sách cũ.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlanStepDto {
+    pub title: String,
+    pub status: PlanStepStatusDto,
+}
+
+/// Trạng thái một bước kế hoạch (D25).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PlanStepStatusDto {
+    Pending,
+    InProgress,
+    Done,
+}
+
+impl PlanStepDto {
+    /// Quy đổi từ kiểu lõi — một chỗ duy nhất để không lệch từ vựng serde.
+    pub(super) fn from_core(step: bean_types::PlanStep) -> Self {
+        Self {
+            title: step.title,
+            status: match step.status {
+                bean_types::PlanStepStatus::Pending => PlanStepStatusDto::Pending,
+                bean_types::PlanStepStatus::InProgress => PlanStepStatusDto::InProgress,
+                bean_types::PlanStepStatus::Done => PlanStepStatusDto::Done,
+            },
+        }
+    }
 }
 
 /// Confirm đang chờ trong snapshot.
@@ -762,6 +796,13 @@ pub enum ServerMsg {
         id: String,
         ok: bool,
         output_preview: String,
+    },
+    /// (D25) Kế hoạch bước của lượt vừa được model cập nhật. Snapshot ghi đè —
+    /// client thay toàn bộ danh sách bước của run.
+    Plan {
+        session_id: i64,
+        run_id: String,
+        steps: Vec<PlanStepDto>,
     },
     ConfirmRequest {
         session_id: i64,

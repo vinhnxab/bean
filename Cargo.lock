@@ -682,6 +682,7 @@ dependencies = [
 name = "bean-types"
 version = "0.1.1"
 dependencies = [
+ "schemars 1.2.2",
  "secrecy",
  "serde",
  "serde_json",

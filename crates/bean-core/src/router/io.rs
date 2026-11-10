@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use bean_types::{ConfirmOutcome, Risk, RunEvent, RunId, SessionId};
+use bean_types::{ConfirmOutcome, PlanStep, Risk, RunEvent, RunId, SessionId};
 use tokio_util::sync::CancellationToken;
 
 use super::confirm::ConfirmRequest;
@@ -78,6 +78,12 @@ impl RunIo for RouterIo {
                 ok,
                 output_preview: preview(output),
             });
+        });
+    }
+
+    fn on_plan(&self, steps: &[PlanStep]) {
+        self.with_router(|router| {
+            router.set_plan(&self.run_id, self.session_id, steps.to_vec());
         });
     }
 

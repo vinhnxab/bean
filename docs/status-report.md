@@ -81,6 +81,7 @@
 - Hàng đời theo session, cancel tường minh, confirm có timeout.
 - Lỗi tool trở thành tool result thay vì làm hỏng loop.
 - Giới hạn bước, ngân sách token/ngày, chống lặp tool, audit JSONL.
+- Kế hoạch có cấu trúc: tool `update_plan` (Safe) — model gửi snapshot toàn bộ danh sách bước, UI web hiện thẻ tiến độ lúc đang chạy; plan sống theo run, khôi phục qua `Sync` (lộ trình mục 5b, D25, 2026-11-10).
 
 ### Provider và tool
 
@@ -134,6 +135,7 @@
 | Failover + model phụ + prompt cache | ✅ Đã kiểm chứng với model thật | Task eval `real_failover_dead_primary` (opt-in, key từ env): primary chết chắc (cổng 9) — 3 lần retry ~9s → log "chuyển sang provider dự phòng" → fallback NVIDIA GLM-5.3-flash trả lời bằng model riêng của profile nó → run kết thúc `final` (1599/52 token). Bug thật bắt được trong lần chạy đầu: fallback nhận model override của primary (`dead-model`) → 404; đã sửa — override chỉ áp cho primary, fallback luôn chạy model riêng (test `fallback_ignores_model_override`). Máy đang chạy đã bật `fallback_profiles = ["open-router"]`, restart `beanctl` sạch, banner CLI `provider: failover` |
 | 7 unit test `FailoverProvider` + wire cache Anthropic | ✅ Pass | 503/401 failover, Decode không failover, hết đường trả lỗi cuối, stream trước delta đầu, fallback bỏ qua model override; `system` có `cache_control: ephemeral` khi bật, string khi tắt; reflection dùng `small_model` (test ghi lại model) |
 | Tool song song (mục 5a lộ trình) | ✅ Pass | 171 test bean-core: đo `max_active` chứng minh 2 Safe chạy đồng thời; kill-switch chạy tuần lại; batch trộn Safe+Confirm chỉ hỏi 1 xác nhận; 4 test phân nhóm (`partition_tool_calls`); 3 test chuẩn hoá thứ tự; test cancel giữ cặp theo ngữ nghĩa mới. Bug thật bắt được: huỷ bị đếm như lỗi tool → gợi ý "thất bại 2 lần" gắn sai vào result huỷ (D24.5, đã sửa) |
+| Kế hoạch có cấu trúc (mục 5b lộ trình) | ✅ Pass | `bean-tools` 40 test (5 plan: schema+ràng buộc → None, trần 200 ký tự theo char, tóm tắt đúng); `agent_loop` 21 test (2 mới: plan hợp lệ phát `on_plan` + giữ cặp tool_use/tool_result; args sai không phát). Bug thật bắt được: `parse_plan_steps` bản đầu chỉ kiểm schema, `steps: []` lọt qua được phát ra UI — gộp `validate_steps` dùng chung cho loop và tool (D25.2). Web 233 test (chat store plan: ghi đè/final xoá, dedupe, `applySync` khôi phục; PlanCard) |
 
 ### Ghi chú về warning dependency
 

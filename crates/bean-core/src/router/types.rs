@@ -306,6 +306,9 @@ pub struct RunningInfo {
     pub session_id: SessionId,
     /// Role sở hữu run; `None` khi RBAC tắt.
     pub role: Option<String>,
+    /// Kế hoạch bước mới nhất của run (D25); rỗng khi model chưa gọi `update_plan`.
+    /// Nằm trong snapshot để client nối lại giữa chừng khôi phục được.
+    pub plan: Vec<PlanStep>,
 }
 
 /// Snapshot phần `[llm]` của cấu hình runtime, đọc qua cùng `RwLock` mà `/model`

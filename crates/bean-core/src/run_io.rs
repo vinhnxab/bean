@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use bean_types::Risk;
+use bean_types::{PlanStep, Risk};
 use tokio_util::sync::CancellationToken;
 
 /// Quyết định của người dùng khi agent yêu cầu xác nhận.
@@ -38,6 +38,12 @@ pub trait RunIo: Send + Sync + 'static {
 
     /// Thông báo kết quả tool.
     fn on_tool_end(&self, id: &str, tool: &str, ok: bool, output: &str);
+
+    /// Kế hoạch bước của lượt vừa được model cập nhật (D25, tool `update_plan`).
+    ///
+    /// Mặc định no-op: kênh không có khung hiển thị kế hoạch (CLI) không phải
+    /// quan tâm; kênh web cài đè để phát `RunEvent::Plan`.
+    fn on_plan(&self, _steps: &[PlanStep]) {}
 
     /// Yêu cầu xác nhận trước hành động. `timeout` là thời gian chờ (thường 300s).
     /// Trả về `None` nếu hết thời gian chờ, `Some(Decision)` nếu người dùng phản hồi.

@@ -158,6 +158,8 @@ struct TestIo {
     events: Arc<Mutex<Vec<String>>>,
     confirm_count: Arc<AtomicUsize>,
     allow_in_session_flags: Arc<Mutex<Vec<bool>>>,
+    /// Kế hoạch bước mà agent loop đã phát (D25) — mỗi lần `on_plan` một phần tử.
+    plans: Arc<Mutex<Vec<Vec<bean_types::PlanStep>>>>,
 }
 
 impl Clone for TestIo {
@@ -168,6 +170,7 @@ impl Clone for TestIo {
             events: self.events.clone(),
             confirm_count: self.confirm_count.clone(),
             allow_in_session_flags: self.allow_in_session_flags.clone(),
+            plans: self.plans.clone(),
         }
     }
 }
@@ -180,6 +183,7 @@ impl TestIo {
             events: Arc::new(Mutex::new(Vec::new())),
             confirm_count: Arc::new(AtomicUsize::new(0)),
             allow_in_session_flags: Arc::new(Mutex::new(Vec::new())),
+            plans: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -190,6 +194,11 @@ impl TestIo {
 
     fn events(&self) -> Vec<String> {
         self.events.lock().unwrap().clone()
+    }
+
+    /// Tất cả kế hoạch bước agent loop đã phát (D25) — mỗi lần `on_plan` một phần tử.
+    fn plans(&self) -> Vec<Vec<bean_types::PlanStep>> {
+        self.plans.lock().unwrap().clone()
     }
 }
 
@@ -211,6 +220,10 @@ impl RunIo for TestIo {
             .lock()
             .unwrap()
             .push(format!("end:{tool}:{ok}:{output}"));
+    }
+
+    fn on_plan(&self, steps: &[bean_types::PlanStep]) {
+        self.plans.lock().unwrap().push(steps.to_vec());
     }
 
     async fn confirm(
@@ -1128,4 +1141,100 @@ async fn parallel_group_then_confirm_stays_sequential() {
         .find(|m| m.tool_call_id.as_deref() == Some("g1"))
         .unwrap();
     assert!(denied.is_error, "bị từ chối ⇒ result là lỗi");
+}
+
+/// (D25) Model gọi `update_plan` → agent loop phải phát kế hoạch qua `on_plan`
+/// **trước khi** tool chạy, và lịch sử vẫn giữ cặp tool_use/tool_result như mọi tool.
+#[tokio::test]
+async fn update_plan_phat_ke_hoach_qua_run_io() {
+    let (_ws, reg) = registry_with(bean_tools::builtin::plan::tool());
+    let io = TestIo::allow_all();
+    let store = MemoryStore::new();
+    let call = ToolCall::new(
+        "plan-1",
+        bean_tools::builtin::plan::PLAN_TOOL,
+        serde_json::json!({
+            "steps": [
+                { "title": "Đọc bug report", "status": "done" },
+                { "title": "Sửa code", "status": "in_progress" },
+                { "title": "Chạy test", "status": "pending" }
+            ]
+        }),
+    );
+
+    let _ = turn(
+        vec![tool_resp(vec![call]), text_resp("xong")],
+        &reg,
+        &io,
+        &store,
+        &cfg(5),
+    )
+    .await
+    .unwrap();
+
+    let plans = io.plans();
+    assert_eq!(
+        plans.len(),
+        1,
+        "phát đúng một lần cho một lần gọi: {plans:?}"
+    );
+    assert_eq!(plans[0].len(), 3);
+    assert_eq!(plans[0][0].status, bean_types::PlanStepStatus::Done);
+    assert_eq!(plans[0][1].status, bean_types::PlanStepStatus::InProgress);
+    assert_eq!(plans[0][2].title, "Chạy test");
+
+    // Tool vẫn chạy thật để lịch sử có cặp tool_use/tool_result.
+    let results = tool_messages(&store).await;
+    assert_eq!(results.len(), 1);
+    assert!(!results[0].is_error);
+    assert!(
+        results[0]
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .contains("3 bước"),
+        "result phải là bản tóm tắt kế hoạch: {:?}",
+        results[0].text
+    );
+}
+
+/// (D25) Args sai schema → không phát kế hoạch ra UI; tool trả lỗi rõ ràng để model tự sửa.
+#[tokio::test]
+async fn update_plan_args_sai_khong_phat_su_kien() {
+    let (_ws, reg) = registry_with(bean_tools::builtin::plan::tool());
+    let io = TestIo::allow_all();
+    let store = MemoryStore::new();
+    let empty = ToolCall::new(
+        "plan-empty",
+        bean_tools::builtin::plan::PLAN_TOOL,
+        serde_json::json!({ "steps": [] }),
+    );
+    let malformed = ToolCall::new(
+        "plan-bad",
+        bean_tools::builtin::plan::PLAN_TOOL,
+        serde_json::json!({ "steps": [{ "title": "a", "status": "hoàn tất" }] }),
+    );
+
+    let _ = turn(
+        vec![tool_resp(vec![empty, malformed]), text_resp("xong")],
+        &reg,
+        &io,
+        &store,
+        &cfg(5),
+    )
+    .await
+    .unwrap();
+
+    assert!(io.plans().is_empty(), "args sai không được phát ra UI");
+
+    let results = tool_messages(&store).await;
+    assert_eq!(results.len(), 2);
+    for result in results {
+        assert!(result.is_error, "steps rỗng/sai phải là result lỗi");
+        assert!(
+            result.text.as_deref().unwrap_or_default().contains("steps"),
+            "lỗi phải nêu tham số hợp lệ để model tự sửa: {:?}",
+            result.text
+        );
+    }
 }

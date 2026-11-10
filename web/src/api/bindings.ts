@@ -39,6 +39,8 @@ export type { MessageQuery } from "./generated/MessageQuery";
 export type { NotImplementedResponse } from "./generated/NotImplementedResponse";
 export type { OkResponse } from "./generated/OkResponse";
 export type { PendingConfirm } from "./generated/PendingConfirm";
+export type { PlanStepDto } from "./generated/PlanStepDto";
+export type { PlanStepStatusDto } from "./generated/PlanStepStatusDto";
 export type { RiskDto } from "./generated/RiskDto";
 export type { RoleDto } from "./generated/RoleDto";
 export type { SandboxDto } from "./generated/SandboxDto";

@@ -17,8 +17,9 @@
 //! `Router`: queue chỉ trả về kết quả để Router phát ra ngoài.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 
-use bean_types::{RunId, SessionId};
+use bean_types::{PlanStep, RunId, SessionId};
 use tokio_util::sync::CancellationToken;
 
 use super::{QueuedRun, RunningInfo};
@@ -46,6 +47,10 @@ pub(super) struct ActiveRun {
     /// Role đã resolve cho run này (M21.3) — để HUB quy đổi "đang chạy" về đúng
     /// agent thay vì chỉ biết có run. `None` khi RBAC tắt.
     pub role: Option<String>,
+    /// Kế hoạch bước mới nhất của run (D25). `Arc<Mutex>` vì `running()` đọc
+    /// theo `&self` trong khi model có thể vừa ghi; lock std đủ — chỉ replace,
+    /// không giữ qua `.await`.
+    pub plan: Arc<Mutex<Vec<PlanStep>>>,
 }
 
 /// Kết quả [`RunQueue::enqueue`].
@@ -112,8 +117,21 @@ impl RunQueue {
                 chat_id: queued.incoming.chat_id.clone(),
                 cancel: queued.cancel.clone(),
                 role: queued.role.clone(),
+                plan: Arc::new(Mutex::new(Vec::new())),
             },
         );
+    }
+
+    /// Ghi đè kế hoạch bước của run đang chạy (D25). Run lạ (`run_id` không còn
+    /// active — kết thúc giữa chừng) bị bỏ qua: kế hoạch đã không còn ý nghĩa.
+    pub(super) fn set_plan(&mut self, run_id: &RunId, steps: Vec<PlanStep>) {
+        if let Some(active) = self.active.get_mut(run_id) {
+            // Poisoned lock chỉ xảy ra khi ai đó panic trong lúc giữ — kế hoạch là
+            // trạng thái hiển thị, bỏ qua là an toàn (run sẽ kết thúc và gỡ).
+            if let Ok(mut plan) = active.plan.lock() {
+                *plan = steps;
+            }
+        }
     }
 
     /// Session còn run đang chạy, hoặc còn việc chờ.
@@ -226,6 +244,11 @@ impl RunQueue {
                 run_id: run_id.clone(),
                 session_id: active.session,
                 role: active.role.clone(),
+                plan: active
+                    .plan
+                    .lock()
+                    .map(|plan| plan.clone())
+                    .unwrap_or_default(),
             })
             .collect()
     }

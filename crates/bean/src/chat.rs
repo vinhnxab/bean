@@ -394,6 +394,13 @@ pub(crate) async fn build_registry(
         "skill",
     )?;
 
+    // (D25) `update_plan` — cơ chế lập kế hoạch của chính vòng lặp, đăng ký **luôn**
+    // (không thuộc nhóm `[tools].enabled`): kế hoạch là bộ phận của agent chứ không
+    // phải nhóm khả năng cho phép bật/tắt như files/web. Safe, không chạm tài nguyên.
+    registry
+        .register(bean_tools::builtin::plan::tool())
+        .context("đăng ký tool update_plan thất bại")?;
+
     register_group(
         &mut registry,
         schedule_tools(
@@ -655,6 +662,7 @@ fn event_run_id(event: &RunEvent) -> &RunId {
         | RunEvent::TextDelta { run_id, .. }
         | RunEvent::ToolStart { run_id, .. }
         | RunEvent::ToolEnd { run_id, .. }
+        | RunEvent::Plan { run_id, .. }
         | RunEvent::ConfirmRequest { run_id, .. }
         | RunEvent::ConfirmResolved { run_id, .. }
         | RunEvent::Final { run_id, .. }
@@ -746,6 +754,10 @@ fn render_event(
         RunEvent::VoiceResponse { .. } => {
             // Audio response chỉ gửi về web UI qua WebSocket.
             // CLI không hỗ trợ phát audio.
+            CliEventAction::Ignore
+        }
+        RunEvent::Plan { .. } => {
+            // Kế hoạch bước (D25) chỉ hiển thị trên Web; CLI in tiến trình qua [tool].
             CliEventAction::Ignore
         }
         RunEvent::Error { code, message, .. } => {

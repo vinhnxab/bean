@@ -7,6 +7,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ConfirmId, Risk, RunId, SessionId};
 
+/// Trạng thái một bước trong kế hoạch của run (D25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStepStatus {
+    /// Chưa làm.
+    Pending,
+    /// Đang làm — tối đa một bước ở trạng thái này tại một thời điểm.
+    InProgress,
+    /// Đã xong.
+    Done,
+}
+
+/// Một bước trong kế hoạch của run (D25). Model gửi **toàn bộ** danh sách mỗi lần
+/// gọi `update_plan` (snapshot, không phải delta) để trạng thái luôn khớp một nguồn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanStep {
+    /// Tiêu đề ngắn, một dòng.
+    pub title: String,
+    /// Trạng thái hiện tại của bước.
+    pub status: PlanStepStatus,
+}
+
 /// Kết quả cuối cùng của một yêu cầu xác nhận.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -141,6 +164,19 @@ pub enum RunEvent {
         audio_base64: String,
         /// MIME type của audio (ví dụ `audio/mpeg`, `audio/wav`).
         mime: String,
+    },
+    /// Model vừa cập nhật kế hoạch bước của lượt (D25, tool `update_plan`).
+    ///
+    /// `steps` là snapshot đầy đủ — client thay thế danh sách cũ, không nối vào.
+    /// Kế hoạch chỉ là trạng thái sống theo run: nằm trong `RunningInfo` để client
+    /// nối lại giữa chừng (`Sync`) khôi phục được mà không cần phát lại sự kiện.
+    Plan {
+        /// Session của run.
+        session_id: SessionId,
+        /// Run phát sự kiện.
+        run_id: RunId,
+        /// Danh sách bước mới, thay thế toàn bộ kế hoạch cũ.
+        steps: Vec<PlanStep>,
     },
     /// Run kết thúc do lỗi.
     Error {

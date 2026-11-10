@@ -15,8 +15,8 @@ use bean_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use bean_tools::{AlertSink, ToolRegistry, truncate_chars};
 use bean_types::config::LlmProviderKind;
 use bean_types::{
-    AgentReport, AgentStatus, Config, ConfirmId, ConfirmOutcome, NO_ACCESS_ROLE, Outbound, Risk,
-    RolePermissions, RunEvent, RunId, SessionId,
+    AgentReport, AgentStatus, Config, ConfirmId, ConfirmOutcome, NO_ACCESS_ROLE, Outbound,
+    PlanStep, Risk, RolePermissions, RunEvent, RunId, SessionId,
 };
 use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;

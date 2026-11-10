@@ -115,6 +115,16 @@ impl<'a> Agent<'a> {
         let args_preview = args_preview(&call.args);
         io.on_tool_start(&call.id, &call.name, risk, &call.name, &args_preview);
 
+        // (D25) Kế hoạch bước: phát sự kiện **trước khi** tool chạy để UI cập nhật
+        // tức thì. Parse lại args ở đây (tool sẽ validate lần nữa khi chạy) — args
+        // là JSON không tin cậy nên chỉ phát khi khớp schema và ràng buộc; sai thì
+        // tool trả lỗi rõ ràng cho model tự sửa, không phát kế hoạch sai ra UI.
+        if call.name == bean_tools::builtin::plan::PLAN_TOOL
+            && let Some(steps) = bean_tools::builtin::plan::parse_plan_steps(&call.args)
+        {
+            io.on_plan(&steps);
+        }
+
         if cancel.is_cancelled() {
             append_run_message(
                 store,

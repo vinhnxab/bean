@@ -7,6 +7,7 @@ import { BeanMark } from "@/components/brand/BeanMark";
 import { Composer } from "@/components/chat/Composer";
 import { ConfirmCard } from "@/components/chat/ConfirmCard";
 import { MessageRow } from "@/components/chat/MessageRow";
+import { PlanCard } from "@/components/chat/PlanCard";
 import { QueuePill, ThinkingIndicator } from "@/components/chat/RunStatus";
 import { SafeMarkdown } from "@/components/markdown/SafeMarkdown";
 import {
@@ -293,9 +294,18 @@ function ChatSession({ sessionId }: { sessionId: number }) {
                 (`submitting`) để có phản hồi tức thì; khi `stopping` đổi nhãn thành
                 "Đang dừng…". Kết quả cuối cùng xuất hiện khi `final` nạp lại lịch sử. */}
             {run && (run.status === "submitting" || run.status === "running" || run.status === "stopping") ? (
-              <Enter kind="rise" className="mt-4 flex justify-center">
-                <ThinkingIndicator startedAt={run.startedAt} stopping={run.status === "stopping"} />
-              </Enter>
+              <div className="mt-4 space-y-3">
+                {/* Kế hoạch bước (D25) hiện ngay trên pill "Đang suy nghĩ" — giúp
+                    việc dài không lạc hướng; biến mất cùng run khi kết thúc. */}
+                {run.plan.length > 0 ? (
+                  <Enter kind="rise">
+                    <PlanCard steps={run.plan} />
+                  </Enter>
+                ) : null}
+                <Enter kind="rise" className="flex justify-center">
+                  <ThinkingIndicator startedAt={run.startedAt} stopping={run.status === "stopping"} />
+                </Enter>
+              </div>
             ) : null}
             {run && (run.error || run.errorCode === "interrupted") ? (
               <Enter kind="shake" className="mt-4">

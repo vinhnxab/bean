@@ -97,6 +97,7 @@ pub(super) fn event_run_id(event: &RunEvent) -> &RunId {
         | RunEvent::TextDelta { run_id, .. }
         | RunEvent::ToolStart { run_id, .. }
         | RunEvent::ToolEnd { run_id, .. }
+        | RunEvent::Plan { run_id, .. }
         | RunEvent::ConfirmRequest { run_id, .. }
         | RunEvent::ConfirmResolved { run_id, .. }
         | RunEvent::Final { run_id, .. }

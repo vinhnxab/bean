@@ -74,7 +74,11 @@ describe("chat event state", () => {
     useChatStore
       .getState()
       .applySync(
-        { type: "sync", running: [{ session_id: 1, run_id: "run-1", role: null }], pending_confirms: [] },
+        {
+          type: "sync",
+          running: [{ session_id: 1, run_id: "run-1", role: null, plan: [] }],
+          pending_confirms: [],
+        },
         true,
       );
     expect(useChatStore.getState().runsBySession[1]?.streamText).toBe("Xin");
@@ -174,7 +178,11 @@ describe("chat event state", () => {
     useChatStore
       .getState()
       .applySync(
-        { type: "sync", running: [{ session_id: 3, run_id: "run-3", role: null }], pending_confirms: [] },
+        {
+          type: "sync",
+          running: [{ session_id: 3, run_id: "run-3", role: null, plan: [] }],
+          pending_confirms: [],
+        },
         true,
       );
     const run = useChatStore.getState().runsBySession[3];
@@ -233,7 +241,11 @@ describe("chat event state", () => {
       useChatStore
         .getState()
         .applySync(
-          { type: "sync", running: [{ session_id: 1, run_id: "run-1", role: null }], pending_confirms: [] },
+          {
+            type: "sync",
+            running: [{ session_id: 1, run_id: "run-1", role: null, plan: [] }],
+            pending_confirms: [],
+          },
           true,
         );
       expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(startedAt);
@@ -242,12 +254,90 @@ describe("chat event state", () => {
       useChatStore
         .getState()
         .applySync(
-          { type: "sync", running: [{ session_id: 1, run_id: "run-9", role: null }], pending_confirms: [] },
+          {
+            type: "sync",
+            running: [{ session_id: 1, run_id: "run-9", role: null, plan: [] }],
+            pending_confirms: [],
+          },
           true,
         );
       expect(useChatStore.getState().runsBySession[1]?.startedAt).toBe(Date.parse("2026-10-21T08:00:05Z"));
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("chat plan state (D25)", () => {
+  it("event plan ghi đè toàn bộ danh sách bước và final xoá sạch", () => {
+    useChatStore.getState().reset();
+    const effect = useChatStore.getState().applyServerMessage({
+      type: "plan",
+      session_id: 1,
+      run_id: "run-1",
+      steps: [
+        { title: "Đọc bug report", status: "done" },
+        { title: "Sửa code", status: "in_progress" },
+        { title: "Chạy test", status: "pending" },
+      ],
+    });
+    const run = useChatStore.getState().runsBySession[1];
+    expect(effect?.runId).toBe("run-1");
+    expect(run?.status).toBe("running");
+    expect(run?.plan.map((step) => step.status)).toEqual(["done", "in_progress", "pending"]);
+
+    // Snapshot thứ hai THAY THẾ (không nối): bước cũ bị gỡ.
+    useChatStore.getState().applyServerMessage({
+      type: "plan",
+      session_id: 1,
+      run_id: "run-1",
+      steps: [{ title: "Sửa code", status: "done" }],
+    });
+    expect(useChatStore.getState().runsBySession[1]?.plan).toEqual([{ title: "Sửa code", status: "done" }]);
+
+    useChatStore.getState().applyServerMessage({
+      type: "final",
+      session_id: 1,
+      run_id: "run-1",
+      message_id: 7,
+      text: "xong",
+    });
+    const idle = useChatStore.getState().runsBySession[1];
+    expect(idle?.status).toBe("idle");
+    expect(idle?.plan).toEqual([]);
+  });
+
+  it("plan trùng nội dung bị dedupe theo event key (WS lag không nhân đôi)", () => {
+    useChatStore.getState().reset();
+    const message = {
+      type: "plan",
+      session_id: 2,
+      run_id: "run-2",
+      steps: [{ title: "Một bước", status: "pending" }],
+    } as Extract<ServerMsg, { type: "plan" }>;
+    useChatStore.getState().applyServerMessage(message);
+    useChatStore.getState().applyServerMessage(message);
+    expect(useChatStore.getState().runsBySession[2]?.plan).toHaveLength(1);
+  });
+
+  it("applySync khôi phục plan từ snapshot khi client nối lại giữa chừng", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().applySync(
+      {
+        type: "sync",
+        running: [
+          {
+            session_id: 4,
+            run_id: "run-4",
+            role: null,
+            plan: [{ title: "Bước còn dang", status: "in_progress" }],
+          },
+        ],
+        pending_confirms: [],
+      },
+      true,
+    );
+    const run = useChatStore.getState().runsBySession[4];
+    expect(run?.plan).toEqual([{ title: "Bước còn dang", status: "in_progress" }]);
   });
 });

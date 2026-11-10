@@ -19,6 +19,6 @@ pub use message::{ALLOWED_IMAGE_MEDIA_TYPES, ImageBlock, Message, Role, ToolCall
 pub use rbac::{ALL_TAGS, NO_ACCESS_ROLE, RolePermissions, WILDCARD_TAG};
 pub use router::{
     AgentRelation, AgentReport, AgentStatus, Alert, AlertSeverity, ConfirmOutcome, Outbound,
-    OutboundAction, OutboundKind, RunEvent,
+    OutboundAction, OutboundKind, PlanStep, PlanStepStatus, RunEvent,
 };
 pub use tool::{Risk, ToolSpec};

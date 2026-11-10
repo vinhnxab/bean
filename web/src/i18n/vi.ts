@@ -81,6 +81,8 @@ export const vi = {
   "chat.interrupted": "Kết nối bị gián đoạn trong khi đang xử lý; không rõ tin vừa gửi đã tới đâu.",
   "chat.queued": "Đang chờ",
   "chat.thinking": "Đang suy nghĩ…",
+  "chat.plan.title": "Kế hoạch",
+  "chat.plan.progress": "{done}/{total} xong",
   "chat.loadingOlder": "Tải tin cũ hơn",
   "chat.noMore": "Đã hiển thị toàn bộ tin nhắn",
   "chat.connected": "Đã kết nối",

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { PendingConfirm, ServerMsg } from "@/api/bindings";
+import type { PendingConfirm, PlanStepDto, ServerMsg } from "@/api/bindings";
 
 export type RunStatus = "idle" | "submitting" | "queued" | "running" | "stopping";
 export type ConfirmState = PendingConfirm & {
@@ -24,6 +24,8 @@ export type SessionRunState = {
   queuePosition: number | null;
   streamText: string;
   liveTools: Record<string, LiveTool>;
+  /** Kế hoạch bước mới nhất của run (D25) — event `plan` ghi đè toàn bộ. */
+  plan: PlanStepDto[];
   /** Mốc giờ (ms) run bắt đầu — cho đồng hồ "Đang suy nghĩ"; `null` khi không có run. */
   startedAt: number | null;
   error: string | null;
@@ -57,6 +59,7 @@ function idleRun(): SessionRunState {
     queuePosition: null,
     streamText: "",
     liveTools: {},
+    plan: [],
     startedAt: null,
     error: null,
     errorCode: null,
@@ -82,6 +85,10 @@ function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): strin
     case "tool_start":
     case "tool_end":
       return `${message.type}:${message.run_id}:${message.id}`;
+    case "plan":
+      // Nội dung là snapshot ghi đè: dedupe theo nội dung để WS lag không tạo
+      // key mới mỗi lần, mà vẫn nhận được plan rỗng và plan giống nhau lặp lại.
+      return `plan:${message.run_id}:${JSON.stringify(message.steps)}`;
     case "final":
       return `${message.type}:${message.run_id}`;
     case "notification":
@@ -133,6 +140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           queuePosition: null,
           streamText: "",
           liveTools: {},
+          plan: [],
           error: null,
           errorCode: null,
         }),
@@ -172,6 +180,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           errorCode: null,
           streamText: previous?.runId === item.run_id ? previous.streamText : "",
           liveTools: previous?.runId === item.run_id ? previous.liveTools : {},
+          // Kế hoạch khôi phục từ snapshot Sync — client nối lại giữa chừng không
+          // mất plan mà không cần server phát lại sự kiện.
+          plan: item.plan,
           // Cùng run_id: giữ mốc giờ cũ (tab mới nối lại không được reset đồng hồ);
           // run lạ: bắt đầu đếm từ bây giờ.
           startedAt: previous?.runId === item.run_id ? (previous.startedAt ?? Date.now()) : Date.now(),
@@ -282,6 +293,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           effect = { sessionId: message.session_id, messageId: null, runId: message.run_id };
           break;
         }
+        case "plan": {
+          const run = runFor(state, message.session_id, {
+            runId: message.run_id,
+            status: "running",
+            queuePosition: null,
+            error: null,
+            errorCode: null,
+          });
+          runs[message.session_id] = { ...run, plan: message.steps };
+          effect = { sessionId: message.session_id, messageId: null, runId: message.run_id };
+          break;
+        }
         case "confirm_request":
           runs[message.session_id] = runFor(state, message.session_id, {
             runId: message.run_id,
@@ -305,6 +328,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             queuePosition: null,
             streamText: "",
             liveTools: {},
+            plan: [],
           };
           effect = { sessionId: message.session_id, messageId: message.message_id, runId: message.run_id };
           break;
@@ -324,6 +348,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               queuePosition: null,
               streamText: "",
               liveTools: {},
+              plan: [],
             };
           }
           break;

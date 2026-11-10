@@ -32,6 +32,9 @@ impl TelegramChannel {
             // Streaming token chỉ dành cho Web UI. Telegram chờ Final để tránh gửi
             // hàng trăm tin nhắn và vẫn nhận đúng một tin đầy đủ.
             RunEvent::TextDelta { .. } => {}
+            // Kế hoạch bước (D25) chỉ hiển thị trên Web; Telegram nhận tiến trình
+            // qua ToolStart và câu trả lời cuối.
+            RunEvent::Plan { .. } => {}
             RunEvent::ToolStart { tool, summary, .. } => {
                 if let Some(target) = self.run_target(&run_id) {
                     self.send_chat_text(target.chat_id, &format!("🔧 {tool}: {summary}"))
