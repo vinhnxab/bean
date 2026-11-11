@@ -83,7 +83,7 @@
 - Giới hạn bước, ngân sách token/ngày, chống lặp tool, audit JSONL.
 - Kế hoạch có cấu trúc: tool `update_plan` (Safe) — model gửi snapshot toàn bộ danh sách bước, UI web hiện thẻ tiến độ lúc đang chạy; plan sống theo run, khôi phục qua `Sync` (lộ trình mục 5b, D25, 2026-11-10).
 - Checkpoint/rollback workspace: chụp snapshot vào `data.dir/checkpoints/` trước tool ghi đầu tiên của lượt (run thuần đọc không tốn chi phí); tool `rollback_workspace` (Confirm, kèm danh sách thay đổi thật trong prompt xác nhận) hoàn tác mọi thay đổi của lượt hiện tại; capture fail ⇒ từ chối tool ghi (lộ trình mục 5c, D26, 2026-11-11).
-- Hiển thị diff khi duyệt ghi file: `write_file`/`edit_file` kèm diff thật đo tại thời điểm hỏi trong prompt xác nhận (web tô màu +/−), thay preview `content=<toàn bộ>`; `edit_file` cảnh báo trước khi `old` không khớp duy nhất (D27, 2026-11-11).
+- Hiển thị diff khi duyệt ghi file: `write_file`/`edit_file` kèm diff thật đo tại thời điểm hỏi trong prompt xác nhận (web tô màu +/−), thay preview `content=<toàn bộ>`; `edit_file` cảnh báo trước khi `old` không khớp duy nhất (D27, 2026-11-11). **Đã kiểm chứng tay qua web với model thật**: thẻ hiển thị đúng `ghi đè (9 dòng → 9 dòng)`, diff 2 thay đổi (ngày + ghi chú), context hai phía nguyên vẹn.
 
 ### Provider và tool
 
