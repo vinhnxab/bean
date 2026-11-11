@@ -13,6 +13,7 @@ import { SafeMarkdown } from "@/components/markdown/SafeMarkdown";
 import {
   deduplicateMessages,
   isWorkMessage,
+  mergeConfirmFlow,
   parseStoredMessage,
   type StoredMessage,
 } from "@/features/chat/messages";
@@ -61,6 +62,10 @@ function ChatSession({ sessionId }: { sessionId: number }) {
   );
 
   const confirmCount = confirms.length;
+
+  // Thẻ xác nhận nằm đúng dòng thời gian thay vì luôn ghim ở cuối: khi `final`
+  // nạp lại lịch sử, câu trả lời cuối không còn chen lên trước thẻ đã duyệt.
+  const flow = useMemo(() => mergeConfirmFlow(messages, confirms), [messages, confirms]);
 
   // --- Hoạt ảnh "tin mới" --------------------------------------------------
   // Lịch sử sẵn có khi mở phiên KHÔNG animate: mở một phiên dài mà mỗi tin lại
@@ -262,27 +267,30 @@ function ChatSession({ sessionId }: { sessionId: number }) {
             ) : null}
             {!history.isPending && messages.length === 0 ? <EmptyChat onPick={setText} /> : null}
             <div className="space-y-6">
-              {messages.map((message) => {
+              {flow.map((item) => {
+                if (item.kind === "confirm") {
+                  const confirm = item.confirm;
+                  return (
+                    <Enter key={confirm.confirm_id} kind="pop">
+                      <ConfirmCard
+                        confirm={confirm}
+                        onDecision={(decision) => decide(confirm.confirm_id, decision)}
+                        onExpire={expire}
+                      />
+                    </Enter>
+                  );
+                }
                 // `HistoryMessage` tự trả `null` cho tin quá trình (lời gọi tool,
                 // kết quả tool); lọc trước khi bọc — bọc `<Enter>` quanh `null` sẽ
                 // để lại div rỗng làm hở dòng do `space-y-6`.
-                const parsed = parseStoredMessage(message);
+                const parsed = parseStoredMessage(item.message);
                 if (!parsed || isWorkMessage(parsed)) return null;
                 return (
-                  <Enter key={message.id} when={isNew(message.id)} kind="rise">
-                    <HistoryMessage dto={message} />
+                  <Enter key={item.message.id} when={isNew(item.message.id)} kind="rise">
+                    <HistoryMessage dto={item.message} />
                   </Enter>
                 );
               })}
-              {confirms.map((confirm) => (
-                <Enter key={confirm.confirm_id} kind="pop">
-                  <ConfirmCard
-                    confirm={confirm}
-                    onDecision={(decision) => decide(confirm.confirm_id, decision)}
-                    onExpire={expire}
-                  />
-                </Enter>
-              ))}
             </div>
             {run?.status === "queued" ? (
               <Enter kind="pop" className="mt-4 flex justify-center">

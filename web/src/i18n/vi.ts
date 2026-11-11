@@ -309,6 +309,8 @@ export const vi = {
   "confirm.denied": "Đã từ chối",
   "confirm.expired": "Đã hết hạn",
   "confirm.submitting": "Đang gửi quyết định…",
+  "confirm.collapse": "Thu gọn nội dung hành động",
+  "confirm.expand": "Mở nội dung hành động",
   "confirm.risk.safe": "An toàn",
   "confirm.risk.confirm": "Cần xác nhận",
   "confirm.risk.dangerous": "Nguy hiểm",

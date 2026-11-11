@@ -302,6 +302,8 @@ export const en: Record<MessageKey, string> = {
   "confirm.denied": "Denied",
   "confirm.expired": "Expired",
   "confirm.submitting": "Sending decision…",
+  "confirm.collapse": "Collapse action details",
+  "confirm.expand": "Expand action details",
   "confirm.risk.safe": "Safe",
   "confirm.risk.confirm": "Confirmation required",
   "confirm.risk.dangerous": "Dangerous",

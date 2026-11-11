@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { MessageDto } from "@/api/bindings";
-import { isWorkMessage, parseStoredMessage } from "@/features/chat/messages";
+import { isWorkMessage, mergeConfirmFlow, parseStoredMessage } from "@/features/chat/messages";
+import type { ConfirmState } from "@/store/chat";
 
 function dto(message: Record<string, unknown>): MessageDto {
   return {
@@ -113,5 +114,110 @@ describe("isWorkMessage — ẩn quá trình làm việc của Bean trong dòng 
   it("tin của người dùng luôn hiện", () => {
     const parsed = parseStoredMessage(dto({ role: "user", text: "chào Bean" }));
     expect(parsed && isWorkMessage(parsed)).toBe(false);
+  });
+});
+
+function confirmState(overrides: Partial<ConfirmState> = {}): ConfirmState {
+  return {
+    confirm_id: "c1",
+    session_id: 1,
+    run_id: "r1",
+    prompt: "run_shell --command ls",
+    risk: "confirm",
+    allow_session_option: true,
+    timeout_seconds: 300,
+    role: null,
+    receivedAt: Date.parse("2026-11-11T00:00:10Z"),
+    resolution: "allowed",
+    ...overrides,
+  };
+}
+
+function msgDto(id: number, seq: number, role: string, text: string, createdAt: string): MessageDto {
+  return {
+    id,
+    session_id: 1,
+    seq,
+    message: { role, text } as MessageDto["message"],
+    created_at: createdAt,
+  };
+}
+
+describe("mergeConfirmFlow — thẻ xác nhận nằm đúng dòng thời gian", () => {
+  it("thẻ nằm sau tin kích hoạt và trước câu trả lời cuối tạo sau nó", () => {
+    const flow = mergeConfirmFlow(
+      [
+        msgDto(1, 1, "user", "làm giúp", "2026-11-11T00:00:00Z"),
+        msgDto(2, 2, "assistant", "xong rồi", "2026-11-11T00:00:20Z"),
+      ],
+      [confirmState()],
+    );
+
+    expect(flow.map((item) => item.kind)).toEqual(["message", "confirm", "message"]);
+    expect(flow[0]?.kind === "message" && flow[0].message.id).toBe(1);
+    expect(flow[2]?.kind === "message" && flow[2].message.id).toBe(2);
+  });
+
+  it("nhiều thẻ giữ thứ tự receivedAt bất kể thứ tự trong store", () => {
+    const flow = mergeConfirmFlow(
+      [
+        msgDto(1, 1, "user", "làm giúp", "2026-11-11T00:00:00Z"),
+        msgDto(2, 2, "assistant", "xong rồi", "2026-11-11T00:00:20Z"),
+      ],
+      [
+        confirmState({ confirm_id: "c2", receivedAt: Date.parse("2026-11-11T00:00:15Z") }),
+        confirmState({ confirm_id: "c1", receivedAt: Date.parse("2026-11-11T00:00:05Z") }),
+      ],
+    );
+
+    expect(flow.map((item) => (item.kind === "confirm" ? item.confirm.confirm_id : "msg"))).toEqual([
+      "msg",
+      "c1",
+      "c2",
+      "msg",
+    ]);
+  });
+
+  it("thẻ đang chờ (mới hơn mọi tin) nằm đáy — đúng hành vi khi run đang chạy", () => {
+    const flow = mergeConfirmFlow(
+      [msgDto(1, 1, "user", "làm giúp", "2026-11-11T00:00:00Z")],
+      [confirmState({ resolution: "pending", receivedAt: Date.now() })],
+    );
+
+    expect(flow.map((item) => item.kind)).toEqual(["message", "confirm"]);
+  });
+
+  it("thẻ của run trước nằm trước tin của run sau", () => {
+    const flow = mergeConfirmFlow(
+      [
+        msgDto(1, 1, "user", "run một", "2026-11-11T00:00:00Z"),
+        msgDto(2, 2, "assistant", "xong run một", "2026-11-11T00:00:20Z"),
+        msgDto(3, 3, "user", "run hai", "2026-11-11T01:00:00Z"),
+      ],
+      [confirmState()],
+    );
+
+    expect(flow.map((item) => item.kind)).toEqual(["message", "confirm", "message", "message"]);
+    expect(flow[3]?.kind === "message" && flow[3].message.id).toBe(3);
+  });
+
+  it("created_at không parse được thì thẻ xếp sau tin đó", () => {
+    const flow = mergeConfirmFlow(
+      [msgDto(1, 1, "user", "làm giúp", "không-phải-thời-gian")],
+      [confirmState()],
+    );
+
+    expect(flow.map((item) => item.kind)).toEqual(["message", "confirm"]);
+  });
+
+  it("không có thẻ thì luồng giữ nguyên danh sách tin", () => {
+    const messages = [
+      msgDto(1, 1, "user", "chào", "2026-11-11T00:00:00Z"),
+      msgDto(2, 2, "assistant", "hi", "2026-11-11T00:00:01Z"),
+    ];
+    const flow = mergeConfirmFlow(messages, []);
+
+    expect(flow).toHaveLength(2);
+    expect(flow.every((item) => item.kind === "message")).toBe(true);
   });
 });

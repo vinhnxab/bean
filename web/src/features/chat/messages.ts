@@ -1,4 +1,5 @@
 import type { JsonValue, MessageDto } from "@/api/bindings";
+import type { ConfirmState } from "@/store/chat";
 
 export type StoredToolCall = {
   id: string;
@@ -94,4 +95,41 @@ export function isWorkMessage(message: StoredMessage): boolean {
   if (message.role === "tool") return message.image === null;
   if (message.role === "assistant") return message.toolCalls.length > 0;
   return false;
+}
+
+/** Một phần tử trong luồng chat: tin từ DB hoặc thẻ xác nhận đến trực tiếp qua WS. */
+export type FlowItem = { kind: "message"; message: MessageDto } | { kind: "confirm"; confirm: ConfirmState };
+
+/**
+ * Gộp thẻ xác nhận vào dòng thời gian của tin nhắn theo thứ tự phát sinh.
+ *
+ * Thẻ xác nhận là trạng thái trực tiếp (WS) còn tin là lịch sử (REST): nếu render
+ * thẻ luôn ở cuối danh sách thì khi `final` nạp lại lịch sử, câu trả lời cuối
+ * chen lên TRƯỚC thẻ — sai dòng thời gian vì hành động xác nhận xảy ra trước
+ * câu trả lời. So sánh `receivedAt` (client, epoch ms) với `created_at` (server,
+ * RFC3339): thẻ chèn vào trước tin đầu tiên được tạo sau nó.
+ *
+ * Lệch đồng hồ client/server chỉ làm thẻ lệch vị trí về mặt hiển thị (agent cá
+ * nhân: client thường cùng máy với server); sau khi tải lại trang thẻ xác nhận
+ * biến mất nên sai lệch không tích tụ. Thẻ đang chờ (`receivedAt` = bây giờ) luôn
+ * mới hơn mọi tin đã có → tự nằm đáy, đúng hành vi khi run đang chạy.
+ */
+export function mergeConfirmFlow(messages: MessageDto[], confirms: ConfirmState[]): FlowItem[] {
+  const ordered = [...confirms].sort((left, right) => left.receivedAt - right.receivedAt);
+  const items: FlowItem[] = [];
+  let cursor = 0;
+  for (const message of messages) {
+    const at = Date.parse(message.created_at);
+    if (!Number.isNaN(at)) {
+      while (cursor < ordered.length && ordered[cursor].receivedAt <= at) {
+        items.push({ kind: "confirm", confirm: ordered[cursor] });
+        cursor += 1;
+      }
+    }
+    items.push({ kind: "message", message });
+  }
+  for (; cursor < ordered.length; cursor += 1) {
+    items.push({ kind: "confirm", confirm: ordered[cursor] });
+  }
+  return items;
 }

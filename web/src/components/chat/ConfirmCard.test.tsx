@@ -1,4 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConfirmCard } from "@/components/chat/ConfirmCard";
@@ -127,5 +128,78 @@ describe("ConfirmCard", () => {
 
     const pre = screen.getByText(/rm -rf \/tmp\/demo/);
     expect(pre.querySelector("span")).toBeNull();
+  });
+
+  it("thẻ đã resolve tự thu gọn: ẩn nguyên văn, còn dòng nhận diện và trạng thái", () => {
+    render(
+      <I18nProvider>
+        <ConfirmCard
+          confirm={pendingConfirm({
+            resolution: "allowed",
+            prompt: "write_file path=ghi-chu.md\n--- a/ghi-chu.md\n+++ b/ghi-chu.md\n@@ -1 +1 @@\n-cũ\n+mới",
+          })}
+          onDecision={vi.fn()}
+          onExpire={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    // Chỉ còn dòng đầu của prompt; khối diff và nhãn "Hành động" biến mất.
+    expect(screen.getByText("write_file path=ghi-chu.md")).toBeInTheDocument();
+    expect(screen.queryByText(/--- a\/ghi-chu\.md/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Action")).not.toBeInTheDocument();
+    expect(screen.getByText("Allowed")).toBeInTheDocument();
+    expect(screen.getByText("Confirmation required")).toBeInTheDocument();
+  });
+
+  it("bấm tiêu đề mở lại nguyên văn của thẻ đã resolve, bấm nữa thu lại", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider>
+        <ConfirmCard
+          confirm={pendingConfirm({
+            resolution: "denied",
+            prompt: "write_file path=ghi-chu.md\n--- a/ghi-chu.md\n+++ b/ghi-chu.md\n@@ -1 +1 @@\n-cũ\n+mới",
+          })}
+          onDecision={vi.fn()}
+          onExpire={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Action confirmation required" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+
+    expect(screen.getByText(/--- a\/ghi-chu\.md/)).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(toggle);
+    expect(screen.queryByText(/--- a\/ghi-chu\.md/)).not.toBeInTheDocument();
+  });
+
+  it("thẻ đang chờ mở mặc định; thu gọn bằng tay vẫn giữ nút và đếm ngược", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider>
+        <ConfirmCard
+          confirm={pendingConfirm({
+            prompt: "write_file path=ghi-chu.md\n--- a/ghi-chu.md\n+++ b/ghi-chu.md\n@@ -1 +1 @@\n-cũ\n+mới",
+          })}
+          onDecision={vi.fn()}
+          onExpire={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Action confirmation required" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/--- a\/ghi-chu\.md/)).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(screen.queryByText(/--- a\/ghi-chu\.md/)).not.toBeInTheDocument();
+    // An toàn: thu gọn không mất nút quyết định và đồng hồ đếm ngược.
+    expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(screen.getByText(/Expires in/)).toBeInTheDocument();
   });
 });

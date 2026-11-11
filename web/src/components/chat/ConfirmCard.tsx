@@ -1,3 +1,4 @@
+import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { DecisionDto } from "@/api/bindings";
@@ -52,6 +53,10 @@ export function ConfirmCard({
   const [remaining, setRemaining] = useState(() =>
     Math.max(0, Math.ceil((confirm.receivedAt + confirm.timeout_seconds * 1000 - Date.now()) / 1000)),
   );
+  // Thu gọn nội dung hành động: diff/lệnh dài chiếm nhiều chỗ trong luồng chat,
+  // nhất là sau khi đã duyệt xong. `null` = chưa can thiệp tay — khi đó thẻ tự
+  // thu gọn ngay khi được giải quyết, bấm tiêu đề để xem lại nguyên văn.
+  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -92,6 +97,8 @@ export function ConfirmCard({
   // denied/expired = mực mờ (đã đóng). Số đếm ngược dùng chữ số tabular để
   // không giật cột mỗi giây.
   const statusClass = confirm.resolution === "allowed" ? "text-live" : resolved ? "text-ink-muted" : "";
+  const collapsed = manualCollapsed ?? resolved;
+  const firstPromptLine = confirm.prompt.split("\n")[0] ?? "";
 
   function decide(decision: DecisionDto) {
     if (confirm.resolution !== "pending" || remaining === 0) return;
@@ -105,8 +112,22 @@ export function ConfirmCard({
       aria-labelledby={`confirm-${confirm.confirm_id}`}
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 id={`confirm-${confirm.confirm_id}`} className="font-semibold">
-          {t("confirm.title")}
+        {/* Nút thu gọn theo mẫu accordion (WAI-ARIA): nút nằm trong heading,
+            `aria-expanded` báo trạng thái — không dùng phím tắt, không tự focus. */}
+        <h2 id={`confirm-${confirm.confirm_id}`} className="flex items-center font-semibold">
+          <button
+            type="button"
+            onClick={() => setManualCollapsed(!collapsed)}
+            aria-expanded={!collapsed}
+            title={collapsed ? t("confirm.expand") : t("confirm.collapse")}
+            className="flex items-center gap-1 rounded text-left transition-colors hover:text-ink"
+          >
+            <ChevronDownIcon
+              aria-hidden="true"
+              className={`size-4 shrink-0 text-ink-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+            />
+            {t("confirm.title")}
+          </button>
         </h2>
         <span
           className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${riskTextClass}`}
@@ -115,33 +136,44 @@ export function ConfirmCard({
           {riskText}
         </span>
       </div>
-      <p className="mb-1 text-xs font-medium text-ink-muted">{t("confirm.action")}</p>
-      <pre className="whitespace-pre-wrap break-words rounded-md bg-surface-raised p-3 font-mono text-sm">
-        {(() => {
-          // (D27) Prompt có khối diff ⇒ tô màu từng dòng bằng <span> (React tự
-          // escape, KHÔNG dangerouslySetInnerHTML — mục 12.3). Prompt thường
-          // (run_shell…) giữ nguyên một text node. Key là offset ký tự của dòng
-          // trong prompt — ổn định và duy nhất kể cả khi nội dung trùng nhau.
-          const lines = confirm.prompt.split("\n");
-          const diffStart = findDiffStart(lines);
-          if (diffStart === -1) return confirm.prompt;
-          let offset = 0;
-          const items = lines.map((line) => {
-            const item = { line, offset };
-            offset += line.length + 1;
-            return item;
-          });
-          return items.map((item, position) => {
-            const kindClass = position >= diffStart ? diffLineClass(item.line) : null;
-            const text = position < items.length - 1 ? `${item.line}\n` : item.line;
-            return (
-              <span key={item.offset} className={kindClass ?? undefined}>
-                {text}
-              </span>
-            );
-          });
-        })()}
-      </pre>
+      {collapsed ? (
+        // Dòng nhận diện gọn khi thu gọn: dòng đầu của prompt (lệnh/đường dẫn).
+        // Nút quyết định và trạng thái vẫn hiện ở dưới — thẻ đang chờ thu gọn
+        // bằng tay vẫn đủ để hành động.
+        <p className="truncate font-mono text-xs text-ink-muted" title={firstPromptLine}>
+          {firstPromptLine}
+        </p>
+      ) : (
+        <>
+          <p className="mb-1 text-xs font-medium text-ink-muted">{t("confirm.action")}</p>
+          <pre className="whitespace-pre-wrap break-words rounded-md bg-surface-raised p-3 font-mono text-sm">
+            {(() => {
+              // (D27) Prompt có khối diff ⇒ tô màu từng dòng bằng <span> (React tự
+              // escape, KHÔNG dangerouslySetInnerHTML — mục 12.3). Prompt thường
+              // (run_shell…) giữ nguyên một text node. Key là offset ký tự của dòng
+              // trong prompt — ổn định và duy nhất kể cả khi nội dung trùng nhau.
+              const lines = confirm.prompt.split("\n");
+              const diffStart = findDiffStart(lines);
+              if (diffStart === -1) return confirm.prompt;
+              let offset = 0;
+              const items = lines.map((line) => {
+                const item = { line, offset };
+                offset += line.length + 1;
+                return item;
+              });
+              return items.map((item, position) => {
+                const kindClass = position >= diffStart ? diffLineClass(item.line) : null;
+                const text = position < items.length - 1 ? `${item.line}\n` : item.line;
+                return (
+                  <span key={item.offset} className={kindClass ?? undefined}>
+                    {text}
+                  </span>
+                );
+              });
+            })()}
+          </pre>
+        </>
+      )}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <span className={`hub-num text-sm font-medium ${statusClass}`} aria-live="polite">
           {status}
