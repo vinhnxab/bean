@@ -158,6 +158,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             // `bean serve` biết đường config gốc → bật CRUD provider profile từ UI.
             config_path: config_path.map(std::path::Path::to_path_buf),
             speech: speech.clone(),
+            checkpoints: built.checkpoints.clone(),
         },
         bean_core::RouterOptions {
             secrets: Some(secret_store),

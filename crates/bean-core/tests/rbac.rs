@@ -231,6 +231,8 @@ async fn run_once(
         permissions: perms,
         project,
         alerts: None,
+
+        checkpoints: None,
     })
     .await
     .unwrap();
@@ -377,6 +379,8 @@ async fn qa_cannot_see_or_call_dev_write_tool() {
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
     .unwrap();
@@ -457,6 +461,8 @@ async fn two_projects_do_not_mix_memory_md() {
             permissions: &perms,
             project,
             alerts: None,
+
+            checkpoints: None,
         })
         .await
         .unwrap();

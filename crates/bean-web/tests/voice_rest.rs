@@ -75,6 +75,8 @@ async fn fixture(speech_enabled: bool) -> (tempfile::TempDir, AxumRouter) {
             skills: Some(skills.clone()),
             llm_state_path: None,
             speech: None,
+
+            checkpoints: None,
         },
         bean_core::RouterOptions {
             secrets: Some(secrets),

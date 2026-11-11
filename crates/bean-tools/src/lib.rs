@@ -22,6 +22,7 @@
 #![forbid(unsafe_code)]
 
 pub mod builtin;
+pub mod checkpoint;
 pub mod ctx;
 pub mod error;
 pub mod mcp;
@@ -33,6 +34,7 @@ pub mod untrusted;
 pub mod workspace;
 
 pub use bean_types::{ImageBlock, Risk, ToolSpec};
+pub use checkpoint::{ChangeList, ROLLBACK_TOOL, RestoreReport, WorkspaceCheckpoint};
 pub use ctx::{AlertSink, ToolCtx};
 pub use error::ToolError;
 pub use registry::ToolRegistry;

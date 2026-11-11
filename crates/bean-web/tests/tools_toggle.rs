@@ -84,6 +84,8 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         skills: Some(skills.clone()),
         llm_state_path: None,
         speech: None,
+
+        checkpoints: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {
@@ -124,6 +126,8 @@ fn build_with_store(config: Config) -> (tempfile::TempDir, Arc<dyn Store>, AxumR
         skills: Some(skills.clone()),
         llm_state_path: None,
         speech: None,
+
+        checkpoints: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {
@@ -351,6 +355,8 @@ async fn toggle_survives_restart_semantics_via_shared_store() {
         skills: Some(skills.clone()),
         llm_state_path: None,
         speech: None,
+
+        checkpoints: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {

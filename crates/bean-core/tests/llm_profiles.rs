@@ -144,6 +144,8 @@ fn setup(config_is_directory: bool) -> Setup {
             skills_index: String::new(),
             skills: None,
             llm_state_path: None,
+
+            checkpoints: None,
         },
         RouterOptions {
             secrets: Some(secrets.clone()),
@@ -191,6 +193,8 @@ fn setup_ram_only() -> (tempfile::TempDir, Router) {
             skills_index: String::new(),
             skills: None,
             llm_state_path: None,
+
+            checkpoints: None,
         },
         RouterOptions::default(),
     );

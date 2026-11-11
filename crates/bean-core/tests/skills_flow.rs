@@ -147,6 +147,8 @@ async fn fake_provider_loads_matching_skill_before_answering() {
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
     .unwrap();

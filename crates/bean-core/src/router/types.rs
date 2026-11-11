@@ -296,6 +296,8 @@ pub struct RouterDeps {
     pub default_profile: bean_types::config::LlmProfile,
     /// Provider STT/TTS cho push-to-talk (M27); `None` khi voice chưa cấu hình.
     pub speech: Option<Arc<dyn bean_speech::SpeechProvider>>,
+    /// Kho checkpoint workspace (D26); `None` khi tính năng tắt.
+    pub checkpoints: Option<Arc<CheckpointStore>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

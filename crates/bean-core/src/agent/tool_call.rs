@@ -162,6 +162,10 @@ impl<'a> Agent<'a> {
             untrusted_seen: state.untrusted_seen.clone(),
             project: project.to_string(),
             alerts: alerts.clone(),
+            checkpoint: state.checkpoint.lock().await.clone().map(|handle| {
+                let handle: Arc<dyn bean_tools::WorkspaceCheckpoint> = handle;
+                handle
+            }),
         };
 
         let args_hash = hash_args(&call.args);
@@ -218,7 +222,28 @@ impl<'a> Agent<'a> {
                 let deny_note = deny_list_reason(&call.name, &call.args)
                     .map(|reason| format!("\n[cảnh báo deny-list] {}", reason.label))
                     .unwrap_or_default();
-                let prompt = format!("{} {}{deny_note}", call.name, args_preview);
+                let mut prompt = format!("{} {}{deny_note}", call.name, args_preview);
+                // (D26) Thẻ xác nhận của rollback hiển thị **danh sách thay đổi thật**
+                // đo tại thời điểm hỏi — model không thể che giấu những gì sẽ bị hoàn tác.
+                if call.name == bean_tools::ROLLBACK_TOOL
+                    && let Some(handle) = state.checkpoint.lock().await.clone()
+                {
+                    match handle.changes(ctx.workspace.root()).await {
+                        Ok(changes) if changes.is_empty() => {
+                            prompt.push_str("\n\nKhông có thay đổi nào kể từ checkpoint.");
+                        }
+                        Ok(changes) => {
+                            prompt.push_str(&format!(
+                                "\n\nSẽ hoàn tác về {}:\n{}",
+                                handle.label(),
+                                changes.summary()
+                            ));
+                        }
+                        Err(error) => {
+                            prompt.push_str(&format!("\n\nKhông so sánh được thay đổi: {error}"));
+                        }
+                    }
+                }
                 let replied = if io.is_background() && untrusted {
                     Some(Decision::Deny)
                 } else {
@@ -278,6 +303,43 @@ impl<'a> Agent<'a> {
                         io.on_tool_end(&call.id, &call.name, false, &message);
                         return Ok(());
                     }
+                }
+            }
+        }
+
+        // (D26) Checkpoint workspace: chụp **một lần** cho mỗi lượt, trước tool đầu
+        // tiên có mức rủi ro cao hơn `Safe` (điểm này chỉ đạt khi policy cho phép
+        // hoặc người dùng đã duyệt). Riêng `rollback_workspace` KHÔNG kích hoạt chụp
+        // (nó đọc checkpoint có sẵn; lượt chưa có gì thay đổi thì nó tự trả lỗi).
+        // Lỗi chụp ⇒ TỪ CHỐI tool call — an toàn trước tiện nghi: không bao giờ ghi
+        // file mà không có điểm hoàn tác khi tính năng đang bật. Model nhận lỗi rõ
+        // ràng và báo người dùng, lịch sử giữ cặp hợp lệ.
+        if risk != Risk::Safe && call.name != bean_tools::ROLLBACK_TOOL {
+            match ensure_run_checkpoint(self.checkpoints.as_ref(), state, &ctx.workspace).await {
+                Ok(Some(handle)) => {
+                    *state.checkpoint.lock().await = Some(handle);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let message = format!(
+                        "Không tạo được checkpoint workspace trước khi chạy tool `{}`: {error}. \
+                         Tool không được chạy vì an toàn. Hãy báo người dùng và dừng các hành động ghi.",
+                        call.name
+                    );
+                    tracing::warn!(
+                        tool = %call.name,
+                        session = session.get(),
+                        "từ chối tool ghi vì không chụp được checkpoint"
+                    );
+                    append_run_message(
+                        store,
+                        session,
+                        &state.transcript,
+                        Message::tool_error(call.id.clone(), message.clone()),
+                    )
+                    .await?;
+                    io.on_tool_end(&call.id, &call.name, false, &message);
+                    return Ok(());
                 }
             }
         }
@@ -429,6 +491,26 @@ async fn execute_tool(
         .ok_or_else(|| ToolError::NotFound(call.name.clone()))?;
     // (M26) `call_rich` mặc định gọi `call`, nên tool cũ không đổi hành vi.
     tool.call_rich(ctx, call.args.clone()).await
+}
+
+/// (D26) Chụp checkpoint workspace cho lượt — **một lần duy nhất**, trước tool có
+/// rủi ro đầu tiên. Trả `Ok(None)` khi tính năng tắt hoặc lượt đã có checkpoint.
+///
+/// Không đua: tool `Confirm`/`Dangerous` luôn chạy trong đoạn tuần tự (mục 5a chỉ
+/// ghép nhóm call `Safe`), nên “kiểm rồi chụp” giữa hai lượt gọi tool là an toàn.
+async fn ensure_run_checkpoint(
+    checkpoints: Option<&Arc<CheckpointStore>>,
+    state: &TurnState,
+    workspace: &Arc<dyn bean_tools::WorkspaceFs>,
+) -> Result<Option<Arc<RunCheckpoint>>, CheckpointError> {
+    let Some(store) = checkpoints else {
+        return Ok(None);
+    };
+    if state.checkpoint.lock().await.is_some() {
+        return Ok(None);
+    }
+    let root = workspace.root().to_path_buf();
+    store.capture(&root).await.map(Some)
 }
 
 fn truncate_output(output: &str) -> String {

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::Result as AnyResult;
 use bean_llm::LlmProvider;
+use bean_security::checkpoint::CheckpointStore;
 use bean_security::{AuditLog, SessionPolicy};
 use bean_skills::{SkillCatalog, SkillDraftDecision, SkillError};
 use bean_tools::{AlertSink, ToolRegistry, truncate_chars};
@@ -150,6 +151,8 @@ struct RouterInner {
     learning_gate: LearningGate,
     /// Provider STT/TTS cho push-to-talk (M27); `None` khi voice chưa cấu hình.
     speech: Option<Arc<dyn SpeechProvider>>,
+    /// Kho checkpoint workspace (D26); `None` khi tính năng tắt.
+    checkpoints: Option<Arc<CheckpointStore>>,
     options: RouterOptions,
     events: broadcast::Sender<RunEvent>,
     channels: RwLock<HashMap<String, Arc<dyn Channel>>>,

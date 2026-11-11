@@ -129,6 +129,8 @@ fn setup(persist: bool, allowed_models: Option<Vec<String>>) -> Setup {
             skills_index: String::new(),
             skills: None,
             llm_state_path: state_path.clone(),
+
+            checkpoints: None,
         },
         RouterOptions::default(),
     );
@@ -324,6 +326,8 @@ async fn switch_persist_failure_rejects_whole_switch() {
             skills_index: String::new(),
             skills: None,
             llm_state_path: Some(state_path),
+
+            checkpoints: None,
         },
         RouterOptions::default(),
     );

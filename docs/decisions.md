@@ -856,3 +856,37 @@ luôn biên xác thực TS. Vá + test regress tại biên (plan hợp lệ qua,
 `status`/thiếu field bị loại). Bài học: test store gọi thẳng
 `applyServerMessage` nên không chặn được drift ở biên — mọi variant mới của
 `ServerMsg` phải có test qua `parseServerMessage`.
+
+## 26. Checkpoint/rollback workspace (D26.x — 2026-11-11, lộ trình chất lượng mục 5c)
+
+Model ghi nhầm file, xoá nhầm nội dung trong lúc làm việc dài là rủi ro thường
+gặp nhất với role Developer. Một lượt có thể chứa nhiều tool ghi; người dùng
+không có cách nào quay lại trạng thái trước đó ngoài sửa tay. Thêm checkpoint
+tự động + tool `rollback_workspace` để mọi lượt ghi luôn có đường lui.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D26.1 | Snapshot **thuần** (copy file), không git-based: chụp vào `data.dir/checkpoints/<run-id>/` rename atomic qua `<id>.partial` | Workspace nằm trong repo thật của người dùng; git-based có nguy cơ đụng index/stash của họ; parallel chỉ chạy Safe tool nên không có đua ghi | Snapshot không nén — trần `max_workspace_mb` chặn workspace lớn; đỡ phức tạp hơn nhiều so với git plumbing |
+| D26.2 | Capture **một lần/lượt**, hook trong agent loop **sau khi** policy/confirm cho phép tool đầu tiên `risk != Safe`; run thuần đọc không chụp | Chi phí 0 cho đa số lượt (đọc web, tìm kiếm, hỏi); checkpoint chỉ cần thiết khi sắp có ghi | Thay đổi của tool Safe trước tool ghi đầu tiên trong lượt không nằm trong snapshot — chấp nhận, Safe không phá huỷ |
+| D26.3 | Snapshot nằm ở `data.dir/checkpoints/` — **ngoài jail workspace** | Model không đọc/xoá được dấu vết rollback qua file tools; restore không bị model phá | Thêm một thư mục cần backup cùng `data.dir` (đã nằm trong backup chuẩn) |
+| D26.4 | Capture fail (đĩa đầy, workspace vượt trần) ⇒ **từ chối tool ghi** với thông báo rõ ràng cho model | An toàn trước tiện nghi: không bao giờ ghi mà không có đường lui | Lượt chỉ đọc vẫn chạy bình thường; lượt ghi phải chờ người dùng giải phóng đĩa hoặc tăng trần |
+| D26.5 | `rollback_workspace` là `Risk::Confirm` — luôn hỏi, không có tuỳ chọn "cho phép trong phiên"; chạy dưới scheduler (không người duyệt) bị từ chối tự động theo mục 14 | Rollback là hành động phá huỷ (xoá/ghi đè file); mức cao nhất sau Dangerous phù hợp hành động hoàn tác | Người dùng phải bấm duyệt mỗi lần — đúng ý, không ai muốn hoàn tác không chủ đích |
+| D26.6 | Prompt confirm rollback được **enrich danh sách thay đổi thật** đo tại thời điểm hỏi (pattern giống plan tool D25) | Model không thể che giấu những gì sẽ bị hoàn tác; người dùng quyết định trên dữ liệu thật | Danh sách có thể đổi giữa lúc hỏi và lúc duyệt — chấp nhận, restore lại đo lại và báo số liệu thật |
+| D26.7 | Phạm vi: rollback **chỉ về checkpoint của lượt hiện tại** — không phải máy thời gian nhiều tầng | Giữ phạm vi nhỏ: nhu cầu thật là "hoàn tác vừa ghi nhầm", không phải duyệt lịch sử phiên | Muốn về trạng thái phiên trước phải dùng backup/kiểm soát phiên của người dùng — ghi rõ trong docs |
+| D26.8 | Mặc định `[security.checkpoint] enabled=true, keep=10, max_workspace_mb=200`; tắt thì tool `rollback_workspace` không được đăng ký | Bật mặc định vì đây là lưới an toàn; `keep` trần chi phí đĩa; tắt là quyết định tường minh | Workspace gần 200MB bị từ chối ghi — người dùng tăng trần hoặc tắt, đều có log |
+| D26.9 | Restore **copy-then-delete**: file trong checkpoint được copy về, file sinh sau checkpoint bị xoá; không restore đích danh file ngoài workspace | Crash-safe: chít giữa chừng thì có file mới hoặc file cũ, không lẫn nửa vời | Symlink trong workspace được bỏ qua khi chụp (không theo ra ngoài jail) — chấp nhận, file tools cũng không tạo được symlink |
+
+**Giới hạn đã biết (ghi ở `bean.example.toml`):** `run_shell` ở host mode có
+thể ghi ra ngoài workspace — checkpoint không che được những thay đổi đó.
+Docker mode không có lỗ hổng này vì shell bị nhốt trong container chỉ mount
+workspace.
+
+**Kiểm chứng:** `bean-security` 5 unit test (chụp, restore, trần dung lượng,
+prune keep, proptest cây file ngẫu nhiên không panic và round-trip đúng) +
+`bean-core` 4 integration test (checkpoint_flow: rollback trả workspace về
+trước khi ghi; chưa có gì thay đổi thì trả lời rõ ràng; checkpoint tắt thì
+tool ghi vẫn chạy và không tạo thư mục; rollback dưới scheduler bị từ chối) +
+E2E binary thật `rollback_restores_workspace_in_real_binary` (write_file duyệt
+→ rollback_workspace duyệt → file sinh sau checkpoint bị xoá, snapshot nằm
+`data.dir/checkpoints`, tool result qua REST báo khôi phục). Workspace test
+984 pass, `make check` xanh.

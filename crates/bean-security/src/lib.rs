@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod checkpoint;
 pub mod osauth;
 pub mod paths;
 pub mod policy;
@@ -24,6 +25,7 @@ pub mod untrusted;
 pub mod web;
 
 pub use audit::{AuditEntry, AuditLog, entry_now, redact_secrets, redact_text_secrets};
+pub use checkpoint::{CheckpointError, CheckpointStore, RunCheckpoint};
 pub use osauth::{
     FakeOsAuth, OsAccount, OsAuth, OsAuthError, PasswordStatus, RealOsAuth, parse_passwd_status,
 };

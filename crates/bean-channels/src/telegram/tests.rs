@@ -222,6 +222,8 @@ async fn make_router(
             skills_index: String::new(),
             skills: None,
             llm_state_path: None,
+
+            checkpoints: None,
         },
         options,
     ));
@@ -741,6 +743,8 @@ async fn skill_draft_inline_button_approves_for_exact_allowed_user() {
         skills_index: catalog.index(),
         skills: Some(catalog.clone()),
         llm_state_path: None,
+
+        checkpoints: None,
     }));
     let transport = Arc::new(MockTransport::new());
     let mut telegram_config = telegram_config();

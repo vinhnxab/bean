@@ -16,9 +16,10 @@ use bean_memory::{
     ensure_daily_budget, ensure_role_daily_budget, record_usage, record_usage_for_role,
 };
 use bean_security::audit::{AuditEntry, AuditLog, entry_now};
+use bean_security::checkpoint::{CheckpointError, CheckpointStore, RunCheckpoint};
 use bean_security::policy::{PolicyDecision, SessionPolicy, decide, deny_list_reason};
 use bean_security::untrusted::contains_untrusted_block;
-use bean_tools::{AlertSink, ToolCtx, ToolError, ToolOutput};
+use bean_tools::{AlertSink, ToolCtx, ToolError, ToolOutput, WorkspaceCheckpoint};
 use bean_types::{
     Config, LlmDelta, LlmResponse, Message, Risk, RolePermissions, StopReason, ToolCall, ToolSpec,
     Usage,
@@ -86,6 +87,9 @@ pub struct RunTurnArgs<'a> {
     pub project: &'a str,
     /// Kênh gửi cảnh báo chủ động cho tool (M23); `None` ⇒ tool chỉ trả cảnh báo trong kết quả.
     pub alerts: Option<Arc<dyn AlertSink>>,
+    /// Kho checkpoint workspace (D26); `None` khi tính năng tắt — tool ghi chạy
+    /// không checkpoint và `rollback_workspace` không được đăng ký.
+    pub checkpoints: Option<Arc<CheckpointStore>>,
 }
 
 /// Tập **phụ thuộc bất biến** của vòng lặp agent (agents.md mục 6).
@@ -115,6 +119,9 @@ pub struct Agent<'a> {
     skills_index: &'a str,
     /// Kênh gửi cảnh báo chủ động cho tool (M23); `None` ⇒ tool chỉ trả cảnh báo.
     alerts: Option<Arc<dyn AlertSink>>,
+    /// Kho checkpoint workspace (D26); `None` khi `[security.checkpoint].enabled = false`
+    /// hoặc trong ngữ cảnh không cần checkpoint (MCP server read-only, test).
+    checkpoints: Option<Arc<CheckpointStore>>,
 }
 
 /// Dữ liệu **riêng của một lượt** — phần thay đổi theo từng lần gọi.
@@ -176,6 +183,10 @@ struct TurnState {
     untrusted_seen: Arc<AtomicBool>,
     /// Tool vừa thất bại 2 lần giống hệt nhau ⇒ kết thúc run bằng [`AgentError::RepeatFailure`].
     repeated_tool: Arc<tokio::sync::Mutex<Option<String>>>,
+    /// Checkpoint workspace của lượt (D26): `Some` sau khi đã chụp trước tool có
+    /// rủi ro đầu tiên. Chỉ các tool `Confirm`/`Dangerous` chạy tuần tự nên không
+    /// có đua giữa nhóm song song (chỉ ghép call `Safe`).
+    checkpoint: Arc<tokio::sync::Mutex<Option<Arc<bean_security::checkpoint::RunCheckpoint>>>>,
 }
 
 impl TurnState {
@@ -250,6 +261,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         permissions,
         project,
         alerts,
+        checkpoints,
     } = args;
     Agent {
         store,
@@ -259,6 +271,7 @@ pub async fn run_turn_outcome(args: RunTurnArgs<'_>) -> Result<RunOutcome, Agent
         audit,
         skills_index,
         alerts,
+        checkpoints,
     }
     .run(Turn {
         session,

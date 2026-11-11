@@ -124,6 +124,8 @@ async fn fixture(
             skills_index: String::new(),
             skills: None,
             llm_state_path: None,
+
+            checkpoints: None,
         },
         RouterOptions {
             outbox_base_delay: Duration::from_millis(1),

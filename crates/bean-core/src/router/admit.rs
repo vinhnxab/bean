@@ -25,6 +25,7 @@ impl Router {
             config_path,
             default_profile,
             speech,
+            checkpoints,
         } = deps;
         let (events, _) = broadcast::channel(options.event_capacity.max(1));
         Self {
@@ -40,6 +41,7 @@ impl Router {
                 skills: SkillCoordinator::new(skills, skills_index),
                 learning_gate: LearningGate::default(),
                 speech,
+                checkpoints,
                 options,
                 events,
                 channels: RwLock::new(HashMap::new()),

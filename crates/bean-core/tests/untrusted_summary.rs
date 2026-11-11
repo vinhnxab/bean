@@ -176,6 +176,8 @@ async fn turn(
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
 }

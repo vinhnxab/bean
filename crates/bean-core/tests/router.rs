@@ -60,6 +60,8 @@ async fn router_with(
             skills_index: "demo: Dùng cho test".into(),
             skills: None,
             llm_state_path: None,
+
+            checkpoints: None,
         },
         options,
     ));
@@ -579,6 +581,8 @@ async fn confirm_actor_is_written_to_audit_log() {
         skills_index: String::new(),
         skills: None,
         llm_state_path: None,
+
+        checkpoints: None,
     }));
     let mut events = router.events();
     let run = router
@@ -732,6 +736,8 @@ async fn explicit_session_id_from_another_user_is_rejected() {
         skills_index: String::new(),
         skills: None,
         llm_state_path: None,
+
+        checkpoints: None,
     });
     let result = router
         .submit(Incoming::new("cli", "local", "cli:other", "cướp session").with_session(owned))
@@ -816,6 +822,8 @@ async fn model_command_applies_override_to_next_run_only() {
         skills_index: String::new(),
         skills: None,
         llm_state_path: None,
+
+        checkpoints: None,
     }));
     let mut events = router.events();
 
@@ -961,6 +969,8 @@ async fn router_with_alerts(store: Arc<MemoryStore>) -> (tempfile::TempDir, Arc<
         skills_index: "demo".into(),
         skills: None,
         llm_state_path: None,
+
+        checkpoints: None,
     }));
     (temp, router)
 }
@@ -1117,6 +1127,8 @@ async fn llm_config_snapshot_and_set_model_share_one_truth() {
         skills_index: String::new(),
         skills: None,
         llm_state_path: None,
+
+        checkpoints: None,
     }));
 
     let snapshot = router.llm_config().unwrap();

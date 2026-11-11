@@ -129,6 +129,8 @@ async fn build_context(config: &Config) -> anyhow::Result<ServeContext> {
         llm_state_path: None,
         config_path: None,
         speech: None, // MCP không cần voice
+
+        checkpoints: None,
     }));
     Ok(ServeContext {
         auth: Arc::new(McpAuth::new(store)),

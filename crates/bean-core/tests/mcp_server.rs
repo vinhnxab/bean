@@ -156,6 +156,8 @@ fn setup() -> (TempDir, Arc<Router>, Config, Arc<EchoArgs>) {
         skills: None,
         llm_state_path: None,
         config_path: None,
+
+        checkpoints: None,
     }));
     (dir, router, config, billing)
 }

@@ -341,6 +341,8 @@ async fn run_task_inner(
             .map_or_else(String::new, |catalog| catalog.index()),
         skills: catalog.clone(),
         llm_state_path: None,
+
+        checkpoints: None,
     }));
 
     // 7. Submit và thu sự kiện — confirm tự động `Allow` (ghi đếm, không im lặng).

@@ -53,6 +53,11 @@ pub struct ToolCtx {
     pub project: String,
     /// Kênh gửi cảnh báo chủ động (M23); `None` ⇒ tool chỉ trả cảnh báo trong kết quả.
     pub alerts: Option<Arc<dyn AlertSink>>,
+    /// Checkpoint workspace của lượt hiện tại (D26); `None` khi chưa chụp —
+    /// chỉ được chụp trước tool đầu tiên có mức rủi ro cao hơn `Safe`. Tool
+    /// `rollback_workspace` đọc trường này để khôi phục; `None` ⇒ tool trả lỗi
+    /// rõ ràng (chưa có gì để khôi phục) cho model tự điều chỉnh.
+    pub checkpoint: Option<Arc<dyn crate::checkpoint::WorkspaceCheckpoint>>,
 }
 
 impl ToolCtx {
@@ -71,6 +76,7 @@ impl ToolCtx {
             untrusted_seen,
             project: DEFAULT_PROJECT.to_string(),
             alerts: None,
+            checkpoint: None,
         }
     }
 

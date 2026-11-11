@@ -408,3 +408,118 @@ async fn plan_events_reach_the_ws_wire_from_real_binary() {
         .success();
     drop(socket);
 }
+
+/// (D26) Checkpoint/rollback phải chạy được với binary thật: model ghi file (duyệt
+/// confirm) rồi gọi `rollback_workspace` (duyệt confirm lần 2), workspace trở về
+/// trạng thái ngay trước khi ghi — file sinh sau checkpoint bị xoá, không còn dấu vết.
+#[tokio::test]
+async fn rollback_restores_workspace_in_real_binary() {
+    let temp = tempfile::tempdir().unwrap();
+    let data = temp.path().join("data");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let addr = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let origin = format!("http://{addr}");
+    let mut config = Config::default();
+    config.data.dir = data.clone();
+    config.agent.workspace = workspace.clone();
+    config.agent.allowed_users = vec!["web:admin".into()];
+    config.tools.enabled = vec!["files".into()];
+    config.learning.enabled = false;
+    config.telegram.enabled = false;
+    config.web.public_origin = origin.clone();
+    config.web.bind = addr;
+    set_password(&data, PASSWORD, None).unwrap();
+    let config_path = temp.path().join("bean.toml");
+    std::fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+    let script_path = temp.path().join("fake.json");
+    let script = json!({ "responses": [
+        { "tool_calls": [{ "id": "c1", "name": "write_file", "args": { "path": "note.txt", "content": "bản ghi nhầm" } }], "stop": "tool_use" },
+        { "tool_calls": [{ "id": "c2", "name": "rollback_workspace", "args": {} }], "stop": "tool_use" },
+        { "text": "đã hoàn tác", "stop": "end_turn" }
+    ] });
+    std::fs::write(&script_path, script.to_string()).unwrap();
+    let (child, addr) = start_server(&config_path, &script_path, addr).await;
+    let client = reqwest::Client::new();
+    let cookie = login(&client, &origin).await;
+    let response = client
+        .post(format!("{origin}/api/sessions"))
+        .header(ORIGIN, &origin)
+        .header(CONTENT_TYPE, "application/json")
+        .header("Cookie", &cookie)
+        .body(json!({ "title": "Rollback E2E" }).to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let session: Value = response.json().await.unwrap();
+    let session_id = session["id"].as_i64().unwrap();
+    let mut socket = connect_ws(addr, &origin, &cookie).await;
+    assert!(matches!(
+        next_event(&mut socket).await,
+        ServerMsg::Sync { .. }
+    ));
+    send(
+        &mut socket,
+        json!({ "type": "start", "session_id": session_id, "text": "ghi rồi hoàn tác" }),
+    )
+    .await;
+
+    // Hai confirm theo thứ tự: write_file rồi rollback_workspace — duyệt cả hai.
+    for _ in 0..2 {
+        let confirm = wait_for(&mut socket, |event| {
+            matches!(event, ServerMsg::ConfirmRequest { .. })
+        })
+        .await;
+        let ServerMsg::ConfirmRequest { confirm_id, .. } = confirm else {
+            unreachable!()
+        };
+        send(
+            &mut socket,
+            json!({ "type": "confirm", "confirm_id": confirm_id, "decision": "allow" }),
+        )
+        .await;
+    }
+    wait_for(&mut socket, |event| {
+        matches!(event, ServerMsg::Final { .. })
+    })
+    .await;
+
+    // Workspace trở về trạng thái trước lượt: file sinh sau checkpoint đã bị xoá.
+    assert!(
+        !workspace.join("note.txt").exists(),
+        "file sinh sau checkpoint phải bị xoá khi rollback"
+    );
+    // Checkpoint nằm ở data.dir/checkpoints — ngoài jail workspace.
+    assert!(
+        data.join("checkpoints").read_dir().unwrap().count() > 0,
+        "phải có ít nhất một snapshot được chụp"
+    );
+    // Tool result của rollback qua REST phải báo khôi phục thành công.
+    let messages: Value = client
+        .get(format!("{origin}/api/sessions/{session_id}/messages"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let text = messages.to_string();
+    assert!(
+        text.contains("Đã khôi phục workspace"),
+        "tool result rollback phải báo khôi phục: {text}"
+    );
+    drop(socket);
+    let pid = child.id().unwrap().to_string();
+    let _ = tokio::process::Command::new("kill")
+        .args(["-TERM", pid.as_str()])
+        .status()
+        .await
+        .unwrap()
+        .success();
+}

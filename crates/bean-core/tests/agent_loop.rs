@@ -404,6 +404,8 @@ async fn turn(
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
 }
@@ -611,6 +613,8 @@ async fn streaming_deltas_are_emitted_and_assembled_into_tool_call() {
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
     .unwrap();
@@ -1010,6 +1014,8 @@ async fn system_prompt_is_sent_once_via_system_field() {
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
     .unwrap();

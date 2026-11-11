@@ -149,6 +149,7 @@ impl Router {
             permissions: &permissions,
             project: &project,
             alerts: self.alert_sink(),
+            checkpoints: self.inner.checkpoints.clone(),
         })
         .await;
         match result {

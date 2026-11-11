@@ -299,6 +299,27 @@ cpus = 1.0
 timeout_seconds = 60
 
 # ---------------------------------------------------------------------------
+# Checkpoint/rollback workspace (D26 — lộ trình chất lượng mục 5c).
+#
+# Trước tool ghi đầu tiên của mỗi lượt (risk > Safe), Bean chụp MỘT snapshot
+# toàn bộ workspace vào `data.dir/checkpoints/` — ngoài jail workspace nên
+# model không đọc/xoá được dấu vết. Model gọi `rollback_workspace` (Confirm,
+# luôn hỏi kèm danh sách thay đổi thật) để hoàn tác mọi thay đổi của lượt
+# hiện tại. Run thuần đọc không tốn chi phí gì.
+#
+# Giới hạn đã biết: `run_shell` ở host mode có thể ghi ra ngoài workspace —
+# checkpoint không che được những thay đổi đó (chỉ rollback được file trong
+# workspace). Scheduler tự từ chối rollback (không có người duyệt).
+#
+# Capture fail (đĩa đầy, workspace quá trần) ⇒ tool ghi bị TỪ CHỐI: an toàn
+# trước tiện nghi — không bao giờ ghi mà không có đường lui.
+
+[security.checkpoint]
+enabled = true                       # tắt thì tool rollback_workspace không được đăng ký
+keep = 10                            # số checkpoint gần nhất giữ lại, cũ hơn bị xoá
+max_workspace_mb = 200               # trần dung lượng workspace để chụp; vượt ⇒ từ chối tool ghi
+
+# ---------------------------------------------------------------------------
 # M23 — Quét bảo mật (CHỈ ĐỌC, read-only về phía hệ thống được quét).
 #
 # `[[infra_scope]]` là RANH GIỚI AN TOÀN QUAN TRỌNG NHẤT của M23: nếu để rỗng, mọi lần

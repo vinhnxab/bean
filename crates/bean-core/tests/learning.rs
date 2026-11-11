@@ -166,6 +166,8 @@ async fn fixture_with_llm(
         skills_index: catalog.index(),
         skills: Some(catalog.clone()),
         llm_state_path: None,
+
+        checkpoints: None,
     }));
     router.register_channel(notifications.clone()).unwrap();
     (temp, router, catalog, notifications)
@@ -361,6 +363,8 @@ async fn disabled_learning_never_calls_reflection() {
         skills_index: String::new(),
         skills: Some(catalog.clone()),
         llm_state_path: None,
+
+        checkpoints: None,
     });
     run(&router, "tắt learning").await;
     tokio::time::sleep(Duration::from_millis(50)).await;

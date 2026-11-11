@@ -143,6 +143,8 @@ fn build_with_os_auth(
             skills: Some(skills.clone()),
             llm_state_path: None,
             speech: None,
+
+            checkpoints: None,
         },
         RouterOptions {
             secrets: Some(secret_store),

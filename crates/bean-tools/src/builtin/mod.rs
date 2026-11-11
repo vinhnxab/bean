@@ -10,6 +10,7 @@
 pub mod files;
 pub mod memory_query;
 pub mod plan;
+pub mod rollback;
 
 /// Tên nhóm tool file trong `[tools] enabled` (xem `bean_types::config::KNOWN_TOOL_GROUPS`).
 pub const GROUP_FILES: &str = "files";
@@ -39,4 +40,11 @@ use crate::tool::Tool;
 #[must_use]
 pub fn memory_query() -> Arc<dyn Tool> {
     memory_query::tool()
+}
+
+/// Tool `rollback_workspace` (D26) — hoàn tác workspace về checkpoint của lượt.
+/// `Confirm` luôn hỏi; chỉ đăng ký khi `[security.checkpoint].enabled = true`.
+#[must_use]
+pub fn rollback_workspace() -> Arc<dyn Tool> {
+    rollback::tool()
 }

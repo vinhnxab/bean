@@ -146,6 +146,7 @@ pub async fn run(args: &ChatArgs, config_path: Option<&Path>) -> Result<()> {
         // CLI chat không biết đường config gốc — CRUD provider profile tắt (RAM only).
         config_path: None,
         speech: None, // CLI không cần voice
+        checkpoints: built.checkpoints,
     }));
     router
         .start_outbox_worker()
@@ -269,6 +270,9 @@ pub(crate) struct BuiltRegistry {
     /// Giữ `Arc` để `chat`/`serve` gọi [`SessionManager::shutdown`] khi thoát, đảm
     /// bảo không bỏ quên tiến trình Chrome con.
     pub(crate) browser: Option<Arc<bean_browser::SessionManager>>,
+    /// Kho checkpoint workspace (D26); `None` khi `[security.checkpoint].enabled = false`.
+    /// Router cầm để truyền vào mỗi lượt; tool `rollback_workspace` đọc qua `ToolCtx`.
+    pub(crate) checkpoints: Option<Arc<bean_security::checkpoint::CheckpointStore>>,
 }
 
 /// Xây registry tool từ cấu hình — tự tạo `agent.workspace` nếu chưa tồn tại (mục 4).
@@ -400,6 +404,22 @@ pub(crate) async fn build_registry(
     registry
         .register(bean_tools::builtin::plan::tool())
         .context("đăng ký tool update_plan thất bại")?;
+
+    // (D26) Checkpoint workspace: kho snapshot + tool hoàn tác, chỉ khi bật. Tool
+    // KHÔNG cầm store — nó đọc checkpoint của lượt qua `ToolCtx`; store đi vào Router
+    // để agent loop chụp trước tool có rủi ro đầu tiên của lượt.
+    let checkpoints = if config.security.checkpoint.enabled {
+        let store = Arc::new(bean_security::checkpoint::CheckpointStore::new(
+            expand_tilde(&config.data.dir).join("checkpoints"),
+            &config.security.checkpoint,
+        ));
+        registry
+            .register(bean_tools::builtin::rollback_workspace())
+            .context("đăng ký tool rollback_workspace thất bại")?;
+        Some(store)
+    } else {
+        None
+    };
 
     register_group(
         &mut registry,
@@ -555,6 +575,7 @@ pub(crate) async fn build_registry(
         registry,
         mcp,
         browser: browser_session,
+        checkpoints,
     })
 }
 

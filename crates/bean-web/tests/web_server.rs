@@ -130,6 +130,8 @@ async fn make_state_with(
         skills: Some(skills.clone()),
         llm_state_path: None,
         speech: None,
+
+        checkpoints: None,
     }));
     let auth = AuthService::load(&config, store_dyn.clone()).unwrap();
     let state = WebState::new(WebStateDeps {

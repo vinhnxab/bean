@@ -102,6 +102,8 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         skills: Some(skills.clone()),
         llm_state_path: None,
         speech: None,
+
+        checkpoints: None,
     }));
     let auth = AuthService::load(&config, Arc::clone(&store)).unwrap();
     let state = WebState::new(WebStateDeps {

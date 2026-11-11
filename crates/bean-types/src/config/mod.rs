@@ -74,7 +74,7 @@ pub use settings_state::{
     SETTINGS_STATE_FILE, SettingsState, apply_persisted_settings_state, settings_state_path,
     settings_state_path_from_config,
 };
-pub use tools::{SandboxConfig, SecurityConfig, ToolsConfig};
+pub use tools::{CheckpointConfig, SandboxConfig, SecurityConfig, ToolsConfig};
 pub use validate::validate_scope_value;
 pub use voice::VoiceConfig;
 pub use voice_state::{

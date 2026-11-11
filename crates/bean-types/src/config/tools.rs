@@ -57,6 +57,30 @@ impl Default for SandboxConfig {
     }
 }
 
+/// `[security.checkpoint]` (D26) — snapshot workspace cho mỗi lượt.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CheckpointConfig {
+    /// Bật chụp checkpoint trước tool đầu tiên có mức rủi ro cao hơn `Safe`.
+    /// Tắt thì tool `rollback_workspace` không được đăng ký.
+    pub enabled: bool,
+    /// Số checkpoint gần nhất giữ lại; cũ hơn bị xoá khi chụp mới.
+    pub keep: u32,
+    /// Trần tổng dung lượng workspace (MB) để chụp; vượt thì bỏ qua lượt đó
+    /// và tool ghi bị từ chối với thông báo rõ ràng (an toàn trước tiện nghi).
+    pub max_workspace_mb: u64,
+}
+
+impl Default for CheckpointConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            keep: 10,
+            max_workspace_mb: 200,
+        }
+    }
+}
+
 /// `[security]`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -67,6 +91,8 @@ pub struct SecurityConfig {
     pub tool_timeout_seconds: u64,
     /// Cấu hình sandbox cho `run_shell`.
     pub sandbox: SandboxConfig,
+    /// Checkpoint workspace (D26).
+    pub checkpoint: CheckpointConfig,
 }
 
 impl Default for SecurityConfig {
@@ -75,6 +101,7 @@ impl Default for SecurityConfig {
             daily_token_budget: 2_000_000,
             tool_timeout_seconds: 60,
             sandbox: SandboxConfig::default(),
+            checkpoint: CheckpointConfig::default(),
         }
     }
 }

@@ -169,6 +169,8 @@ async fn turn_with(
         permissions: &perms,
         project: "default",
         alerts: None,
+
+        checkpoints: None,
     })
     .await
 }

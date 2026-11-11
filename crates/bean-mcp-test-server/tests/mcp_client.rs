@@ -169,6 +169,7 @@ async fn agent_discovers_calls_and_wraps_real_stdio_mcp_tool() {
         permissions: &perms,
         project: "default",
         alerts: None,
+        checkpoints: None,
     })
     .await
     .unwrap();
@@ -642,6 +643,7 @@ async fn monitor_tool_result_is_wrapped_and_cannot_escape_the_block() {
         permissions: &perms,
         project: "default",
         alerts: None,
+        checkpoints: None,
     })
     .await
     .unwrap();
