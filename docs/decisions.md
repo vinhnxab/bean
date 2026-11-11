@@ -890,3 +890,30 @@ E2E binary thật `rollback_restores_workspace_in_real_binary` (write_file duy�
 → rollback_workspace duyệt → file sinh sau checkpoint bị xoá, snapshot nằm
 `data.dir/checkpoints`, tool result qua REST báo khôi phục). Workspace test
 984 pass, `make check` xanh.
+
+## 27. Hiển thị diff cho `write_file`/`edit_file` khi duyệt (D27.x — 2026-11-11, UX duyệt hành động)
+
+Confirm quá nhiều gây mỏi (K1-followup), nhưng xác nhận là rào cản an toàn — không
+thể bớt tần suất. Hướng khác: giảm **chi phí mỗi lần duyệt** — người dùng thấy
+nguyên văn thay đổi (diff) thay vì đọc `content=<toàn bộ file>` trong preview.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D27.1 | Diff tính **backend**, nhúng vào **prompt xác nhận** (pattern D26.6) — không thêm trường mới trong WS API | Thẻ confirm render `confirm.prompt` nguyên văn; kiểu này web/Telegram/CLI cùng hưởng, không đổi hợp đồng WS | Telegram/CLI hiển thị diff dạng văn bản thuần, không có màu |
+| D27.2 | `Tool` thêm method default `confirm_details(&self, workspace, args) -> Option<String>` (pattern `describe`/`marks_untrusted`); `TypedTool` thêm builder `.confirm_details_fn(...)` | Chỉ tool có chi tiết mới override; 25+ tool cũ không đổi một dòng, không đụng `call` | `None` ⇒ agent loop rơi về preview `k=v` cũ — không đo được không làm hỏng gì |
+| D27.3 | Có `confirm_details` thì prompt **thay thế** preview `k=v` (không nối tiếp) | `args_preview` ghép `content=<toàn bộ>` khiến content hiện hai lần — chống lại chính mục tiêu giảm nhiễu | Prompt vẫn giữ tên tool đứng đầu để biết tool nào đang được duyệt |
+| D27.4 | LCS DP với prefix/suffix trim + trần 1.000.000 ô; vượt ⇒ fallback "thay toàn bộ đoạn giữa" + đầu bản mới | File lớn không được làm treo confirm; trần ô chặn cả RAM lẫn thời gian | Fallback không hiển thị dòng bị xoá — người dùng vẫn thấy nội dung mới sẽ ghi |
+| D27.5 | Prefix/suffix giữ trong dãy op dạng `Equal` (tham chiếu, không tốn DP) để hunks có **context thật**; header hunk `@@` không tính vào trần 50 dòng | Hunk không context là diff vô dụng — người dùng không định vị được thay đổi; bug thật bắt được ở bản đầu (context biến mất sau trim) | Trần đếm dòng nội dung, không đếm metadata |
+| D27.6 | `write_file` details: đọc file **tại thời điểm hỏi** — có sẵn ⇒ "ghi đè (N → M dòng)" + diff; `NotFound` ⇒ "tạo file mới"; nhị phân ⇒ note; lỗi khác ⇒ `None` | Trạng thái file quyết định hình thức đúng nhất; đo muộn tránh diff lệch với file thật | File có thể đổi giữa lúc hỏi và duyệt — checkpoint (D26) là lưới an toàn, diff chỉ mang tính trình bày |
+| D27.7 | `edit_file` details: đếm `old` xuất hiện — ≠ 1 ⇒ cảnh báo trước lỗi (không diff); = 1 ⇒ mô phỏng `replacen` + diff | Người dùng không duyệt mù một hành động sẽ thất bại; model đọc cùng prompt nên tự sửa trước | Đếm trên file tại thời điểm hỏi — race nhỏ chấp nhận như D27.6 |
+| D27.8 | UI colorize bằng `<span>` màu token (`--live` thêm, `--alert` xoá, mực mờ cho header/hunk), chỉ tô từ cặp header chuẩn `--- a/`+`+++ b/`; React tự escape, KHÔNG `dangerouslySetInnerHTML` | Mục 12.3: nội dung model là không tin cậy; màu giúp quét nhanh +/- | Phần mô tả trước header không tô — nội dung người dùng/agent có thể bắt đầu `-` (bullet) và bị tô oan |
+| D27.9 | Trần 50 dòng hiển thị + note "… (còn N dòng diff nữa)"; không cấu hình | Thẻ confirm phải gọn (mục 12.1 — một màn hình, không cuộn trang) | Trọn vẹn diff vẫn xem được qua output tool sau khi duyệt (`GET /api/messages/:id`) |
+
+**Kiểm chứng:** `bean-tools` 9 test `diff.rs` (giống hệt, chỉ khác newline, file mới,
+đổi giữa file có context + số dòng, 2 hunk, cắt trần + note, fallback file quá lớn
+không treo, tiếng Việt + emoji, thay trong dòng) + 9 test `confirm_details` (fake
+`WorkspaceFs`: tạo mới/ghi đè/nhị phân/lỗi I/O/thiếu args/old không duy nhất/wire qua
+tool thật) + `bean-core` 2 integration test (prompt chứa `+dòng mới`, không còn
+`content=`; cảnh báo `old` xuất hiện 2 lần) + web 3 test `ConfirmCard` (màu dòng
++/−/header; phần mô tả trước diff không tô; prompt không diff không sinh span).
+`make check` xanh.

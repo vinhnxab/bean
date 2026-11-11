@@ -3,6 +3,7 @@
 //! # Module (tách theo trách nhiệm)
 //! - `run` — vòng lặp [`Agent::run`] + thông báo kết thúc lượt
 //! - `tool_call` — [`Agent::run_tool_call`], audit, cắt output tool
+//! - `confirm` — nội dung thẻ xác nhận (D26 rollback + D27 diff)
 //! - `error` — [`AgentError`]
 
 use std::collections::{BTreeSet, HashMap};
@@ -38,6 +39,7 @@ const CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_PARALLEL_TOOL_CALLS: usize = 4;
 type RepeatKey = (String, String);
 
+mod confirm;
 mod error;
 mod parallel;
 mod run;

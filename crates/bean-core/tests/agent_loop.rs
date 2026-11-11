@@ -158,6 +158,8 @@ struct TestIo {
     events: Arc<Mutex<Vec<String>>>,
     confirm_count: Arc<AtomicUsize>,
     allow_in_session_flags: Arc<Mutex<Vec<bool>>>,
+    /// Prompt đầy đủ từng lần `confirm` (D27: assert diff trong thẻ xác nhận).
+    prompts: Arc<Mutex<Vec<String>>>,
     /// Kế hoạch bước mà agent loop đã phát (D25) — mỗi lần `on_plan` một phần tử.
     plans: Arc<Mutex<Vec<Vec<bean_types::PlanStep>>>>,
 }
@@ -170,6 +172,7 @@ impl Clone for TestIo {
             events: self.events.clone(),
             confirm_count: self.confirm_count.clone(),
             allow_in_session_flags: self.allow_in_session_flags.clone(),
+            prompts: self.prompts.clone(),
             plans: self.plans.clone(),
         }
     }
@@ -183,6 +186,7 @@ impl TestIo {
             events: Arc::new(Mutex::new(Vec::new())),
             confirm_count: Arc::new(AtomicUsize::new(0)),
             allow_in_session_flags: Arc::new(Mutex::new(Vec::new())),
+            prompts: Arc::new(Mutex::new(Vec::new())),
             plans: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -199,6 +203,11 @@ impl TestIo {
     /// Tất cả kế hoạch bước agent loop đã phát (D25) — mỗi lần `on_plan` một phần tử.
     fn plans(&self) -> Vec<Vec<bean_types::PlanStep>> {
         self.plans.lock().unwrap().clone()
+    }
+
+    /// Prompt đầy đủ của từng lần xác nhận (mục 12.1.4 + D27).
+    fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().unwrap().clone()
     }
 }
 
@@ -240,6 +249,7 @@ impl RunIo for TestIo {
             .lock()
             .unwrap()
             .push(allow_in_session);
+        self.prompts.lock().unwrap().push(_prompt.to_string());
         self.decision
     }
 
@@ -1243,4 +1253,74 @@ async fn update_plan_args_sai_khong_phat_su_kien() {
             result.text
         );
     }
+}
+
+/// (D27) Thẻ xác nhận của `write_file` hiển thị **diff thật** thay vì preview
+/// `content=<toàn bộ>` — người dùng duyệt nhanh mà vẫn thấy rõ thay đổi.
+#[tokio::test]
+async fn write_file_confirm_prompt_contains_diff() {
+    let (dir, reg) = files_registry();
+    std::fs::write(dir.path().join("f.txt"), "dòng cũ\n").unwrap();
+    let io = TestIo::new(Some(Decision::Allow));
+    let store = MemoryStore::new();
+    let call = ToolCall::new(
+        "c1",
+        "write_file",
+        serde_json::json!({"path": "f.txt", "content": "dòng cũ\ndòng mới\n"}),
+    );
+    turn(
+        vec![tool_resp(vec![call]), text_resp("đã ghi")],
+        &reg,
+        &io,
+        &store,
+        &cfg(5),
+    )
+    .await
+    .unwrap();
+    let prompts = io.prompts();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("write_file"), "{}", prompts[0]);
+    assert!(
+        prompts[0].contains("ghi đè (1 dòng → 2 dòng)"),
+        "{}",
+        prompts[0]
+    );
+    assert!(prompts[0].contains("+dòng mới"), "{}", prompts[0]);
+    assert!(
+        !prompts[0].contains("content="),
+        "preview k=v phải bị thay bằng diff: {}",
+        prompts[0]
+    );
+}
+
+/// (D27) `edit_file` với `old` xuất hiện nhiều lần: thẻ cảnh báo trước lỗi
+/// thay vì để người dùng duyệt mù một hành động sẽ thất bại.
+#[tokio::test]
+async fn edit_file_confirm_prompt_warns_non_unique_old() {
+    let (dir, reg) = files_registry();
+    std::fs::write(dir.path().join("f.txt"), "abc\nabc\n").unwrap();
+    let io = TestIo::new(Some(Decision::Allow));
+    let store = MemoryStore::new();
+    let call = ToolCall::new(
+        "c1",
+        "edit_file",
+        serde_json::json!({"path": "f.txt", "old": "abc", "new": "x"}),
+    );
+    turn(
+        vec![tool_resp(vec![call]), text_resp("xong")],
+        &reg,
+        &io,
+        &store,
+        &cfg(5),
+    )
+    .await
+    .unwrap();
+    let prompts = io.prompts();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("xuất hiện 2 lần"), "{}", prompts[0]);
+    assert!(
+        !prompts[0].contains("--- a/"),
+        "không có khối diff khi sẽ lỗi: {}",
+        prompts[0]
+    );
 }

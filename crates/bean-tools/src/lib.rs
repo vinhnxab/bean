@@ -24,6 +24,7 @@
 pub mod builtin;
 pub mod checkpoint;
 pub mod ctx;
+pub mod diff;
 pub mod error;
 pub mod mcp;
 pub mod registry;

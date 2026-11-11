@@ -12,6 +12,33 @@ function formatSeconds(seconds: number): string {
   return `${minutes}:${rest}`;
 }
 
+// (D27) Màu dòng diff trong thẻ xác nhận — mọi màu đi qua token CSS (mục 12.1).
+// `+` = thêm (systemGreen), `-` = xoá (systemRed), header/hunk = mực mờ; dòng
+// context (bắt đầu space) giữ màu chữ thường.
+const DIFF_ADD_CLASS = "text-live";
+const DIFF_DEL_CLASS = "text-alert";
+const DIFF_META_CLASS = "text-ink-muted";
+
+function diffLineClass(line: string): string | null {
+  if (line.startsWith("--- a/") || line.startsWith("+++ b/")) return DIFF_META_CLASS;
+  if (line.startsWith("@@")) return DIFF_META_CLASS;
+  if (line.startsWith("+")) return DIFF_ADD_CLASS;
+  if (line.startsWith("-")) return DIFF_DEL_CLASS;
+  return null;
+}
+
+/**
+ * Tìm vị trí bắt đầu khối diff trong prompt xác nhận: chỉ tin cậy cặp header
+ * chuẩn `--- a/` + `+++ b/`. Trả -1 khi prompt không có diff (vd. `run_shell`)
+ * — khi đó render nguyên văn như cũ, và phần mô tả phía trước header cũng
+ * không bị tô màu oan (nội dung do người dùng/agent viết có thể bắt đầu `-`).
+ */
+function findDiffStart(lines: string[]): number {
+  return lines.findIndex(
+    (line, index) => line.startsWith("--- a/") && lines[index + 1]?.startsWith("+++ b/"),
+  );
+}
+
 export function ConfirmCard({
   confirm,
   onDecision,
@@ -90,7 +117,30 @@ export function ConfirmCard({
       </div>
       <p className="mb-1 text-xs font-medium text-ink-muted">{t("confirm.action")}</p>
       <pre className="whitespace-pre-wrap break-words rounded-md bg-surface-raised p-3 font-mono text-sm">
-        {confirm.prompt}
+        {(() => {
+          // (D27) Prompt có khối diff ⇒ tô màu từng dòng bằng <span> (React tự
+          // escape, KHÔNG dangerouslySetInnerHTML — mục 12.3). Prompt thường
+          // (run_shell…) giữ nguyên một text node. Key là offset ký tự của dòng
+          // trong prompt — ổn định và duy nhất kể cả khi nội dung trùng nhau.
+          const lines = confirm.prompt.split("\n");
+          const diffStart = findDiffStart(lines);
+          if (diffStart === -1) return confirm.prompt;
+          let offset = 0;
+          const items = lines.map((line) => {
+            const item = { line, offset };
+            offset += line.length + 1;
+            return item;
+          });
+          return items.map((item, position) => {
+            const kindClass = position >= diffStart ? diffLineClass(item.line) : null;
+            const text = position < items.length - 1 ? `${item.line}\n` : item.line;
+            return (
+              <span key={item.offset} className={kindClass ?? undefined}>
+                {text}
+              </span>
+            );
+          });
+        })()}
       </pre>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <span className={`hub-num text-sm font-medium ${statusClass}`} aria-live="polite">

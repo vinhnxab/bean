@@ -1,6 +1,7 @@
 //! Thực thi một tool call: xác định rủi ro, xin xác nhận, chạy, cắt output,
 //! ghi audit và trả về `Message` kết quả (`Agent::run_tool_call`).
 
+use super::confirm::build_confirm_prompt;
 use super::*;
 
 impl<'a> Agent<'a> {
@@ -83,8 +84,9 @@ impl<'a> Agent<'a> {
             return Ok(());
         }
 
-        let risk = registry
-            .get(&call.name)
+        let tool = registry.get(&call.name);
+        let risk = tool
+            .as_deref()
             .map_or(bean_types::Risk::Safe, |tool| tool.risk(&call.args));
 
         // (M27) Lượt voice (`safe_only`) chỉ được chạy tool `Risk::Safe`. Đây là chốt chặn
@@ -219,31 +221,14 @@ impl<'a> Agent<'a> {
                     record_audit(audit_log.as_ref(), &audit);
                     return Ok(());
                 }
-                let deny_note = deny_list_reason(&call.name, &call.args)
-                    .map(|reason| format!("\n[cảnh báo deny-list] {}", reason.label))
-                    .unwrap_or_default();
-                let mut prompt = format!("{} {}{deny_note}", call.name, args_preview);
-                // (D26) Thẻ xác nhận của rollback hiển thị **danh sách thay đổi thật**
-                // đo tại thời điểm hỏi — model không thể che giấu những gì sẽ bị hoàn tác.
-                if call.name == bean_tools::ROLLBACK_TOOL
-                    && let Some(handle) = state.checkpoint.lock().await.clone()
-                {
-                    match handle.changes(ctx.workspace.root()).await {
-                        Ok(changes) if changes.is_empty() => {
-                            prompt.push_str("\n\nKhông có thay đổi nào kể từ checkpoint.");
-                        }
-                        Ok(changes) => {
-                            prompt.push_str(&format!(
-                                "\n\nSẽ hoàn tác về {}:\n{}",
-                                handle.label(),
-                                changes.summary()
-                            ));
-                        }
-                        Err(error) => {
-                            prompt.push_str(&format!("\n\nKhông so sánh được thay đổi: {error}"));
-                        }
-                    }
-                }
+                let prompt = build_confirm_prompt(
+                    tool.as_deref(),
+                    ctx.workspace.as_ref(),
+                    call,
+                    &args_preview,
+                    state.checkpoint.lock().await.clone(),
+                )
+                .await;
                 let replied = if io.is_background() && untrusted {
                     Some(Decision::Deny)
                 } else {

@@ -156,6 +156,27 @@ pub trait Tool: Send + Sync {
         ToolAccess::default()
     }
 
+    /// Chi tiết bổ sung cho **thẻ xác nhận** (D27) — ví dụ diff của `write_file`/
+    /// `edit_file` để người dùng duyệt nhanh mà vẫn thấy rõ thay đổi.
+    ///
+    /// # Vì sao là method riêng, không dùng `describe`
+    ///
+    /// `describe` là tóm tắt **một dòng** cho `ToolStart` (log/UI stream), cắt ngắn;
+    /// confirm cần **nguyên văn thay đổi sẽ xảy ra** (diff, số chỗ thay) — nội dung dài,
+    /// chỉ có nghĩa khi người dùng đứng trước nút Duyệt. Tách method để cả hai biến
+    /// thiên độc lập: tool trả `None` (mặc định) rơi về preview `k=v` cũ, không hỏng gì.
+    ///
+    /// `workspace` được truyền vào (không lưu trong tool) vì chi tiết phải đo **tại thời
+    /// điểm hỏi** — file có thể đã đổi từ lúc model sinh args. Trả `None` khi không đo
+    /// được (file nhị phân, lỗi I/O…) — agent loop sẽ dùng preview mặc định.
+    fn confirm_details(
+        &self,
+        _workspace: &dyn crate::workspace::WorkspaceFs,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        None
+    }
+
     /// Thực thi tool.
     ///
     /// # Errors

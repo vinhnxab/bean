@@ -74,4 +74,58 @@ describe("ConfirmCard", () => {
     expect(screen.queryByRole("button", { name: "Allow" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
   });
+
+  it("tô màu dòng diff: + xanh, - đỏ, header mờ (D27)", () => {
+    render(
+      <I18nProvider>
+        <ConfirmCard
+          confirm={pendingConfirm({
+            prompt:
+              "write_file path=ghi-chu.md — ghi đè (1 dòng → 1 dòng)\n" +
+              "--- a/ghi-chu.md\n+++ b/ghi-chu.md\n" +
+              "@@ -1,1 +1,1 @@\n-dòng cũ\n+dòng mới",
+          })}
+          onDecision={vi.fn()}
+          onExpire={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("+dòng mới")).toHaveClass("text-live");
+    expect(screen.getByText("-dòng cũ")).toHaveClass("text-alert");
+    expect(screen.getByText("@@ -1,1 +1,1 @@")).toHaveClass("text-ink-muted");
+    expect(screen.getByText("--- a/ghi-chu.md")).toHaveClass("text-ink-muted");
+  });
+
+  it("không tô màu phần mô tả phía trước khối diff", () => {
+    render(
+      <I18nProvider>
+        <ConfirmCard
+          confirm={pendingConfirm({
+            prompt:
+              "write_file path=a.md — tạo file mới (1 dòng)\n" +
+              "--- a/a.md\n+++ b/a.md\n@@ -0,0 +1,1 @@\n+hello",
+          })}
+          onDecision={vi.fn()}
+          onExpire={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    const description = screen.getByText(/tạo file mới/);
+    expect(description.className).not.toContain("text-live");
+    expect(description.className).not.toContain("text-alert");
+    expect(screen.getByText("+hello")).toHaveClass("text-live");
+  });
+
+  it("prompt không có diff (run_shell) hiển thị nguyên văn không span màu", () => {
+    render(
+      <I18nProvider>
+        <ConfirmCard confirm={pendingConfirm()} onDecision={vi.fn()} onExpire={vi.fn()} />
+      </I18nProvider>,
+    );
+
+    const pre = screen.getByText(/rm -rf \/tmp\/demo/);
+    expect(pre.querySelector("span")).toBeNull();
+  });
 });

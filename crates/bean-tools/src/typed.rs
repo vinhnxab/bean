@@ -24,6 +24,7 @@ use serde_json::Value;
 use crate::ctx::ToolCtx;
 use crate::error::ToolError;
 use crate::tool::{Tool, ToolAccess};
+use crate::workspace::WorkspaceFs;
 use bean_types::{Risk, ToolSpec};
 use std::borrow::Cow;
 
@@ -80,6 +81,8 @@ pub struct TypedTool<P, F, Fut> {
     marks_untrusted: bool,
     required_tags: Vec<&'static str>,
     also_visible_to: Vec<&'static str>,
+    confirm_details_fn:
+        Option<Arc<dyn Fn(&dyn WorkspaceFs, &Value) -> Option<String> + Send + Sync>>,
     handler: F,
     _phantom: PhantomData<fn(P) -> Fut>,
 }
@@ -175,6 +178,19 @@ where
         self
     }
 
+    /// Gắn hàm sinh **chi tiết thẻ xác nhận** (D27) — ví dụ diff cho tool ghi file.
+    ///
+    /// Hàm nhận `&dyn WorkspaceFs` (đo file **tại thời điểm hỏi**, không cache) và args
+    /// thô của model; trả `None` khi không đo được để agent loop rơi về preview mặc định.
+    #[must_use]
+    pub fn confirm_details_fn(
+        mut self,
+        f: impl Fn(&dyn WorkspaceFs, &Value) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.confirm_details_fn = Some(Arc::new(f));
+        self
+    }
+
     fn build(
         name: &str,
         default_risk: Risk,
@@ -189,6 +205,7 @@ where
             marks_untrusted: false,
             required_tags: Vec::new(),
             also_visible_to: Vec::new(),
+            confirm_details_fn: None,
             handler,
             _phantom: PhantomData,
         }
@@ -253,6 +270,11 @@ where
             required_tags: Cow::Borrowed(&self.required_tags),
             also_visible_to: Cow::Borrowed(&self.also_visible_to),
         }
+    }
+
+    fn confirm_details(&self, workspace: &dyn WorkspaceFs, args: &Value) -> Option<String> {
+        let f = self.confirm_details_fn.as_ref()?;
+        f(workspace, args)
     }
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {

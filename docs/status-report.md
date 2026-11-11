@@ -83,6 +83,7 @@
 - Giới hạn bước, ngân sách token/ngày, chống lặp tool, audit JSONL.
 - Kế hoạch có cấu trúc: tool `update_plan` (Safe) — model gửi snapshot toàn bộ danh sách bước, UI web hiện thẻ tiến độ lúc đang chạy; plan sống theo run, khôi phục qua `Sync` (lộ trình mục 5b, D25, 2026-11-10).
 - Checkpoint/rollback workspace: chụp snapshot vào `data.dir/checkpoints/` trước tool ghi đầu tiên của lượt (run thuần đọc không tốn chi phí); tool `rollback_workspace` (Confirm, kèm danh sách thay đổi thật trong prompt xác nhận) hoàn tác mọi thay đổi của lượt hiện tại; capture fail ⇒ từ chối tool ghi (lộ trình mục 5c, D26, 2026-11-11).
+- Hiển thị diff khi duyệt ghi file: `write_file`/`edit_file` kèm diff thật đo tại thời điểm hỏi trong prompt xác nhận (web tô màu +/−), thay preview `content=<toàn bộ>`; `edit_file` cảnh báo trước khi `old` không khớp duy nhất (D27, 2026-11-11).
 
 ### Provider và tool
 
@@ -140,6 +141,7 @@
 | Kế hoạch có cấu trúc (mục 5b lộ trình) | ✅ Pass | `bean-tools` 40 test (5 plan: schema+ràng buộc → None, trần 200 ký tự theo char, tóm tắt đúng); `agent_loop` 21 test (2 mới: plan hợp lệ phát `on_plan` + giữ cặp tool_use/tool_result; args sai không phát). Bug thật bắt được: `parse_plan_steps` bản đầu chỉ kiểm schema, `steps: []` lọt qua được phát ra UI — gộp `validate_steps` dùng chung cho loop và tool (D25.2). Web 233 test (chat store plan: ghi đè/final xoá, dedupe, `applySync` khôi phục; PlanCard) |
 | Checkpoint/rollback workspace (mục 5c lộ trình) | ✅ Pass | `bean-security` 5 test (chụp/restore/trần/prune + proptest cây ngẫu nhiên); `bean-core` 4 test `checkpoint_flow` (rollback về trước khi ghi; chưa có gì thay đổi; checkpoint tắt ⇒ tool ghi vẫn chạy; scheduler từ chối); E2E binary thật `rollback_restores_workspace_in_real_binary` (duyệt 2 confirm, file sinh sau checkpoint bị xoá, snapshot ngoài jail, result qua REST đúng). Chi tiết D26.1–D26.9. **Còn kiểm chứng tay với model thật** qua Telegram/web (ghi file xong bảo hoàn tác) — người dùng sẽ thử |
 | Truy xuất bộ nhớ K5 + K2 (mục 6 lộ trình) | ✅ Pass | K5: `memory_search_bo_message_cua_luot_dang_chay` (sqlite) — message của lượt đang chạy bị loại, lịch sử lượt trước + session khác vẫn thấy, gọi ngoài lượt vẫn thấy đủ. K2: `build_windowed_history_equals_full_history_trim` (250 message, nhóm tool đúng biên trang 200 — windowed ≡ full-trim) + `build_with_large_budget_returns_whole_history_with_tool_group_intact` (nhóm tool vắt biên trang giữ nguyên thứ tự chuẩn hoá) |
+| Diff duyệt hành động (D27) | ✅ Pass | `bean-tools` 9 test `diff.rs` (context thật + số dòng chuẩn, trần 50 dòng + note, fallback file quá lớn không treo, tiếng Việt + emoji, chỉ khác newline) + 9 test `confirm_details` (fake `WorkspaceFs`: tạo mới/ghi đè/nhị phân/lỗi I/O/thiếu args/old không duy nhất/wire qua tool thật) + `bean-core` 2 integration test (prompt chứa `+dòng mới`, không còn `content=`; cảnh báo old xuất hiện 2 lần) + web 3 test `ConfirmCard` (màu +/−/header, mô tả trước diff không tô, không diff không sinh span). Bug thật bắt được: bản đầu LCS chạy trên đoạn giữa sau trim ⇒ hunk mất context hai phía — giữ prefix/suffix dạng `Equal` trong dãy op |
 
 ### Ghi chú về warning dependency
 
