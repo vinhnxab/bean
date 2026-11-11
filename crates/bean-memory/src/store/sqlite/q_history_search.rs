@@ -95,13 +95,18 @@ pub(super) fn delete_before(
 pub(super) fn memory_search(
     conn: &Connection,
     query: &str,
+    exclude_current_run_of: Option<SessionId>,
 ) -> Result<Vec<MemorySearchHit>, StoreError> {
     let Some(match_expr) = sanitize_fts_query(query) else {
         return Ok(Vec::new());
     };
     let limit = MEMORY_SEARCH_LIMIT as i64;
+    let run_cut = match exclude_current_run_of {
+        Some(session) => current_run_start_seq(conn, session)?.map(|cut| (session.get(), cut)),
+        None => None,
+    };
     let mut memories = search_memories(conn, &match_expr, limit)?;
-    let mut messages = search_messages(conn, &match_expr, limit)?;
+    let mut messages = search_messages(conn, &match_expr, limit, run_cut)?;
     normalize_scores(&mut memories);
     normalize_scores(&mut messages);
 
@@ -112,6 +117,24 @@ pub(super) fn memory_search(
     hits.sort_by(|left, right| right.score.total_cmp(&left.score));
     hits.truncate(MEMORY_SEARCH_LIMIT);
     Ok(hits)
+}
+
+/// Seq của message `user` cuối cùng trong session — ranh giới mở đầu lượt hiện tại.
+///
+/// `None` khi session chưa có message user nào: khi đó không có lượt nào đang chạy,
+/// không loại gì cả (không dùng COALESCE 0 vì sẽ loại nhầm toàn bộ lịch sử).
+pub(super) fn current_run_start_seq(
+    conn: &Connection,
+    session: SessionId,
+) -> Result<Option<i64>, StoreError> {
+    let mut stmt = conn
+        .prepare("SELECT MAX(seq) FROM messages WHERE session_id = ?1 AND role = 'user'")
+        .map_err(internal)?;
+    let mut rows = stmt
+        .query_map(params![session.get()], |row| row.get::<_, Option<i64>>(0))
+        .map_err(internal)?;
+    let first = rows.next().transpose().map_err(internal)?;
+    Ok(first.flatten())
 }
 
 /// Tìm trong bảng `memories` (chỉ mục FTS5 external content).
@@ -145,20 +168,28 @@ pub(super) fn search_memories(
 }
 
 /// Tìm trong lịch sử hội thoại (`text_for_search` gồm cả tên/đối số tool).
+///
+/// `run_cut` — khi có (`Some(session_id_thô, cut)`), loại message của session đó có
+/// `seq > cut`: đó là các message của lượt đang chạy (đối số tool, kết quả tool,
+/// assistant trung gian) — K5. Chỉ message của session chỉ định bị ảnh hưởng.
 pub(super) fn search_messages(
     conn: &Connection,
     match_expr: &str,
     limit: i64,
+    run_cut: Option<(i64, i64)>,
 ) -> Result<Vec<MemorySearchHit>, StoreError> {
     let mut stmt = conn
         .prepare(
             "SELECT m.text_for_search, m.session_id, bm25(messages_fts) \
              FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid \
-             WHERE messages_fts MATCH ?1 ORDER BY 3 LIMIT ?2",
+             WHERE messages_fts MATCH ?1 \
+               AND (?2 IS NULL OR m.session_id != ?2 OR m.seq <= ?3) \
+             ORDER BY 3 LIMIT ?4",
         )
         .map_err(internal)?;
+    let (cut_session, cut_seq) = run_cut.unzip();
     let rows = stmt
-        .query_map(params![match_expr, limit], |row| {
+        .query_map(params![match_expr, cut_session, cut_seq, limit], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,

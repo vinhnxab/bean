@@ -194,8 +194,7 @@ async fn build_full(
         system.push_str(&wrap_bounded(summary.trim(), MAX_WRAPPED_OUTPUT_CHARS));
     }
 
-    let history = store.history(session, None, 0).await?;
-    let messages = trim_history(&stabilize_tool_order(&history), options.context_budget);
+    let messages = load_history_within_budget(store, session, options.context_budget).await?;
     Ok(TurnContext {
         system,
         messages,
@@ -282,6 +281,13 @@ pub fn trim_history(history: &[Message], budget_tokens: u32) -> Vec<Message> {
         return Vec::new();
     }
     let budget = usize::try_from(budget_tokens).unwrap_or(usize::MAX);
+    let keep = budget_keep(history, budget);
+    let start = extend_start_backwards(history, keep);
+    history[start..].to_vec()
+}
+
+/// Số message gần nhất vừa ngân sách (quét từ mới nhất về cũ; mới nhất luôn giữ).
+fn budget_keep(history: &[Message], budget: usize) -> usize {
     let mut used = 0usize;
     let mut keep = 0usize;
     for message in history.iter().rev() {
@@ -292,8 +298,65 @@ pub fn trim_history(history: &[Message], budget_tokens: u32) -> Vec<Message> {
         used = used.saturating_add(cost);
         keep += 1;
     }
-    let start = extend_start_backwards(history, keep);
-    history[start..].to_vec()
+    keep
+}
+
+/// Kích thước mỗi trang đọc lịch sử (K2).
+const HISTORY_PAGE_SIZE: usize = 200;
+
+/// K2: đọc lịch sử theo **trang** từ mới nhất lùi về cũ thay vì đọc toàn bộ.
+///
+/// Trước đây `build` đọc **toàn bộ** lịch sử mỗi bước rồi cắt theo ngân sách —
+/// O(n) mỗi lần gọi LLM, chậm dần theo phiên dài. Giờ chỉ đọc đúng phần gần nhất:
+/// mỗi trang 200 message, dừng ngay khi đoạn đã đọc vượt ngân sách hoặc hết lịch
+/// sử — phiên dài chỉ trả phí I/O tương ứng phần vừa ngân sách.
+///
+/// Bất biến giữ nguyên như đọc full:
+/// * thứ tự tool result được chuẩn hoá theo `tool_calls` của assistant (mục 5a)
+///   **trước khi** cắt ngân sách;
+/// * cắt lùi qua [`extend_start_backwards`] để không tách cặp
+///   `assistant(tool_calls)`/`tool` (mục 22.1);
+/// * cửa sổ bắt đầu giữa nhóm tool (partner `assistant` nằm trang cũ hơn) thì
+///   đọc thêm trang cũ trước khi chuẩn hoá — nhóm tool không bao giờ bị xé ở
+///   biên cửa sổ, và `stabilize_tool_order` không bao giờ gặp result "mồ côi"
+///   trong cửa sổ (sẽ bị đẩy về cuối ⇒ sai thứ tự lịch sử).
+async fn load_history_within_budget(
+    store: &dyn Store,
+    session: SessionId,
+    budget_tokens: u32,
+) -> Result<Vec<Message>, StoreError> {
+    let budget = usize::try_from(budget_tokens).unwrap_or(usize::MAX);
+    let mut window: Vec<Message> = Vec::new();
+    let mut before_seq: Option<u64> = None;
+    loop {
+        let page = store
+            .list_messages(session, before_seq, HISTORY_PAGE_SIZE)
+            .await?;
+        let exhausted = page.len() < HISTORY_PAGE_SIZE;
+        before_seq = page.first().map(|stored| stored.seq);
+        let mut merged: Vec<Message> = page.into_iter().map(|stored| stored.message).collect();
+        merged.append(&mut window);
+        window = merged;
+
+        // Cửa sổ bắt đầu giữa một nhóm tool ⇒ partner `assistant` nằm trang cũ hơn:
+        // đọc thêm trước khi chuẩn hoá thứ tự.
+        if !exhausted
+            && window
+                .first()
+                .is_some_and(|message| message.role == Role::Tool)
+        {
+            continue;
+        }
+
+        let ordered = stabilize_tool_order(&window);
+        let keep = budget_keep(&ordered, budget);
+        let start = extend_start_backwards(&ordered, keep);
+        if start == 0 && !exhausted {
+            // Cả cửa sổ vừa ngân sách ⇒ có thể còn lịch sử cũ hơn: đọc thêm.
+            continue;
+        }
+        return Ok(ordered[start..].to_vec());
+    }
 }
 
 #[cfg(test)]
@@ -579,5 +642,125 @@ mod tests {
         assert_eq!(kept[0].role, Role::Assistant);
         assert!(check_no_orphan_result(&kept, 0));
         assert!(trim_history(&[], 1_000).is_empty());
+    }
+
+    /// (K2) `build` đọc theo trang nhưng kết quả phải **tương đương** đọc full:
+    /// cùng đoạn lịch sử, cùng cắt ngân sách, không tách cặp tool. Lịch sử 250
+    /// message (> 1 trang) với một nhóm tool nằm ĐÚNG biên trang 200/201.
+    #[tokio::test]
+    async fn build_windowed_history_equals_full_history_trim() {
+        let store = MemoryStore::new();
+        let session = SessionId::new(1);
+        let filler = "x".repeat(50);
+        // seq 1..=48: filler user.
+        for _ in 0..48 {
+            store
+                .append(session, Message::user(filler.clone()))
+                .await
+                .unwrap();
+        }
+        // seq 49 user, seq 50 assistant(gọi a,b) — partner nằm ĐÚNG TRƯỚC biên
+        // trang 200 (trang 1 = seq 51..250) ⇒ cửa sổ đầu tiên bắt đầu giữa nhóm tool.
+        store
+            .append(session, Message::user("chạy hai tool"))
+            .await
+            .unwrap();
+        store
+            .append(
+                session,
+                Message::assistant(
+                    None,
+                    vec![
+                        ToolCall::new("a", "probe", serde_json::json!({})),
+                        ToolCall::new("b", "probe", serde_json::json!({})),
+                    ],
+                ),
+            )
+            .await
+            .unwrap();
+        // seq 51, 52: result ghi LỘN XỘN (thứ tự hoàn tất) — chuẩn hoá phải sửa.
+        store
+            .append(session, Message::tool("b", "kết quả b"))
+            .await
+            .unwrap();
+        store
+            .append(session, Message::tool("a", "kết quả a"))
+            .await
+            .unwrap();
+        // seq 53..=250: filler user cho đủ hơn một trang.
+        for _ in 0..198 {
+            store
+                .append(session, Message::user(filler.clone()))
+                .await
+                .unwrap();
+        }
+
+        let mut config = Config::default();
+        config.agent.context_budget_tokens = 500;
+        let ctx = build(&store, &config, session, None).await.unwrap();
+
+        let full = store.history(session, None, 0).await.unwrap();
+        let expected = trim_history(&super::stabilize_tool_order(&full), 500);
+        let actual = serde_json::to_value(&ctx.messages).unwrap();
+        let expected = serde_json::to_value(&expected).unwrap();
+        assert_eq!(actual, expected, "windowed phải tương đương full-trim");
+        assert!(check_no_orphan_result(&ctx.messages, 0));
+        assert_ne!(ctx.messages[0].role, Role::Tool);
+    }
+
+    /// (K2) Ngân sách lớn hơn lịch sử: windowed trả đủ toàn bộ, nhóm tool vắt
+    /// trang giữ nguyên thứ tự chuẩn hoá (assistant → a → b).
+    #[tokio::test]
+    async fn build_with_large_budget_returns_whole_history_with_tool_group_intact() {
+        let store = MemoryStore::new();
+        let session = SessionId::new(1);
+        for _ in 0..199 {
+            store
+                .append(session, Message::user("x".repeat(50)))
+                .await
+                .unwrap();
+        }
+        // seq 200 assistant + seq 201,202 results — nhóm tool vắt biên trang 200.
+        store
+            .append(
+                session,
+                Message::assistant(
+                    None,
+                    vec![
+                        ToolCall::new("a", "probe", serde_json::json!({})),
+                        ToolCall::new("b", "probe", serde_json::json!({})),
+                    ],
+                ),
+            )
+            .await
+            .unwrap();
+        store
+            .append(session, Message::tool("b", "kết quả b"))
+            .await
+            .unwrap();
+        store
+            .append(session, Message::tool("a", "kết quả a"))
+            .await
+            .unwrap();
+
+        let mut config = Config::default();
+        config.agent.context_budget_tokens = 100_000;
+        let ctx = build(&store, &config, session, None).await.unwrap();
+        assert_eq!(ctx.messages.len(), 202);
+        assert!(check_no_orphan_result(&ctx.messages, 0));
+        // Nhóm tool vắt trang: assistant phải đứng ngay trước result của mình.
+        let assistant_idx = ctx
+            .messages
+            .iter()
+            .position(|m| m.tool_call_id.is_none() && m.tool_calls.len() == 2)
+            .unwrap();
+        assert_eq!(
+            ctx.messages[assistant_idx + 1].tool_call_id.as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            ctx.messages[assistant_idx + 2].tool_call_id.as_deref(),
+            Some("b")
+        );
     }
 }

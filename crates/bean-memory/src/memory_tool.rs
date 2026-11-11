@@ -76,12 +76,14 @@ impl Tool for MemorySearchTool {
         Risk::Safe
     }
 
-    async fn call(&self, _ctx: &ToolCtx, args: serde_json::Value) -> Result<String, ToolError> {
+    async fn call(&self, ctx: &ToolCtx, args: serde_json::Value) -> Result<String, ToolError> {
         let params = typed::deserialize_params::<MemorySearchParams>(args, &self.spec().parameters)
             .map_err(|err| ToolError::InvalidArgs(err.to_string()))?;
+        // (K5) Loại message của lượt đang chạy: đối số tool — kể cả chính query vừa
+        // gửi — đã ghi DB trước khi tool chạy và sẽ chiếm top kết quả, gây nhiễu.
         let hits = self
             .store
-            .memory_search(&params.query)
+            .memory_search(&params.query, Some(ctx.session))
             .await
             .map_err(|err| ToolError::Internal(err.to_string()))?;
         if hits.is_empty() {

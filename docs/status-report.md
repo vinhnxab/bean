@@ -99,6 +99,7 @@
 
 - SQLite + FTS5, lịch sử bền vững.
 - Context budget và compaction không cắt sai cặp tool.
+- Truy xuất: `memory_search` loại message của lượt đang chạy khỏi kết quả (K5); context builder đọc lịch sử **theo trang** từ mới nhất lùi về cũ, dừng khi đủ ngân sách — không đọc toàn bộ mỗi bước (K2) (lộ trình mục 6, 2026-11-11).
 - `MEMORY.md`, `USER.md`, memory entries.
 - Skills từ project/user directory; skill draft chỉ kích hoạt sau duyệt.
 
@@ -137,7 +138,8 @@
 | 7 unit test `FailoverProvider` + wire cache Anthropic | ✅ Pass | 503/401 failover, Decode không failover, hết đường trả lỗi cuối, stream trước delta đầu, fallback bỏ qua model override; `system` có `cache_control: ephemeral` khi bật, string khi tắt; reflection dùng `small_model` (test ghi lại model) |
 | Tool song song (mục 5a lộ trình) | ✅ Pass | 171 test bean-core: đo `max_active` chứng minh 2 Safe chạy đồng thời; kill-switch chạy tuần lại; batch trộn Safe+Confirm chỉ hỏi 1 xác nhận; 4 test phân nhóm (`partition_tool_calls`); 3 test chuẩn hoá thứ tự; test cancel giữ cặp theo ngữ nghĩa mới. Bug thật bắt được: huỷ bị đếm như lỗi tool → gợi ý "thất bại 2 lần" gắn sai vào result huỷ (D24.5, đã sửa) |
 | Kế hoạch có cấu trúc (mục 5b lộ trình) | ✅ Pass | `bean-tools` 40 test (5 plan: schema+ràng buộc → None, trần 200 ký tự theo char, tóm tắt đúng); `agent_loop` 21 test (2 mới: plan hợp lệ phát `on_plan` + giữ cặp tool_use/tool_result; args sai không phát). Bug thật bắt được: `parse_plan_steps` bản đầu chỉ kiểm schema, `steps: []` lọt qua được phát ra UI — gộp `validate_steps` dùng chung cho loop và tool (D25.2). Web 233 test (chat store plan: ghi đè/final xoá, dedupe, `applySync` khôi phục; PlanCard) |
-| Checkpoint/rollback workspace (mục 5c lộ trình) | ✅ Pass | `bean-security` 5 test (chụp/restore/trần/prune + proptest cây ngẫu nhiên); `bean-core` 4 test `checkpoint_flow` (rollback về trước khi ghi; chưa có gì thay đổi; checkpoint tắt ⇒ tool ghi vẫn chạy; scheduler từ chối); E2E binary thật `rollback_restores_workspace_in_real_binary` (duyệt 2 confirm, file sinh sau checkpoint bị xoá, snapshot ngoài jail, result qua REST đúng). Chi tiết D26.1–D26.9 |
+| Checkpoint/rollback workspace (mục 5c lộ trình) | ✅ Pass | `bean-security` 5 test (chụp/restore/trần/prune + proptest cây ngẫu nhiên); `bean-core` 4 test `checkpoint_flow` (rollback về trước khi ghi; chưa có gì thay đổi; checkpoint tắt ⇒ tool ghi vẫn chạy; scheduler từ chối); E2E binary thật `rollback_restores_workspace_in_real_binary` (duyệt 2 confirm, file sinh sau checkpoint bị xoá, snapshot ngoài jail, result qua REST đúng). Chi tiết D26.1–D26.9. **Còn kiểm chứng tay với model thật** qua Telegram/web (ghi file xong bảo hoàn tác) — người dùng sẽ thử |
+| Truy xuất bộ nhớ K5 + K2 (mục 6 lộ trình) | ✅ Pass | K5: `memory_search_bo_message_cua_luot_dang_chay` (sqlite) — message của lượt đang chạy bị loại, lịch sử lượt trước + session khác vẫn thấy, gọi ngoài lượt vẫn thấy đủ. K2: `build_windowed_history_equals_full_history_trim` (250 message, nhóm tool đúng biên trang 200 — windowed ≡ full-trim) + `build_with_large_budget_returns_whole_history_with_tool_group_intact` (nhóm tool vắt biên trang giữ nguyên thứ tự chuẩn hoá) |
 
 ### Ghi chú về warning dependency
 

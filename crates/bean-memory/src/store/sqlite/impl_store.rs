@@ -295,10 +295,18 @@ impl crate::traits::traits::MemoryStore for SqliteStore {
             .await
     }
 
-    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError> {
+    async fn memory_search(
+        &self,
+        query: &str,
+        exclude_current_run_of: Option<SessionId>,
+    ) -> Result<Vec<MemorySearchHit>, StoreError> {
         let query = query.to_string();
-        self.request(move |reply| DbCommand::MemorySearch { query, reply })
-            .await
+        self.request(move |reply| DbCommand::MemorySearch {
+            query,
+            exclude_current_run_of,
+            reply,
+        })
+        .await
     }
 }
 

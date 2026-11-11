@@ -102,7 +102,7 @@ async fn sqlite_persists_messages_across_restart() {
         reopened.summary(session).await.unwrap().as_deref(),
         Some("tóm tắt cũ")
     );
-    let hits = reopened.memory_search("Vinh").await.unwrap();
+    let hits = reopened.memory_search("Vinh", None).await.unwrap();
     assert!(hits.iter().any(|h| h.source == MemorySource::Memories));
 }
 
@@ -361,7 +361,7 @@ async fn fts5_finds_memories_and_messages() {
         .await
         .unwrap();
 
-    let hits = store.memory_search("báo cáo").await.unwrap();
+    let hits = store.memory_search("báo cáo", None).await.unwrap();
     assert!(hits.iter().any(|h| h.source == MemorySource::Memories));
     assert!(
         hits.iter()
@@ -370,7 +370,113 @@ async fn fts5_finds_memories_and_messages() {
         texts(&hits)
     );
     assert!(hits.iter().all(|h| h.text.contains("báo")));
-    assert!(store.memory_search("thời tiết").await.unwrap().len() == 1);
+    assert!(store.memory_search("thời tiết", None).await.unwrap().len() == 1);
+}
+
+/// (K5) `memory_search` gọi từ tool trong lượt đang chạy phải loại mọi message
+/// sau message `user` cuối cùng: đối số tool — kể cả chính query vừa gửi — đã được
+/// ghi DB trước khi tool chạy (mục 6) và thường chiếm top kết quả, gây nhiễu cho
+/// model. Lịch sử các lượt trước và session khác vẫn phải tìm thấy. Cắt theo
+/// `MAX(seq) WHERE role = 'user'` nên message `user` mở đầu lượt vẫn tìm thấy.
+#[tokio::test]
+async fn memory_search_bo_message_cua_luot_dang_chay() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let session = store.ensure_session("cli", "local", "").await.unwrap();
+    let other = store.ensure_session("web", "uuid-khac", "").await.unwrap();
+
+    // Lượt TRƯỚC của cùng session: nội dung này vẫn phải tìm thấy.
+    store
+        .append(session, Message::user("lập báo cáo tài chính quý 4"))
+        .await
+        .unwrap();
+    // Session khác: không thuộc lượt hiện tại, vẫn phải tìm thấy.
+    store
+        .append(other, Message::user("báo cáo tài chính của session khác"))
+        .await
+        .unwrap();
+
+    // Lượt HIỆN TẠI: user mở đầu, model gọi memory_search — assistant(tool_calls)
+    // chứa query trong đối số và tool result ghi DB trước khi tool chạy (mục 6).
+    store
+        .append(session, Message::user("tìm lại báo cáo"))
+        .await
+        .unwrap();
+    store
+        .append(
+            session,
+            Message::assistant(
+                None,
+                vec![ToolCall::new(
+                    "c1",
+                    "memory_search",
+                    serde_json::json!({ "query": "báo cáo tài chính" }),
+                )],
+            ),
+        )
+        .await
+        .unwrap();
+    store
+        .append(session, Message::tool("c1", "kết quả zebratrunggian"))
+        .await
+        .unwrap();
+
+    // Gọi như tool (Some(session)): mọi Message hit phải đến từ session khác —
+    // message của lượt đang chạy (tool call + result) bị loại, còn message user
+    // của lượt trước (seq trước user cuối) vẫn tìm thấy.
+    let hits = store
+        .memory_search("báo cáo tài chính", Some(session))
+        .await
+        .unwrap();
+    assert!(
+        hits.iter()
+            .any(|hit| matches!(hit.source, MemorySource::Message { session_id } if session_id == session.get())),
+        "phải giữ lịch sử lượt trước (cùng session): {:?}",
+        texts(&hits)
+    );
+    assert!(
+        hits.iter()
+            .any(|hit| matches!(hit.source, MemorySource::Message { session_id } if session_id == other.get())),
+        "phải giữ lịch sử session khác: {:?}",
+        texts(&hits)
+    );
+    // Message cùng session được trả chỉ có thể là lịch sử lượt trước — không
+    // được có assistant(tool_calls) hay tool result của lượt đang chạy.
+    for hit in &hits {
+        if let MemorySource::Message { session_id } = &hit.source
+            && *session_id == session.get()
+        {
+            assert!(
+                hit.text.contains("lập báo cáo tài chính quý 4"),
+                "chỉ user message lượt trước được trả: {hit:?}"
+            );
+        }
+    }
+    // Token duy nhất chỉ nằm trong tool result của lượt đang chạy: bị loại.
+    assert!(
+        store
+            .memory_search("zebratrunggian", Some(session))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // Gọi ngoài lượt (None): tìm thấy cả message của lượt vừa rồi.
+    assert!(
+        !store
+            .memory_search("zebratrunggian", None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // Session chưa từng có message user: không loại gì, không lỗi.
+    let fresh = store.ensure_session("web", "uuid-moi", "").await.unwrap();
+    assert!(
+        !store
+            .memory_search("zebratrunggian", Some(fresh))
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Điểm chuẩn hoá theo nguồn: ghi nhớ dài hạn không bị "chìm" chỉ vì bảng có ít dòng
@@ -386,7 +492,7 @@ async fn fts5_normalizes_scores_per_source() {
         .await
         .unwrap();
 
-    let hits = store.memory_search("hồ sơ Vinh").await.unwrap();
+    let hits = store.memory_search("hồ sơ Vinh", None).await.unwrap();
     let best_memory = hits
         .iter()
         .find(|hit| hit.source == MemorySource::Memories)
@@ -414,7 +520,7 @@ async fn fts5_ranks_higher_term_frequency_first() {
         .memory_save("alpha alpha alpha alpha alpha", "b")
         .await
         .unwrap();
-    let hits = store.memory_search("alpha").await.unwrap();
+    let hits = store.memory_search("alpha", None).await.unwrap();
     assert_eq!(hits.len(), 2);
     assert_eq!(hits[0].text, "alpha alpha alpha alpha alpha");
     assert!(hits[0].score > hits[1].score, "điểm: {:?}", hits);
@@ -430,7 +536,7 @@ async fn fts5_matches_vietnamese_with_or_without_diacritics() {
         .await
         .unwrap();
     for query in ["báo cáo", "bao cao", "BÁO CÁO", "tai chinh", "thu sau"] {
-        let hits = store.memory_search(query).await.unwrap();
+        let hits = store.memory_search(query, None).await.unwrap();
         assert!(!hits.is_empty(), "không tìm thấy với query `{query}`");
     }
 }
@@ -459,10 +565,10 @@ async fn fts_search_tolerates_special_characters() {
         "café:test*",
     ] {
         // Không được panic hay trả lỗi cú pháp FTS.
-        store.memory_search(query).await.unwrap();
+        store.memory_search(query, None).await.unwrap();
     }
-    assert!(!store.memory_search("dự án").await.unwrap().is_empty());
-    assert!(store.memory_search("😀").await.unwrap().is_empty());
+    assert!(!store.memory_search("dự án", None).await.unwrap().is_empty());
+    assert!(store.memory_search("😀", None).await.unwrap().is_empty());
 }
 
 /// Trigger FTS phải đồng bộ khi xoá (`delete_before`, `clear`).
@@ -479,15 +585,21 @@ async fn delete_and_clear_keep_fts_in_sync() {
         .append(session, Message::user("chủ đề unicorn"))
         .await
         .unwrap();
-    assert!(!store.memory_search("zebra").await.unwrap().is_empty());
+    assert!(!store.memory_search("zebra", None).await.unwrap().is_empty());
 
     store.delete_before(session, 2).await.unwrap();
     assert!(
-        store.memory_search("zebra").await.unwrap().is_empty(),
+        store.memory_search("zebra", None).await.unwrap().is_empty(),
         "FTS chưa đồng bộ sau khi xoá"
     );
     store.clear(session).await.unwrap();
-    assert!(store.memory_search("unicorn").await.unwrap().is_empty());
+    assert!(
+        store
+            .memory_search("unicorn", None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(store.count(session).await.unwrap(), 0);
 }
 
@@ -530,7 +642,13 @@ async fn compaction_keeps_tool_pairs_and_saves_summary() {
         "phải giữ nguyên lượt gần nhất"
     );
     // Nội dung đã bị xoá không còn trong FTS.
-    assert!(store.memory_search("kết quả 0").await.unwrap().is_empty());
+    assert!(
+        store
+            .memory_search("kết quả 0", None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Dưới ngưỡng 70% thì **không** gọi LLM và không đụng vào lịch sử.
@@ -577,7 +695,7 @@ async fn memory_store_behaves_like_sqlite_for_basic_ops() {
         store.memory_save("ghi nhớ về zeta", "tag").await.unwrap(),
         1
     );
-    let hits = store.memory_search("zeta").await.unwrap();
+    let hits = store.memory_search("zeta", None).await.unwrap();
     assert_eq!(hits[0].source, MemorySource::Memories);
     store.delete_before(session, 2).await.unwrap();
     assert_eq!(store.count(session).await.unwrap(), 1);

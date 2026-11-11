@@ -163,7 +163,8 @@ impl Router {
             }
             Command::MemoryUsage => Ok("Dùng: /memory <truy vấn>".into()),
             Command::MemorySearch(query) => {
-                let hits = self.inner.store.memory_search(query).await?;
+                // (K5) Slash command chạy ngoài lượt agent — không có message nào cần loại.
+                let hits = self.inner.store.memory_search(query, None).await?;
                 Ok(if hits.is_empty() {
                     "Không tìm thấy ghi nhớ.".into()
                 } else {

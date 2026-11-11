@@ -177,7 +177,17 @@ pub trait MemoryStore: Send + Sync {
     async fn memory_save(&self, text: &str, tags: &str) -> Result<u64, StoreError>;
 
     /// Tìm kiếm FTS5 trong cả `memories` và `messages`, sắp theo BM25.
-    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError>;
+    ///
+    /// `exclude_current_run_of` — khi có (lượt agent đang chạy), loại mọi message
+    /// của lượt hiện tại trong session đó, tức mọi message nằm **sau** message
+    /// `user` cuối cùng: đối số tool (kể cả chính query vừa gửi) đã được ghi DB
+    /// trước khi tool chạy và thường chiếm top kết quả, gây nhiễu cho model (K5).
+    /// Slash command chạy ngoài lượt nên truyền `None`.
+    async fn memory_search(
+        &self,
+        query: &str,
+        exclude_current_run_of: Option<SessionId>,
+    ) -> Result<Vec<MemorySearchHit>, StoreError>;
 }
 
 // ============================================================================ //

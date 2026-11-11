@@ -313,8 +313,12 @@ pub(super) fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         DbCommand::MemorySave { text, tags, reply } => {
             let _ = reply.send(memory_save_row(conn, &text, &tags));
         }
-        DbCommand::MemorySearch { query, reply } => {
-            let _ = reply.send(memory_search(conn, &query));
+        DbCommand::MemorySearch {
+            query,
+            exclude_current_run_of,
+            reply,
+        } => {
+            let _ = reply.send(memory_search(conn, &query, exclude_current_run_of));
         }
         DbCommand::Outbound {
             channel,

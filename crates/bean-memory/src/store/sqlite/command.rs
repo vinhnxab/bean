@@ -253,6 +253,7 @@ pub(super) enum DbCommand {
     },
     MemorySearch {
         query: String,
+        exclude_current_run_of: Option<SessionId>,
         reply: Reply<Vec<MemorySearchHit>>,
     },
     Outbound {

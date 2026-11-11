@@ -552,7 +552,11 @@ impl crate::traits::traits::MemoryStore for MemoryStore {
         Ok(id)
     }
 
-    async fn memory_search(&self, query: &str) -> Result<Vec<MemorySearchHit>, StoreError> {
+    async fn memory_search(
+        &self,
+        query: &str,
+        _exclude_current_run_of: Option<SessionId>,
+    ) -> Result<Vec<MemorySearchHit>, StoreError> {
         let needle = query.trim().to_lowercase();
         if needle.is_empty() {
             return Ok(Vec::new());
