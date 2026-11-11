@@ -555,29 +555,67 @@ async fn run_host(
 /// `command` đã được dựng sẵn ở [`Sandbox::run_argv`], nên không có tầng shell nào diễn giải
 /// ký tự trong tham số.
 async fn run_host_argv(
-    mut command: tokio::process::Command,
+    command: tokio::process::Command,
     timeout: Duration,
     cancel: &CancellationToken,
 ) -> Result<ShellOutcome, SandboxError> {
-    let child = command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| SandboxError::Launch(format!("không khởi động được scanner: {e}")))?;
+    let child = spawn_with_busy_retry(command, cancel).await?;
 
     tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(SandboxError::Cancelled),
         _ = tokio::time::sleep(timeout) => Err(SandboxError::Timeout(timeout.as_secs())),
         res = child.wait_with_output() => {
-            let output = res.map_err(|e| SandboxError::Launch(format!("scanner lỗi: {e}")))?;
+            let output =
+                res.map_err(|e| SandboxError::Launch(format!("scanner lỗi: {e}")))?;
             Ok(ShellOutcome {
                 exit_code: output.status.code(),
                 stdout: cap_stream(String::from_utf8_lossy(&output.stdout).into_owned()),
                 stderr: cap_stream(String::from_utf8_lossy(&output.stderr).into_owned()),
             })
+        }
+    }
+}
+
+/// Spawn argv, thử lại khi `ETXTBSY` (os error 26).
+///
+/// `run_host_argv` exec **trực tiếp** chương trình do người dùng cấu hình — kể cả
+/// script vừa được ghi ra đĩa (scanner test tự dựng, scanner vừa được cập nhật).
+/// Exec một file đúng lúc nó còn có fd mở để ghi ở đâu đó trên hệ thống bị
+/// kernel từ chối với ETXTBSY; lỗi là tạm thời (đã tái hiện ~1/20 lần khi test
+/// song song, chạy lại luôn pass — known-issues "CI flake Text file busy").
+/// Retry có trần chặt (≤ 70ms) nên không ăn mòn timeout của lệnh.
+async fn spawn_with_busy_retry(
+    mut command: tokio::process::Command,
+    cancel: &CancellationToken,
+) -> Result<tokio::process::Child, SandboxError> {
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut backoff = Duration::from_millis(10);
+    let mut attempt = 1;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && attempt < MAX_ATTEMPTS =>
+            {
+                attempt += 1;
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Err(SandboxError::Cancelled),
+                    _ = tokio::time::sleep(backoff) => backoff *= 2,
+                }
+            }
+            Err(error) => {
+                return Err(SandboxError::Launch(format!(
+                    "không khởi động được scanner: {error}"
+                )));
+            }
         }
     }
 }
@@ -857,6 +895,49 @@ mod tests {
         assert!(matches!(err, SandboxError::Timeout(_)), "{err:?}");
         // Trở về nhanh (không đợi hết 30s) — có dư địa cho kill.
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn host_argv_retries_when_script_still_has_write_fd() {
+        // ETXTBSY thật (known-issues "CI flake Text file busy"): exec một script
+        // vừa ghi khi fd ghi còn mở ở đâu đó. Giữ fd mở 15ms rồi mới thả —
+        // spawn lần đầu phải ETXTBSY, retry phải cứu được và quét vẫn thành công.
+        let ws = tempfile::tempdir().unwrap();
+        let script = ws.path().join("scanner.sh");
+        std::fs::write(&script, "#!/bin/sh\necho ok-scanner\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let held = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&script)
+            .unwrap();
+        let closer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            drop(held);
+        });
+
+        let sandbox = Sandbox::new(
+            SandboxConfig {
+                mode: SandboxMode::Host,
+                ..SandboxConfig::default()
+            },
+            ws.path().to_path_buf(),
+        );
+        let cancel = CancellationToken::new();
+        let out = sandbox
+            .run_argv(
+                &[script.to_string_lossy().into_owned()],
+                Duration::from_secs(5),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        closer.await.unwrap();
+        assert_eq!(out.exit_code, Some(0));
+        assert!(out.stdout.contains("ok-scanner"));
     }
 
     #[tokio::test]
