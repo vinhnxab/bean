@@ -54,6 +54,14 @@ fn docker_sandbox(workspace: std::path::PathBuf, network: bool) -> Sandbox {
     )
 }
 
+/// K22: các test docker chạy **tuần tự** trong file này. Đếm container toàn cục
+/// (`running_sbx_containers`) chỉ đúng khi không test nào khác đang spawn —
+/// chạy song song thì test 1/2 spawn container mới giữa lúc test 3 chụp
+/// `before` và sample `after`, assert `after <= before` fail giả (flake thật
+/// 2026-11). Docker tests vốn tự skip khi thiếu daemon/image nên serialization
+/// chỉ tốn thời gian, không đổi khả năng chạy.
+static DOCKER_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Đếm container `bean-sbx-*` đang chạy.
 async fn running_sbx_containers() -> usize {
     let Ok(out) = tokio::process::Command::new("docker")
@@ -70,6 +78,7 @@ async fn running_sbx_containers() -> usize {
 /// 1. Container chỉ thấy workspace — file ở thư mục cha (ngoài workspace) là vô hình.
 #[tokio::test]
 async fn docker_sandbox_sees_only_workspace() {
+    let _serial = DOCKER_SERIAL.lock().await;
     if !docker_ready().await {
         eprintln!("SKIP docker_sandbox_sees_only_workspace: docker/image không sẵn sàng");
         return;
@@ -117,6 +126,7 @@ async fn docker_sandbox_sees_only_workspace() {
 /// DNS không phân giải được.
 #[tokio::test]
 async fn docker_sandbox_has_no_network_when_disabled() {
+    let _serial = DOCKER_SERIAL.lock().await;
     if !docker_ready().await {
         eprintln!("SKIP docker_sandbox_has_no_network_when_disabled: docker/image không sẵn sàng");
         return;
@@ -149,6 +159,7 @@ async fn docker_sandbox_has_no_network_when_disabled() {
 /// không còn container `bean-sbx-*` sống sót.
 #[tokio::test]
 async fn docker_timeout_kills_container() {
+    let _serial = DOCKER_SERIAL.lock().await;
     if !docker_ready().await {
         eprintln!("SKIP docker_timeout_kills_container: docker/image không sẵn sàng");
         return;
