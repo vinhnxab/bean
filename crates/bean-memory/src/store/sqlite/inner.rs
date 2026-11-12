@@ -12,6 +12,7 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rusqlite::Connection;
 use tokio::sync::oneshot;
@@ -21,10 +22,22 @@ use super::migration::{configure, run_migration};
 use super::worker::worker_loop;
 use crate::store::StoreError;
 
+/// Trần chờ một lệnh store (K3).
+///
+/// Worker là thread duy nhất chạy SQL, với `busy_timeout` 5 giây (xem
+/// `configure`) — mọi lệnh hợp lệ phải xong trong cỡ đó. Vượt ngưỡng này nghĩa
+/// là worker kẹt thật: trả lỗi để run kết thúc có kiểm soát thay vì treo mãi
+/// (trước khi có trần này, worker kẹt đồng nghĩa mọi lời gọi store treo vĩnh
+/// viễn). Giá trị là hằng số cố ý — chưa thấy nhu cầu cấu hình.
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Trạng thái dùng chung của [`SqliteStore`] (chia sẻ qua `Arc` để `SqliteStore` clone được).
 pub(super) struct SqliteInner {
     tx: Mutex<Option<std::sync::mpsc::Sender<DbCommand>>>,
     worker: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Trần chờ reply của [`SqliteStore::request`] — mặc định
+    /// [`DEFAULT_REQUEST_TIMEOUT`], test dựng trực tiếp với giá trị nhỏ.
+    request_timeout: Duration,
 }
 
 impl Drop for SqliteInner {
@@ -85,11 +98,17 @@ impl SqliteStore {
             inner: Arc::new(SqliteInner {
                 tx: Mutex::new(Some(tx)),
                 worker: Mutex::new(Some(worker)),
+                request_timeout: DEFAULT_REQUEST_TIMEOUT,
             }),
         })
     }
 
     /// Gửi lệnh cho worker và chờ kết quả.
+    ///
+    /// Chờ reply có trần [`SqliteInner::request_timeout`] (K3): worker kẹt thì
+    /// trả [`StoreError::Internal`] thay vì treo mãi — run gọi store được kết
+    /// thúc có kiểm soát. Lệnh đã gửi có thể vẫn được worker xử lý xong sau đó;
+    /// reply gửi vào receiver đã đóng bị bỏ qua (worker `let _ = send`).
     pub(super) async fn request<T>(
         &self,
         build: impl FnOnce(Reply<T>) -> DbCommand,
@@ -109,8 +128,59 @@ impl SqliteStore {
                 .send(build(reply_tx))
                 .map_err(|_| StoreError::Internal("worker bộ nhớ đã dừng".into()))?;
         }
-        reply_rx
+        match tokio::time::timeout(self.inner.request_timeout, reply_rx).await {
+            Ok(reply) => {
+                reply.map_err(|_| StoreError::Internal("worker bộ nhớ không phản hồi".into()))?
+            }
+            Err(_) => Err(StoreError::Internal(format!(
+                "store không phản hồi sau {} giây — worker bộ nhớ kẹt (K3); \
+                 nếu lặp lại, khởi động lại Bean",
+                self.inner.request_timeout.as_secs()
+            ))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Store "worker kẹt": kênh gửi vẫn sống nhưng không ai trả lời. Dùng để
+    /// chứng minh `request` chịu được worker kẹt (K3) — trả lỗi theo trần thay
+    /// vì treo vĩnh viễn.
+    fn stuck_store(request_timeout: Duration) -> SqliteStore {
+        let (tx, rx) = std::sync::mpsc::channel::<DbCommand>();
+        // Giữ receiver sống đủ lâu trong thread riêng; tuyệt đối không reply.
+        std::thread::spawn(move || {
+            let _keep_alive = rx;
+            std::thread::sleep(Duration::from_secs(2));
+        });
+        SqliteStore {
+            inner: Arc::new(SqliteInner {
+                tx: Mutex::new(Some(tx)),
+                worker: Mutex::new(None),
+                request_timeout,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn request_returns_error_when_worker_never_replies() {
+        let store = stuck_store(Duration::from_millis(50));
+        let started = std::time::Instant::now();
+        let error = store
+            .request(|reply| DbCommand::ToolOverrides { reply })
             .await
-            .map_err(|_| StoreError::Internal("worker bộ nhớ không phản hồi".into()))?
+            .expect_err("worker kẹt phải trả lỗi, không treo");
+        let message = error.to_string();
+        assert!(
+            message.contains("không phản hồi sau"),
+            "lỗi phải nói rõ worker không phản hồi: {message}"
+        );
+        // Trần 50ms được tôn trọng (không chờ 2s của thread giữ receiver).
+        assert!(
+            started.elapsed() < Duration::from_millis(2_000),
+            "request phải trả lỗi theo trần, không chờ receiver đóng"
+        );
     }
 }
