@@ -143,6 +143,10 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    // Test thì được phép unwrap/expect — nguyên tắc "không panic trong code sản
+    // phẩm" (agents.md mục 0.8) không áp dụng cho test.
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     /// Store "worker kẹt": kênh gửi vẫn sống nhưng không ai trả lời. Dùng để
