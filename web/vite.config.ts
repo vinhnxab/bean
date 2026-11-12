@@ -37,6 +37,17 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    // Font (woff2/ttf) KHÔNG bao giờ inline thành `data:` URI (K31): CSP tại
+    // `bean-web` (security_headers) không khai `font-src data:` — chủ ý giữ chặt
+    // theo mục 15.7 — nên font inline của chính Bean bị chặn trong console. Mặc
+    // định Vite inline mọi asset < 4096 byte, và các subset font nhỏ (cyrillic,
+    // greek-ext…) rơi vào ngưỡng đó. Hàm này giữ nguyên hành vi inline cho asset
+    // khác (SVG nhỏ…), chỉ đẩy font ra file riêng — cùng origin nên vẫn nằm
+    // trong `default-src 'self'`, không phải nới CSP.
+    assetsInlineLimit(filePath, content) {
+      if (/\.(woff2?|ttf|otf|eot)$/i.test(filePath)) return false;
+      return content.length < 4096;
+    },
     // Không hash tên file đầu ra: index.html luôn trỏ tới /assets/index.js +
     // /assets/index.css, nên việc chép web/dist mới vào [web].ui_dir (hoặc rebuild
     // Rust nhúng) không phải đổi tên asset trong backend. Trade-off: các asset
