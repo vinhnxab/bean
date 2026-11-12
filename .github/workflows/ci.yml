@@ -46,7 +46,18 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - uses: dtolnay/rust-toolchain@stable
+      # K33: CI phải chạy đúng pin `rust-toolchain.toml` — `dtolnay@stable` set
+      # `RUSTUP_TOOLCHAIN=stable` đè pin của repo, bản stable mới (~6 tuần/lần)
+      # thêm lint mới thì CI đỏ bất ngờ (đã xảy ra ở `fe02c82`). Đọc pin từ file
+      # rồi cài đúng bản đó; component khai tại đây vì cài toolchain theo pin.
+      - name: Đọc pin toolchain từ rust-toolchain.toml
+        id: rustpin
+        run: echo "toolchain=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rustpin.outputs.toolchain }}
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
 
@@ -58,12 +69,15 @@ jobs:
       # Flake đã lặp 2 lần (2026-11-09, 2026-11-10) mà log job cần đăng nhập mới đọc
       # được. In dòng lỗi vào annotations (::error::) — hiển thị ngay trên trang run,
       # không cần đăng nhập — để bắt đúng test flaky thay vì fix mù.
-      # `-A 3` kèm 3 dòng sau panic để thấy nội dung assert (vd `stdout:` của test CLI
+      # `-A 3` kèm 3 dòng sau panic để thấy nội dung assert (vĩ `stdout:` của test CLI
       # — flake lần 3 `61d5080` bị cắt mất phần này nên không chẩn đoán được).
+      # K33: `CARGO_TERM_COLOR: always` bọc ANSI khiến grep `^error:` không khớp —
+      # strip escape trước khi grep (đã khiến run `58e126e` đỏ mà không thấy lỗi).
       - name: Tóm tắt test fail ra annotations
         if: failure()
         run: |
-          grep -E "panicked at|test result: FAILED|^error(\[|:)|failures:" -A 3 check-rust.log \
+          sed -e 's/\x1b\[[0-9;]*m//g' check-rust.log \
+            | grep -E "panicked at|test result: FAILED|^error(\[|:)|failures:" -A 3 \
             | head -60 \
             | while IFS= read -r line; do echo "::error::$line"; done
           exit 0
@@ -125,7 +139,13 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Đọc pin toolchain từ rust-toolchain.toml (K33)
+        id: rustpin-eval
+        run: echo "toolchain=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rustpin-eval.outputs.toolchain }}
 
       - uses: Swatinem/rust-cache@v2
 
@@ -149,7 +169,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Đọc pin toolchain từ rust-toolchain.toml (K33)
+        id: rustpin-audit
+        run: echo "toolchain=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rustpin-audit.outputs.toolchain }}
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2
