@@ -13,8 +13,13 @@ impl Router {
         id: &str,
         actor: &str,
     ) -> Result<SkillDraftDecision, RouterError> {
-        self.authorize_actor(actor)?;
-        self.inner.skills.approve_draft(id).await
+        let result = if let Err(error) = self.authorize_actor(actor) {
+            Err(error)
+        } else {
+            self.inner.skills.approve_draft(id).await
+        };
+        self.audit_draft_decision("skill_draft_approve", "allow", id, actor, &result);
+        result
     }
 
     /// Bỏ skill nháp; không reload vì không có skill nào được kích hoạt.
@@ -23,8 +28,48 @@ impl Router {
         id: &str,
         actor: &str,
     ) -> Result<SkillDraftDecision, RouterError> {
-        self.authorize_actor(actor)?;
-        self.inner.skills.reject_draft(id).await
+        let result = if let Err(error) = self.authorize_actor(actor) {
+            Err(error)
+        } else {
+            self.inner.skills.reject_draft(id).await
+        };
+        self.audit_draft_decision("skill_draft_reject", "deny", id, actor, &result);
+        result
+    }
+
+    /// K19: quyết định duyệt/bỏ skill nháp phải còn dấu vết bền (actor, thời điểm,
+    /// draft nào, thành công hay lỗi) — cùng định dạng JSONL tool call, dù quyết định
+    /// đến từ web hay Telegram (`/approve <id>`, `/reject <id>`). Lỗi ghi chỉ cảnh báo,
+    /// không làm hỏng quyết định; draft sau khi bị bỏ bị xoá khỏi `_drafts` nên dòng
+    /// audit này là bằng chứng duy nhất còn lại.
+    fn audit_draft_decision(
+        &self,
+        event: &'static str,
+        outcome: &'static str,
+        draft_id: &str,
+        actor: &str,
+        result: &Result<SkillDraftDecision, RouterError>,
+    ) {
+        let Some(log) = &self.inner.audit else {
+            return;
+        };
+        let args = match result {
+            Ok(decided) => serde_json::json!({
+                "draft_id": draft_id,
+                "name": decided.name,
+                "status": decided.status.as_str(),
+            }),
+            Err(_) => serde_json::json!({ "draft_id": draft_id }),
+        };
+        let channel = actor.split(':').next().unwrap_or(actor);
+        let mut entry = bean_security::entry_now(0, channel, event, &args);
+        entry.ok = Some(result.is_ok());
+        entry.decision = outcome;
+        entry.decided_by = actor.to_string();
+        entry.error = result.as_ref().err().map(ToString::to_string);
+        if let Err(error) = log.record(&entry) {
+            tracing::warn!(error = %error, "không ghi được audit quyết định draft");
+        }
     }
 
     pub(super) fn authorize_actor(&self, actor: &str) -> Result<(), RouterError> {

@@ -9,7 +9,7 @@ use anyhow::Result as AnyResult;
 use async_trait::async_trait;
 use bean_core::{Channel, Incoming, MemoryStore, Router, RouterDeps, RouterError};
 use bean_llm::{ChatRequest, FakeProvider, LlmError, LlmProvider};
-use bean_security::CapWorkspace;
+use bean_security::{AuditLog, CapWorkspace};
 use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind, skill_tools};
 use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
 use bean_types::{Config, LlmResponse, Outbound, RunId, ToolCall, ToolSpec};
@@ -131,6 +131,21 @@ async fn fixture_with_llm(
     SkillCatalog,
     Arc<SentNotifications>,
 ) {
+    fixture_full(llm, min_tool_calls, small_model, None).await
+}
+
+/// Biến thể có audit log (K19) — các test cũ dùng [`fixture`] vẫn qua đường `None`.
+async fn fixture_full(
+    llm: Arc<dyn LlmProvider>,
+    min_tool_calls: u32,
+    small_model: Option<String>,
+    audit: Option<Arc<AuditLog>>,
+) -> (
+    tempfile::TempDir,
+    Arc<Router>,
+    SkillCatalog,
+    Arc<SentNotifications>,
+) {
     let temp = tempfile::tempdir().unwrap();
     let workspace_path = temp.path().join("workspace");
     std::fs::create_dir_all(&workspace_path).unwrap();
@@ -162,7 +177,7 @@ async fn fixture_with_llm(
         store,
         registry: Arc::new(registry),
         llm,
-        audit: None,
+        audit,
         skills_index: catalog.index(),
         skills: Some(catalog.clone()),
         llm_state_path: None,
@@ -460,4 +475,92 @@ async fn approval_rejects_actor_outside_allowlist() {
         Err(RouterError::Forbidden(_))
     ));
     assert!(catalog.get("reviewed-skill").is_err());
+}
+
+/// K19: quyết định duyệt/bỏ draft (kể cả lần thử bị từ chối quyền hay draft không
+/// tồn tại) phải còn dấu vết bền trong audit JSONL với actor, thời điểm và draft nào.
+#[tokio::test]
+async fn draft_decisions_are_written_to_audit_log() {
+    let temp = tempfile::tempdir().unwrap();
+    let audit = Arc::new(AuditLog::open(&temp.path().join("audit")).unwrap());
+    let (_t, router, catalog, _notifications) = fixture_full(
+        Arc::new(FakeProvider::new(vec![])),
+        5,
+        None,
+        Some(audit.clone()),
+    )
+    .await;
+
+    let make = |name: &str| NewSkillDraft {
+        name: name.into(),
+        kind: SkillDraftKind::New,
+        description: "Mô tả hợp lệ.".into(),
+        body: "# Guide".into(),
+        reason: "Quy trình có thể tái sử dụng.".into(),
+        source_session_id: 1,
+        source_channel: "test".into(),
+        source_chat_id: "chat".into(),
+        created_at: "2026-11-12T10:00:00Z".into(),
+    };
+
+    let approved = catalog.create_draft(make("approved-skill")).unwrap();
+    router
+        .approve_draft(&approved.id, "test:user")
+        .await
+        .unwrap();
+
+    let rejected = catalog.create_draft(make("rejected-skill")).unwrap();
+    router
+        .reject_draft(&rejected.id, "web:admin")
+        .await
+        .unwrap();
+
+    // Lần thử không thành công vẫn phải còn dấu vết: draft không tồn tại và actor
+    // ngoài allowlist.
+    router
+        .approve_draft("khong-ton-tai", "test:user")
+        .await
+        .unwrap_err();
+    router
+        .reject_draft(&approved.id, "test:khác")
+        .await
+        .unwrap_err();
+
+    let lines = audit.read_recent(None, 10);
+    assert_eq!(
+        lines.len(),
+        4,
+        "mỗi quyết định/thử quyết định một dòng audit"
+    );
+    // `read_recent` trả mới trước: [reject bị cấm, approve lỗi, reject ok, approve ok].
+    let reject_forbidden = &lines[0];
+    assert_eq!(reject_forbidden["tool"], "skill_draft_reject");
+    assert_eq!(reject_forbidden["decided_by"], "test:khác");
+    assert_eq!(reject_forbidden["ok"], false);
+    assert_eq!(reject_forbidden["channel"], "test");
+    assert!(reject_forbidden["error"].as_str().is_some());
+
+    let approve_missing = &lines[1];
+    assert_eq!(approve_missing["tool"], "skill_draft_approve");
+    assert_eq!(approve_missing["decided_by"], "test:user");
+    assert_eq!(approve_missing["ok"], false);
+
+    let reject_ok = &lines[2];
+    assert_eq!(reject_ok["tool"], "skill_draft_reject");
+    assert_eq!(reject_ok["decision"], "deny");
+    assert_eq!(reject_ok["decided_by"], "web:admin");
+    assert_eq!(reject_ok["channel"], "web");
+    assert_eq!(reject_ok["ok"], true);
+    assert_eq!(reject_ok["args"]["draft_id"], rejected.id);
+    assert_eq!(reject_ok["args"]["name"], "rejected-skill");
+
+    let approve_ok = &lines[3];
+    assert_eq!(approve_ok["tool"], "skill_draft_approve");
+    assert_eq!(approve_ok["decision"], "allow");
+    assert_eq!(approve_ok["decided_by"], "test:user");
+    assert_eq!(approve_ok["ok"], true);
+    assert_eq!(approve_ok["args"]["draft_id"], approved.id);
+    assert_eq!(approve_ok["args"]["name"], "approved-skill");
+    assert_eq!(approve_ok["args"]["status"], "approved");
+    assert!(approve_ok["ts"].as_str().is_some(), "phải có thời điểm");
 }
