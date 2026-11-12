@@ -17,16 +17,21 @@
 //! |---|---|
 //! | Origin **trong** `allowed_origins` | Cho đi — kể cả loopback. Đây là môi trường dev mà whitelist khai đích danh. |
 //! | Origin ngoài whitelist, host là IP private/loopback/link-local/metadata | **Chặn cứng**. |
-//! | Origin ngoài whitelist, host là tên miền | Cho đi (không phân giải DNS ở đây — xem `docs/known-issues.md`). |
+//! | Origin ngoài whitelist, host là tên miền | Phân giải DNS: có **bất kỳ** bản ghi nào rơi vào dải nội bộ thì **chặn cứng** (K25); phân giải thất bại thì cho đi — không có IP nào để kiểm, Chromium sẽ tự báo lỗi DNS. |
 //! | scheme không phải http/https, có credential, URL quá dài | **Chặn cứng**. |
 //!
-//! Rủi ro DNS rebinding còn sót lại được ghi ở `docs/known-issues.md`: lớp này
-//! **không** phân giải DNS, nên một tên miền ngoài whitelist vẫn có thể trỏ về IP
-//! nội bộ lúc Chromium kết nối. Việc bù lại là mức rủi ro: origin đó luôn
-//! `Dangerous` (không session-wide) và người dùng phải bấm xác nhận.
+//! Phân giải DNS chỉ chạy ở đường gọi thật (tên phương thức `check_resolved` —
+//! async, dùng `tokio::net`); `Tool::risk` đồng bộ vẫn dùng [`BrowserGuard::check`]
+//! không phân giải — đó là đánh giá mức rủi ro best-effort, không phải rào cản.
+//! Rủi ro TOCTOU còn sót lại được ghi ở `docs/known-issues.md` (K25): Chromium
+//! tự phân giải DNS lần nữa lúc kết nối, nên một tên miền có thể đổi IP giữa
+//! lúc guard kiểm và lúc Chromium mở trang (cửa sổ cỡ TTL DNS). Lớp bù: origin
+//! ngoài whitelist luôn `Dangerous` (không session-wide) và người dùng phải bấm
+//! xác nhận từng lần.
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use url::Url;
 
 use crate::origin::{OriginVerdict, OriginWhitelist, is_private_ip, parse_origin};
@@ -68,16 +73,61 @@ pub struct GuardVerdict {
 }
 
 /// Lớp kiểm tra URL của domain browser.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BrowserGuard {
     whitelist: Arc<OriginWhitelist>,
+    resolver: Arc<dyn HostResolver>,
+}
+
+/// Nguồn phân giải DNS cho bước kiểm IP *đã phân giải* (K25).
+///
+/// Trait riêng (DIP — agents.md mục 0.10) để test inject bảng phân giải giả,
+/// không cần mạng và không phụ thuộc DNS của máy chạy test.
+#[async_trait]
+pub trait HostResolver: Send + Sync {
+    /// Phân giải host thành danh sách IP; rỗng khi không phân giải được.
+    async fn resolve(&self, host: &str) -> Vec<std::net::IpAddr>;
+}
+
+/// Phân giải bằng hệ điều hành (tokio — không block runtime, mục 22.8).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemResolver;
+
+#[async_trait]
+impl HostResolver for SystemResolver {
+    async fn resolve(&self, host: &str) -> Vec<std::net::IpAddr> {
+        match tokio::net::lookup_host((host, 80u16)).await {
+            Ok(addrs) => addrs.map(|addr| addr.ip()).collect(),
+            Err(error) => {
+                tracing::debug!(host, %error, "không phân giải được host khi kiểm guard browser");
+                Vec::new()
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for BrowserGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrowserGuard")
+            .field("whitelist", &self.whitelist)
+            .finish_non_exhaustive()
+    }
 }
 
 impl BrowserGuard {
-    /// Dựng guard từ whitelist đã parse.
+    /// Dựng guard từ whitelist đã parse, dùng resolver hệ điều hành.
     #[must_use]
     pub fn new(whitelist: Arc<OriginWhitelist>) -> Self {
-        Self { whitelist }
+        Self::with_resolver(whitelist, Arc::new(SystemResolver))
+    }
+
+    /// Dựng guard với resolver chỉ định (test inject bảng giả).
+    #[must_use]
+    pub fn with_resolver(whitelist: Arc<OriginWhitelist>, resolver: Arc<dyn HostResolver>) -> Self {
+        Self {
+            whitelist,
+            resolver,
+        }
     }
 
     /// Whitelist đang dùng.
@@ -129,6 +179,33 @@ impl BrowserGuard {
             whitelisted: verdict == OriginVerdict::Whitelisted,
         })
     }
+
+    /// Kiểm tra một URL **kèm phân giải DNS** cho tên miền ngoài whitelist (K25).
+    ///
+    /// Đây là phương thức cho đường gọi thật (`Tool::call` — async): ngoài các
+    /// kiểm tra đồng bộ của [`BrowserGuard::check`], tên miền ngoài whitelist được
+    /// phân giải và chặn nếu **bất kỳ** IP nào rơi vào dải nội bộ. Origin trong
+    /// whitelist bỏ qua bước này — whitelist là môi trường dev người dùng khai
+    /// đích danh (localhost:3000 chẳng hạn).
+    ///
+    /// # Errors
+    /// Như [`BrowserGuard::check`], cộng [`GuardError::BlockedInternalTarget`] khi
+    /// IP đã phân giải nằm trong dải nội bộ.
+    pub async fn check_resolved(&self, raw_url: &str) -> Result<GuardVerdict, GuardError> {
+        let verdict = self.check(raw_url)?;
+        if !verdict.whitelisted
+            && verdict.origin.ip_literal().is_none()
+            && verdict.origin.host != "localhost"
+        {
+            let ips = self.resolver.resolve(&verdict.origin.host).await;
+            if ips.iter().any(|ip| is_private_ip(*ip)) {
+                return Err(GuardError::BlockedInternalTarget(
+                    verdict.origin.as_display(),
+                ));
+            }
+        }
+        Ok(verdict)
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +225,110 @@ mod tests {
 
     fn guard(items: &[&str]) -> BrowserGuard {
         BrowserGuard::new(Arc::new(list(items)))
+    }
+
+    /// Resolver giả với bảng phân giải cố định — test K25 không cần mạng.
+    struct FakeResolver {
+        table: Vec<(&'static str, Vec<std::net::IpAddr>)>,
+    }
+
+    impl FakeResolver {
+        fn single(host: &'static str, ip: std::net::IpAddr) -> Arc<Self> {
+            Arc::new(Self {
+                table: vec![(host, vec![ip])],
+            })
+        }
+    }
+
+    #[async_trait]
+    impl HostResolver for FakeResolver {
+        async fn resolve(&self, host: &str) -> Vec<std::net::IpAddr> {
+            self.table
+                .iter()
+                .filter(|(name, _)| *name == host)
+                .flat_map(|(_, ips)| ips.iter().copied())
+                .collect()
+        }
+    }
+
+    fn guard_with(items: &[&str], resolver: Arc<dyn HostResolver>) -> BrowserGuard {
+        BrowserGuard::with_resolver(Arc::new(list(items)), resolver)
+    }
+
+    // -----------------------------------------------------------------------
+    // K25: tên miền ngoài whitelist trỏ về IP nội bộ phải bị chặn
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn rebind_to_loopback_is_blocked_by_resolved_check() {
+        let g = guard_with(
+            &[],
+            FakeResolver::single(
+                "rebind.attacker.com",
+                std::net::IpAddr::from([127, 0, 0, 1]),
+            ),
+        );
+        // `check` đồng bộ cho đi (không phân giải) — khoảng hở K25 trước đây.
+        assert!(g.check("http://rebind.attacker.com/x").is_ok());
+        // `check_resolved` phải chặn vì IP đã phân giải là loopback.
+        let err = g
+            .check_resolved("http://rebind.attacker.com/x")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, GuardError::BlockedInternalTarget(_)),
+            "phải chặn, nhận: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rebind_to_metadata_ip_is_blocked_by_resolved_check() {
+        let g = guard_with(
+            &[],
+            FakeResolver::single(
+                "cloud.rebind.attacker.com",
+                std::net::IpAddr::from([169, 254, 169, 254]),
+            ),
+        );
+        let err = g
+            .check_resolved("http://cloud.rebind.attacker.com/latest/meta-data")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GuardError::BlockedInternalTarget(_)));
+    }
+
+    #[tokio::test]
+    async fn public_resolved_ip_is_allowed() {
+        let g = guard_with(
+            &[],
+            FakeResolver::single("example.com", std::net::IpAddr::from([93, 184, 216, 34])),
+        );
+        let ok = g.check_resolved("http://example.com/").await.unwrap();
+        assert!(!ok.whitelisted);
+    }
+
+    #[tokio::test]
+    async fn unresolved_host_is_allowed_and_whitelisted_skips_dns() {
+        // Không phân giải được: không có IP nào để kiểm ⇒ cho đi (Chromium sẽ
+        // tự báo lỗi DNS), đúng bảng quy tắc.
+        let g = guard_with(&[], Arc::new(FakeResolver { table: vec![] }));
+        let ok = g
+            .check_resolved("http://never-resolves.example/")
+            .await
+            .unwrap();
+        assert!(!ok.whitelisted);
+
+        // Origin trong whitelist bỏ qua phân giải dù host trỏ nội bộ — môi
+        // trường dev người dùng khai đích danh.
+        let dev = guard_with(
+            &["http://dev.internal:3000"],
+            FakeResolver::single("dev.internal", std::net::IpAddr::from([10, 0, 0, 5])),
+        );
+        let ok = dev
+            .check_resolved("http://dev.internal:3000/")
+            .await
+            .unwrap();
+        assert!(ok.whitelisted);
     }
 
     // -----------------------------------------------------------------------

@@ -38,7 +38,7 @@ use bean_types::config::BrowserConfig as BrowserSettings;
 pub use act_tools::{
     ACT_TAGS, ClickTool, EvaluateScriptTool, FillTool, NavigateTool, PressKeyTool,
 };
-pub use guard::{BrowserGuard, GuardError, MAX_URL_CHARS};
+pub use guard::{BrowserGuard, GuardError, HostResolver, MAX_URL_CHARS, SystemResolver};
 pub use origin::{Origin, OriginPattern, OriginVerdict, OriginWhitelist, parse_origin};
 pub use read_tools::{ConsoleLogsTool, NetworkTool, PerformanceTool, READ_TAGS, ScreenshotTool};
 pub use session::{LaunchError, SessionManager};

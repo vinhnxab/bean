@@ -157,7 +157,13 @@ impl bean_tools::Tool for NavigateTool {
 
     async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<String, ToolError> {
         let params: NavigateParams = bean_tools::deserialize_params(args, &self.spec().parameters)?;
-        let verdict = self.guard.check(&params.url).map_err(|e| guard_error(&e))?;
+        // K25: đường gọi thật kiểm cả IP *đã phân giải* — tên miền ngoài whitelist
+        // trỏ về dải nội bộ bị chặn ngay tại đây, trước khi Chromium mở trang.
+        let verdict = self
+            .guard
+            .check_resolved(&params.url)
+            .await
+            .map_err(|e| guard_error(&e))?;
 
         let page = self.session.page().await.map_err(launch_error)?;
         page.goto(&params.url)
