@@ -603,6 +603,36 @@ async fn delete_and_clear_keep_fts_in_sync() {
     assert_eq!(store.count(session).await.unwrap(), 0);
 }
 
+/// K6: `clear` phải xoá cả summary — summary mô tả lịch sử vừa mất, giữ lại là
+/// context sai lệch. Chạy trên **cả hai** bản cài đặt để giữ ngữ nghĩa đồng bộ (K7).
+#[tokio::test]
+async fn clear_resets_summary_in_both_stores() {
+    async fn flow(store: &impl Store) {
+        let session = store.ensure_session("cli", "local", "").await.unwrap();
+        store
+            .append(session, Message::user("lịch sử sẽ bị xoá"))
+            .await
+            .unwrap();
+        store
+            .save_summary(session, "tóm tắt của lịch sử đã mất")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.summary(session).await.unwrap().as_deref(),
+            Some("tóm tắt của lịch sử đã mất")
+        );
+        store.clear(session).await.unwrap();
+        assert!(
+            store.summary(session).await.unwrap().is_none(),
+            "summary phải bị reset cùng message (K6)"
+        );
+        assert_eq!(store.count(session).await.unwrap(), 0);
+    }
+    let dir = TempDir::new().unwrap();
+    flow(&open(&dir)).await;
+    flow(&MemoryStore::new()).await;
+}
+
 /// Compaction (mục 8.3): tóm tắt phần cũ, giữ phần gần đây, **không** tách cặp tool.
 #[tokio::test]
 async fn compaction_keeps_tool_pairs_and_saves_summary() {

@@ -185,6 +185,8 @@ impl MessageStore for MemoryStore {
         if let Some(s) = sessions.iter_mut().find(|s| s.id == session) {
             s.messages.clear();
             s.message_ids.clear();
+            // K6: summary mô tả lịch sử vừa xoá — giữ lại là context sai lệch.
+            s.summary.clear();
         }
         Ok(())
     }

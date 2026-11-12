@@ -131,7 +131,10 @@ pub trait MessageStore: Send + Sync {
     /// Số message hiện có của phiên.
     async fn count(&self, session: SessionId) -> Result<u64, StoreError>;
 
-    /// Xoá **toàn bộ message** của phiên (giữ lại bản ghi phiên).
+    /// Xoá **toàn bộ message và summary** của phiên (giữ lại bản ghi phiên).
+    ///
+    /// K6: summary mô tả lịch sử đã xoá — giữ lại sẽ cho context sai lệch, nên
+    /// cả hai bản cài đặt phải reset cùng lúc (K7).
     async fn clear(&self, session: SessionId) -> Result<(), StoreError>;
 
     /// Lấy message đầy đủ theo id.

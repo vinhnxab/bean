@@ -124,6 +124,12 @@ pub(super) fn clear_messages(conn: &Connection, session: SessionId) -> Result<()
         params![session.get()],
     )
     .map_err(internal)?;
+    // K6: summary mô tả lịch sử vừa xoá — giữ lại là context sai lệch.
+    conn.execute(
+        "UPDATE sessions SET summary = '' WHERE id = ?1",
+        params![session.get()],
+    )
+    .map_err(internal)?;
     Ok(())
 }
 
