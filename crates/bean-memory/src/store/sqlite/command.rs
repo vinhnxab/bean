@@ -25,10 +25,85 @@ use crate::store::types::{
 /// Kênh trả lời của một lệnh gửi cho worker.
 pub(super) type Reply<T> = oneshot::Sender<Result<T, StoreError>>;
 
+/// Phân loại lệnh để định tuyến tới worker đúng (K4).
+///
+/// Lệnh **đọc** chạy trên connection reader riêng: WAL chịu nhiều reader song
+/// song với writer, nên truy vấn FTS nặng (`memory_search`, `list_sessions`)
+/// không còn chặn `append` — ghi message phải ngay khi phát sinh (mục 6).
+/// Lệnh **ghi** chạy trên worker giữ connection ghi. [`DbCommand::kind`] là
+/// `match` vét cạn: thêm biến thể mới mà chưa phân loại sẽ **không biên dịch**
+/// được; phân loại sai chiều ghi→đọc thì lộ ngay vì reader bật `query_only`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum CmdKind {
+    Read,
+    Write,
+}
+
+impl DbCommand {
+    /// Lệnh này phải chạy trên reader hay writer?
+    pub(super) fn kind(&self) -> CmdKind {
+        match self {
+            DbCommand::History { .. }
+            | DbCommand::Count { .. }
+            | DbCommand::SessionInfo { .. }
+            | DbCommand::Summary { .. }
+            | DbCommand::SessionSummary { .. }
+            | DbCommand::FindActiveSession { .. }
+            | DbCommand::ListSessions { .. }
+            | DbCommand::MessageById { .. }
+            | DbCommand::ListMessageRecords { .. }
+            | DbCommand::ListMemories { .. }
+            | DbCommand::ListTasks { .. }
+            | DbCommand::ListTasksForSession { .. }
+            | DbCommand::DueTasks { .. }
+            | DbCommand::Usage { .. }
+            | DbCommand::UsageByRole { .. }
+            | DbCommand::GetWebSession { .. }
+            | DbCommand::GetMcpClient { .. }
+            | DbCommand::ListMcpClients { .. }
+            | DbCommand::ToolOverrides { .. }
+            | DbCommand::MemorySearch { .. }
+            | DbCommand::DueOutbox { .. }
+            | DbCommand::ListMessages { .. } => CmdKind::Read,
+            DbCommand::EnsureSession { .. }
+            | DbCommand::CreateSession { .. }
+            | DbCommand::ArchiveSession { .. }
+            | DbCommand::Append { .. }
+            | DbCommand::Clear { .. }
+            | DbCommand::SaveSummary { .. }
+            | DbCommand::UpdateSession { .. }
+            | DbCommand::DeleteSession { .. }
+            | DbCommand::DeleteMemory { .. }
+            | DbCommand::CreateTask { .. }
+            | DbCommand::SetTaskEnabled { .. }
+            | DbCommand::DeleteTaskForSession { .. }
+            | DbCommand::DeleteTask { .. }
+            | DbCommand::ClaimTask { .. }
+            | DbCommand::SetTaskStatus { .. }
+            | DbCommand::AddUsage { .. }
+            | DbCommand::AddUsageByRole { .. }
+            | DbCommand::CreateWebSession { .. }
+            | DbCommand::TouchWebSession { .. }
+            | DbCommand::DeleteWebSession { .. }
+            | DbCommand::DeleteAllWebSessions { .. }
+            | DbCommand::CreateMcpClient { .. }
+            | DbCommand::DeleteMcpClient { .. }
+            | DbCommand::SetToolEnabled { .. }
+            | DbCommand::MemorySave { .. }
+            | DbCommand::Outbound { .. }
+            | DbCommand::CompleteOutbox { .. }
+            | DbCommand::RetryOutbox { .. }
+            | DbCommand::DeleteBefore { .. } => CmdKind::Write,
+        }
+    }
+}
+
 /// Lệnh gửi cho worker thread.
 ///
-/// Mọi truy cập SQLite đi qua **một** thread sở hữu connection (agents.md mục 22.8):
+/// Mọi truy cập SQLite đi qua thread worker (K4: hai thread — writer giữ
+/// connection ghi, reader giữ connection chỉ đọc; agents.md mục 22.8):
 /// `rusqlite` là API blocking nên không được gọi trực tiếp trong async.
+#[derive(Debug)]
 pub(super) enum DbCommand {
     EnsureSession {
         channel: String,

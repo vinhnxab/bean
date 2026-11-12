@@ -17,8 +17,25 @@ use crate::store::types::StoreError;
 // Pragma, migration, tiện ích
 // ---------------------------------------------------------------------------
 
+/// PRAGMA cho connection reader (K4) — xem [`configure_reader`].
+const READER_PRAGMA_SQL: &str = "PRAGMA foreign_keys = ON; PRAGMA query_only = ON;";
+
 pub(crate) fn configure(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(PRAGMA_SQL).map_err(internal)?;
+    conn.busy_timeout(Duration::from_secs(5))
+        .map_err(internal)?;
+    Ok(())
+}
+
+/// Cấu hình connection **chỉ đọc** của worker reader (K4).
+///
+/// Không đặt lại `journal_mode` — WAL là thuộc tính bền của file DB, writer đã
+/// bật trong [`configure`]. `query_only` chặn ghi ở mức SQL: nếu định tuyến sai
+/// cho một lệnh ghi lọt reader, lệnh đó lỗi lộ ngay (trong test lẫn production)
+/// thay vì im lặng ghi lệch. `busy_timeout` giữ nguyên 5s như writer vì reader
+/// vẫn phải chờ khoá khi WAL đang checkpoint.
+pub(crate) fn configure_reader(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(READER_PRAGMA_SQL).map_err(internal)?;
     conn.busy_timeout(Duration::from_secs(5))
         .map_err(internal)?;
     Ok(())

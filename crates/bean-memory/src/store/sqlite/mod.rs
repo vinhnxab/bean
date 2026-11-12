@@ -19,9 +19,10 @@
 //! # Bất biến then chốt
 //!
 //! `rusqlite` là API **blocking** (agents.md mục 22.8), nên **không** được gọi trực
-//! tiếp trong async runtime. Mọi truy cập đi qua `DbCommand` tới worker thread duy
-//! nhất giữ connection. Đó là lý do `impl_store.rs` ở đây mỗi method chỉ "đóng gói lệnh
-//! rồi `.await`" — phần thật nằm ở `q_*.rs`, và đó là lý do **không được** chuyển bất kỳ
+//! tiếp trong async runtime. Mọi truy cập đi qua `DbCommand` tới **hai** thread worker
+//! (K4): writer giữ connection ghi, reader giữ connection chỉ đọc (`query_only`) —
+//! WAL cho phép hai phía chạy song song. Đó là lý do `impl_store.rs` ở đây mỗi method
+//! chỉ "đóng gói lệnh rồi `.await`" — phần thật nằm ở `q_*.rs`, và đó là lý do **không được** chuyển bất kỳ
 //! hàm nào trong `q_*.rs` thành `async`.
 
 mod command;

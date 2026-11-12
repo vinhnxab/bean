@@ -1,4 +1,4 @@
-//! Worker thread — nơi **duy nhất** được chạm vào connection SQLite (mục 22.8).
+//! Worker thread — nơi được chạm vào connection SQLite (mục 22.8).
 //!
 //! # Vì sao tách riêng
 //!
@@ -7,9 +7,15 @@
 //! mọi hàm trong `q_*.rs` đều là hàm đồng bộ nhận `&mut Connection`, và chỉ được gọi
 //! từ `dispatch`.
 //!
-//! Nếu sau này thêm một lệnh mới, có **hai** chỗ phải sửa cùng lúc: thêm biến thể ở
-//! `command.rs` và thêm nhánh ở đây. Compiler không bắt được sự thiếu sót thứ hai,
-//! nên bất biến "mỗi lệnh có một nhánh" được giữ bằng kỷ luật review, không bằng kiểu.
+//! K4: chạy **hai** worker cùng vòng lặp này — writer (connection ghi) và reader
+//! (connection chỉ đọc, `query_only`). Định tuyến lệnh vào kênh nào là việc của
+//! `SqliteStore::request` theo `CmdKind`; reader nhận lệnh ghi (nếu định tuyến lỗi)
+//! sẽ bị SQLite từ chối ngay, không im lặng.
+//!
+//! Nếu sau này thêm một lệnh mới, có **ba** chỗ phải sửa cùng lúc: thêm biến thể ở
+//! `command.rs`, thêm nhánh ở đây, và phân loại trong `DbCommand::kind`. Compiler
+//! bắt được sự thiếu sót ở `kind` (match vét cạn); hai chỗ còn lại giữ bằng kỷ luật
+//! review, không bằng kiểu.
 
 use rusqlite::Connection;
 
