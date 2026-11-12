@@ -21,6 +21,39 @@ use tokio::process::Command;
 
 use crate::{AudioInput, AudioOutput, SpeechError, SpeechProvider};
 
+/// Spawn tiến trình con, thử lại khi `ETXTBSY` (os error 26, "Text file busy").
+///
+/// Giống `bean-security::spawn_with_busy_retry` (known-issues "CI flake Text
+/// file busy"): exec một file vừa được ghi khi fd ghi còn mở ở đâu đó bị kernel
+/// từ chối **tạm thời** — tái hiện ~1/20 lần khi test song song. Lỗi khác (ENOENT…)
+/// là vĩnh viễn, trả ngay. Retry ≤ 3 lần, backoff 10/20 ms — nhỏ so với timeout.
+async fn spawn_with_busy_retry(
+    command: &mut Command,
+    label: &str,
+) -> Result<tokio::process::Child, SpeechError> {
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut backoff = Duration::from_millis(10);
+    let mut attempt = 1;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && attempt < MAX_ATTEMPTS =>
+            {
+                attempt += 1;
+                tokio::time::sleep(backoff).await;
+                backoff *= 2;
+            }
+            Err(error) => {
+                return Err(SpeechError::NotFound(format!(
+                    "không chạy được `{label}`: {error}"
+                )));
+            }
+        }
+    }
+}
+
 /// STT/TTS chạy cục bộ bằng tiến trình con.
 pub struct LocalSpeech {
     whisper_command: String,
@@ -87,7 +120,8 @@ impl SpeechProvider for LocalSpeech {
                 .await
                 .map_err(|e| SpeechError::Failed(format!("ghi file audio tạm: {e}")))?;
             // whisper.cpp: `-otxt -of <base>` ghi transcript ra `<base>.txt`; `-nt` bỏ timestamp.
-            let output = Command::new(&whisper_command)
+            let mut command = Command::new(&whisper_command);
+            command
                 .arg("-m")
                 .arg(&whisper_model)
                 .arg("-f")
@@ -100,12 +134,12 @@ impl SpeechProvider for LocalSpeech {
                 .arg(&base)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
+                .stderr(Stdio::piped());
+            let child = spawn_with_busy_retry(&mut command, &whisper_command).await?;
+            let output = child
+                .wait_with_output()
                 .await
-                .map_err(|e| {
-                    SpeechError::NotFound(format!("không chạy được `{whisper_command}`: {e}"))
-                })?;
+                .map_err(|e| SpeechError::Failed(format!("chờ `{whisper_command}`: {e}")))?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(SpeechError::Failed(format!(
@@ -135,18 +169,16 @@ impl SpeechProvider for LocalSpeech {
         let run = async move {
             let dir = tempfile::tempdir().map_err(|e| SpeechError::NotFound(e.to_string()))?;
             let out = dir.path().join("out.wav");
-            let mut child = Command::new(&piper_command)
+            let mut command = Command::new(&piper_command);
+            command
                 .arg("-m")
                 .arg(&piper_model)
                 .arg("--output_file")
                 .arg(&out)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|e| {
-                    SpeechError::NotFound(format!("không chạy được `{piper_command}`: {e}"))
-                })?;
+                .stderr(Stdio::piped());
+            let mut child = spawn_with_busy_retry(&mut command, &piper_command).await?;
             if let Some(mut stdin) = child.stdin.take() {
                 stdin
                     .write_all(text.as_bytes())

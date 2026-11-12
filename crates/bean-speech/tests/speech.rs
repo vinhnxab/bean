@@ -98,6 +98,44 @@ printf 'RIFF....WAVEfake' > "$out"
     assert!(out.data.starts_with(b"RIFF"));
 }
 
+/// ETXTBSY thật (known-issues "CI flake Text file busy"): exec một script vừa
+/// ghi khi fd ghi còn mở ở đâu đó bị kernel từ chối tạm thời. Giữ fd mở 15ms
+/// rồi mới thả — spawn đầu phải ETXTBSY, retry phải cứu được và STT vẫn thành
+/// công (cùng pattern với `host_argv_retries_when_script_still_has_write_fd`).
+#[tokio::test]
+async fn local_speech_retries_when_binary_busy() {
+    let dir = tempfile::tempdir().unwrap();
+    let whisper = write_script(
+        &dir,
+        "whisper",
+        r#"#!/bin/bash
+base=""; prev=""
+for a in "$@"; do [ "$prev" = "-of" ] && base="$a"; prev="$a"; done
+echo "retry ok" > "${base}.txt"
+"#,
+    );
+    let piper = write_script(&dir, "piper", "#!/bin/sh\ncat > /dev/null\n");
+    let held = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&whisper)
+        .unwrap();
+    let closer = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        drop(held);
+    });
+    let speech = LocalSpeech::new(
+        whisper,
+        "model.bin".into(),
+        piper,
+        "voice.onnx".into(),
+        "vi".into(),
+        Duration::from_secs(10),
+    );
+    let text = speech.transcribe(&audio_webm()).await.unwrap();
+    closer.await.unwrap();
+    assert_eq!(text, "retry ok");
+}
+
 #[tokio::test]
 async fn local_speech_reports_missing_binary() {
     let speech = LocalSpeech::new(
