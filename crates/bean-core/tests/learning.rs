@@ -12,7 +12,7 @@ use bean_llm::{ChatRequest, FakeProvider, LlmError, LlmProvider};
 use bean_security::{AuditLog, CapWorkspace};
 use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraftKind, skill_tools};
 use bean_tools::{Tool, ToolCtx, ToolError, ToolRegistry};
-use bean_types::{Config, LlmResponse, Outbound, RunId, ToolCall, ToolSpec};
+use bean_types::{Config, LlmResponse, Outbound, RunId, StopReason, ToolCall, ToolSpec, Usage};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Default)]
@@ -82,6 +82,51 @@ impl LlmProvider for ModelRecordingProvider {
 
     fn name(&self) -> &'static str {
         "recording"
+    }
+}
+
+/// (K17) Provider đếm số lần gọi LLM — kiểm chứng retry reflection đúng một lần
+/// và ngân sách ngày chặn được retry khi đã cạn.
+#[derive(Debug)]
+struct ScriptedCountingProvider {
+    inner: FakeProvider,
+    calls: Mutex<usize>,
+}
+
+impl ScriptedCountingProvider {
+    fn calls(&self) -> usize {
+        *self.calls.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedCountingProvider {
+    async fn chat(&self, req: ChatRequest<'_>) -> Result<LlmResponse, LlmError> {
+        *self.calls.lock().unwrap() += 1;
+        self.inner.chat(req).await
+    }
+
+    async fn chat_with_model(
+        &self,
+        req: ChatRequest<'_>,
+        _model: &str,
+    ) -> Result<LlmResponse, LlmError> {
+        *self.calls.lock().unwrap() += 1;
+        self.inner.chat(req).await
+    }
+
+    fn name(&self) -> &'static str {
+        "counting"
+    }
+}
+
+/// JSON reflection bị cắt cụt giữa chừng — đúng dạng lỗi thật (K17): model reasoning
+/// tràn trần `max_tokens` nên content bị cắt, `finish_reason = length`.
+fn truncated_proposal() -> LlmResponse {
+    LlmResponse {
+        text: Some(r#"{"reusable":true,"proposal":{"kind":"new","name":"x""#.into()),
+        stop: StopReason::MaxTokens,
+        ..LlmResponse::default()
     }
 }
 
@@ -745,4 +790,82 @@ async fn slash_command_does_not_promote_candidate() {
     assert_no_notification(&notifications).await;
     assert!(catalog.list_drafts().unwrap().is_empty());
     assert_eq!(catalog.pending_proposals().unwrap().len(), 1);
+}
+
+// --- K17 follow-up: retry đúng một lần khi reflection lỗi parse ---------------------
+
+#[tokio::test]
+async fn reflection_parse_failure_is_retried_once_and_recovers() {
+    let provider = Arc::new(ScriptedCountingProvider {
+        inner: FakeProvider::new(vec![
+            tool_calls(5),
+            LlmResponse::text_only("đã hoàn tất"),
+            truncated_proposal(),           // reflection lần 1: JSON cắt cụt
+            proposal("retry-skill", "new"), // gọi lại: đủ điều kiện → candidate
+            LlmResponse::text_only("rất rõ ràng"), // lượt 2: vòng chính + thăng hạng
+        ]),
+        calls: Mutex::new(0),
+    });
+    let (_temp, router, catalog, notifications) = fixture_with_llm(provider.clone(), 5, None).await;
+    run(&router, "quy trình cần retry").await;
+    wait_pending(&catalog).await;
+    // 2 lượt chính + 2 lượt reflection (1 lỗi parse + 1 retry thành công).
+    assert_eq!(provider.calls(), 4);
+
+    run(&router, "tốt lắm, cảm ơn").await;
+    wait_notification(&notifications).await;
+    let drafts = catalog.list_drafts().unwrap();
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].name, "retry-skill");
+    assert!(catalog.pending_proposals().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reflection_retry_happens_exactly_once_then_gives_up() {
+    let provider = Arc::new(ScriptedCountingProvider {
+        inner: FakeProvider::new(vec![
+            tool_calls(5),
+            LlmResponse::text_only("xong"),
+            truncated_proposal(), // lỗi parse lần 1 → retry
+            truncated_proposal(), // lỗi parse lần 2 → bỏ cuộc, không có lần 3
+        ]),
+        calls: Mutex::new(0),
+    });
+    let (_temp, router, catalog, notifications) = fixture_with_llm(provider.clone(), 5, None).await;
+    run(&router, "reflection luôn hỏng").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // 2 lượt chính + 2 lượt reflection — không được có lần gọi thứ 5.
+    assert_eq!(provider.calls(), 4);
+    assert!(catalog.pending_proposals().unwrap().is_empty());
+    assert_no_notification(&notifications).await;
+}
+
+#[tokio::test]
+async fn reflection_budget_exceeded_blocks_the_retry() {
+    let provider = Arc::new(ScriptedCountingProvider {
+        inner: FakeProvider::new(vec![
+            tool_calls(5),
+            LlmResponse::text_only("xong"),
+            // Lỗi parse kèm usage khổng lồ: vượt ngân sách ngày mặc định (2_000_000)
+            // ngay trong `drive_reflection` — lỗi là BudgetExceeded, không phải
+            // InvalidResponse, nên KHÔNG được retry.
+            LlmResponse {
+                text: Some(r#"{"reusable":true,"proposal""#.into()),
+                stop: StopReason::MaxTokens,
+                usage: Usage {
+                    input_tokens: 10,
+                    output_tokens: 3_000_000,
+                },
+                ..LlmResponse::default()
+            },
+        ]),
+        calls: Mutex::new(0),
+    });
+    let (_temp, router, catalog, _notifications) =
+        fixture_with_llm(provider.clone(), 5, None).await;
+    run(&router, "budget chặn retry").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // 2 lượt chính + 1 reflection — budget chặn trước khi kịp retry.
+    assert_eq!(provider.calls(), 3);
+    assert!(catalog.pending_proposals().unwrap().is_empty());
 }
