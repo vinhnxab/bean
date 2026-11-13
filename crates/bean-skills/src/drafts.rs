@@ -63,7 +63,11 @@ impl SkillDraftStatus {
 }
 
 /// Dữ liệu core để tạo một draft.
-#[derive(Debug, Clone)]
+///
+/// Serialize/Deserialize để lưu đề xuất reflection ở **trạng thái chờ** trong state
+/// của catalog (K16 phương án (b)): reflection chạy xong chỉ lưu candidate bền qua
+/// restart, draft thực sự được tạo lúc thăng hạng ở đầu lượt kế tiếp.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewSkillDraft {
     /// Tên skill mới hoặc skill cần sửa.
     pub name: String,
@@ -130,6 +134,10 @@ struct DraftMetadata {
 #[serde(default, deny_unknown_fields)]
 struct DraftState {
     last_proposed_at: Option<String>,
+    /// (K16 phương án (b)) Đề xuất reflection đang chờ lượt kế tiếp xác nhận không
+    /// tiêu cực rồi mới thành draft. `#[serde(default)]` để state cũ (chỉ có
+    /// `last_proposed_at`) vẫn đọc được — bền qua restart cùng file `.state.json`.
+    pending: Vec<NewSkillDraft>,
 }
 
 struct DraftInner {
@@ -226,24 +234,8 @@ impl SkillCatalog {
     /// Tạo draft hợp lệ dưới `skills/_drafts/<name>/`; chưa kích hoạt skill.
     pub fn create_draft(&self, input: NewSkillDraft) -> Result<SkillDraft, SkillError> {
         let _operation = self.drafts.operation()?;
-        if !is_kebab_case(&input.name) {
-            return Err(SkillError::InvalidName(input.name));
-        }
+        validate_proposal_cheap(&input)?;
         let reason = input.reason.trim().to_string();
-        if reason.is_empty() || reason.chars().count() > MAX_REASON_CHARS {
-            return Err(SkillError::InvalidDraft(format!(
-                "lý do phải có 1..={MAX_REASON_CHARS} ký tự"
-            )));
-        }
-        if input.source_session_id <= 0
-            || input.source_channel.trim().is_empty()
-            || input.source_chat_id.trim().is_empty()
-            || chrono::DateTime::parse_from_rfc3339(&input.created_at).is_err()
-        {
-            return Err(SkillError::InvalidDraft(
-                "source hoặc timestamp của draft không hợp lệ".into(),
-            ));
-        }
         let base_content = match input.kind {
             SkillDraftKind::New => match self.get(&input.name) {
                 Ok(_) => return Err(SkillError::AlreadyExists(input.name)),
@@ -441,6 +433,135 @@ impl SkillCatalog {
     }
 
     fn persist_proposal_time(&self, created_at: &str) -> Result<(), SkillError> {
+        self.mutate_state(|state| state.last_proposed_at = Some(created_at.to_string()))
+    }
+
+    /// (K16 phương án (b)) Lưu đề xuất reflection ở **trạng thái chờ** — chưa tạo
+    /// draft, chưa báo người dùng.
+    ///
+    /// Cooldown tick tại thời điểm reflection (`last_proposed_at = input.created_at`),
+    /// không phải lúc thăng hạng, nên chu kỳ đề xuất không bị kéo dài khi lượt promote
+    /// đến muộn. Validate đắt (skill đã tồn tại, bản sửa không đổi nội dung) cố ý
+    /// **không** chạy ở đây: nó chạy trong `create_draft` lúc thăng hạng, và lỗi lúc
+    /// đó chỉ bỏ candidate chứ không làm hỏng lượt người dùng đang chạy.
+    ///
+    /// # Errors
+    /// [`SkillError`] khi đề xuất không qua validate rẻ, hoặc state không đọc/ghi được.
+    pub fn add_pending_proposal(&self, input: NewSkillDraft) -> Result<(), SkillError> {
+        validate_proposal_cheap(&input)?;
+        let _operation = self.drafts.operation()?;
+        self.mutate_state(|state| {
+            state.last_proposed_at = Some(input.created_at.clone());
+            state.pending.push(input);
+        })
+    }
+
+    /// (K16) Đọc đề xuất chờ của **một** phiên rồi xoá khỏi state (FIFO), để thăng
+    /// hạng ngay sau đó. Lỗi ghi state chỉ xảy ra trước khi mutate nên không mất dữ
+    /// liệu: trả `Err` thì `pending` còn nguyên.
+    ///
+    /// # Errors
+    /// [`SkillError`] khi state không đọc/ghi được.
+    pub fn take_pending_proposals(
+        &self,
+        session_id: i64,
+    ) -> Result<Vec<NewSkillDraft>, SkillError> {
+        let _operation = self.drafts.operation()?;
+        // Hàm này chạy ở ĐẦU MỌI lượt (resolve_pending_promotion) nên khi không có
+        // gì để lấy phải thoát trước khi ghi — ghi vô ích mỗi lượt sẽ tạo file
+        // `.state.json` trong CWD của mọi tiến trình kể cả khi learning không bao
+        // giờ sinh đề xuất (lỗi thật: make check làm bẩn `crates/bean/skills/`).
+        if !self.has_pending_for(session_id)? {
+            return Ok(Vec::new());
+        }
+        self.mutate_state(|state| {
+            let mut taken = Vec::new();
+            let mut rest = Vec::new();
+            for proposal in std::mem::take(&mut state.pending) {
+                if proposal.source_session_id == session_id {
+                    taken.push(proposal);
+                } else {
+                    rest.push(proposal);
+                }
+            }
+            state.pending = rest;
+            taken
+        })
+    }
+
+    /// Đề xuất chờ của một phiên có tồn tại không — đọc thuần, không ghi.
+    /// Lỗi state trả `Err` trước khi mutate (giống hợp đồng của `mutate_state`).
+    fn has_pending_for(&self, session_id: i64) -> Result<bool, SkillError> {
+        if let Some(error) = self
+            .drafts
+            .inner
+            .state_error
+            .lock()
+            .map_err(|_| SkillError::CatalogPoisoned)?
+            .as_ref()
+        {
+            return Err(SkillError::InvalidDraft(error.clone()));
+        }
+        self.drafts
+            .inner
+            .state
+            .lock()
+            .map(|state| {
+                state
+                    .pending
+                    .iter()
+                    .any(|proposal| proposal.source_session_id == session_id)
+            })
+            .map_err(|_| SkillError::CatalogPoisoned)
+    }
+
+    /// (K16) Bỏ vĩnh viễn đề xuất chờ của một phiên (lượt kế tiếp mang phản hồi
+    /// tiêu cực); trả số đề xuất đã bỏ.
+    ///
+    /// # Errors
+    /// [`SkillError`] khi state không đọc/ghi được.
+    pub fn discard_pending_proposals(&self, session_id: i64) -> Result<usize, SkillError> {
+        let _operation = self.drafts.operation()?;
+        if !self.has_pending_for(session_id)? {
+            return Ok(0);
+        }
+        self.mutate_state(|state| {
+            let before = state.pending.len();
+            state
+                .pending
+                .retain(|proposal| proposal.source_session_id != session_id);
+            before - state.pending.len()
+        })
+    }
+
+    /// (K16) Xem đề xuất chờ hiện có (mọi phiên) mà **không** lấy ra — dùng để chờ
+    /// reflection hoàn tất trong eval/test một cách xác định.
+    ///
+    /// # Errors
+    /// [`SkillError`] khi state không đọc được.
+    pub fn pending_proposals(&self) -> Result<Vec<NewSkillDraft>, SkillError> {
+        if let Some(error) = self
+            .drafts
+            .inner
+            .state_error
+            .lock()
+            .map_err(|_| SkillError::CatalogPoisoned)?
+            .as_ref()
+        {
+            return Err(SkillError::InvalidDraft(error.clone()));
+        }
+        self.drafts
+            .inner
+            .state
+            .lock()
+            .map(|state| state.pending.clone())
+            .map_err(|_| SkillError::CatalogPoisoned)
+    }
+
+    /// Đọc state, cho closure biến đổi bản copy, ghi đè atomically rồi mới cài vào
+    /// mutex. Nếu ghi lỗi thì bản trong mutex không đổi — caller thấy `Err` và state
+    /// giữ nguyên (không mất candidate giữa chừng).
+    fn mutate_state<T>(&self, update: impl FnOnce(&mut DraftState) -> T) -> Result<T, SkillError> {
         if let Some(error) = self
             .drafts
             .inner
@@ -458,10 +579,10 @@ impl SkillCatalog {
             .lock()
             .map_err(|_| SkillError::CatalogPoisoned)?;
         let mut updated = (*state).clone();
-        updated.last_proposed_at = Some(created_at.to_string());
+        let result = update(&mut updated);
         write_state(&self.draft_root.join(DRAFT_STATE_FILE), &updated)?;
         *state = updated;
-        Ok(())
+        Ok(result)
     }
 
     fn find_draft(&self, id: &str) -> Result<SkillDraft, SkillError> {
@@ -485,6 +606,33 @@ impl SkillCatalog {
         }
         Err(SkillError::DraftNotFound(id.to_string()))
     }
+}
+
+/// Validate rẻ dùng chung cho `create_draft` và `add_pending_proposal` (K16):
+/// hình thức tên/lý do/nguồn/timestamp — không đụng filesystem nên đề xuất chờ có
+/// thể được kiểm ngay lúc reflection mà không tốn I/O. Validate đắt (skill đã tồn
+/// tại, bản sửa không đổi nội dung — cần đọc skill nền) nằm riêng trong
+/// `create_draft` và chỉ chạy lúc thăng hạng.
+fn validate_proposal_cheap(input: &NewSkillDraft) -> Result<(), SkillError> {
+    if !is_kebab_case(&input.name) {
+        return Err(SkillError::InvalidName(input.name.clone()));
+    }
+    let reason = input.reason.trim();
+    if reason.is_empty() || reason.chars().count() > MAX_REASON_CHARS {
+        return Err(SkillError::InvalidDraft(format!(
+            "lý do phải có 1..={MAX_REASON_CHARS} ký tự"
+        )));
+    }
+    if input.source_session_id <= 0
+        || input.source_channel.trim().is_empty()
+        || input.source_chat_id.trim().is_empty()
+        || chrono::DateTime::parse_from_rfc3339(&input.created_at).is_err()
+    {
+        return Err(SkillError::InvalidDraft(
+            "source hoặc timestamp của draft không hợp lệ".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn read_draft(directory: &Path) -> Result<SkillDraft, SkillError> {
