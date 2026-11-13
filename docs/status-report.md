@@ -158,13 +158,15 @@ Dependency chain: `teloxide 0.17.0` → `aquamarine 0.6.0` → `proc-macro-error
 ## 5. Trạng thái local trên máy hiện tại
 
 - **Soak 24h đang chạy (lộ trình chất lượng — đề xuất #1):** bắt đầu **2026-11-13 11:07 ICT**
-  sau `make build` + `scripts/beanctl restart` với binary tại commit `f5cbb25`
-  (mang K16 phương án (b) + D28; docs cùng commit). Instance pid ghi lúc start: `119218`,
+  sau `make build` + `scripts/beanctl restart` với binary tại commit `27e9994`
+  (mang K17 follow-up: reflection retry parse lỗi đúng một lần + log lý do dừng `stop_reason`;
+  K16/D28 đã có từ trước). Instance pid ghi lúc start: `174054`,
   provider NVIDIA GLM-5.3-flash qua `openai_compat`, web `0.0.0.0:7878`, Telegram bật.
-  **Reset có chủ ý** (soak trước bắt đầu 2026-11-12 17:42 ICT, pid 37541, dừng êm qua
-  SIGTERM sau ~10,5 giờ) — cần chạy binary mới mang K16. Rà `/tmp/bean-run/serve.log`
-  (lỗi, restart, memory, WS reconnect) khi hết 24 giờ (**2026-11-14 ~11:07 ICT**)
-  rồi cập nhật mục 6.2.5.
+  Rà `/tmp/bean-run/serve.log` (lỗi, restart, memory, WS reconnect) khi hết 24 giờ
+  (**2026-11-14 ~11:07 ICT**) rồi cập nhật mục 6.2.5.
+
+- Soak trước (pid `119218`, commit `f5cbb25`, mang K16) đã reset có chủ ý và dừng êm qua SIGTERM;
+  soak trước nữa (pid `37541`, bắt đầu 2026-11-12 17:42 ICT) dừng êm sau ~10,5 giờ.
 
 - Có binary release tại `target/release/bean`.
 - Đã tạo `~/.bean/auth.toml` với quyền `0600`.
@@ -231,8 +233,11 @@ cp bean.example.toml bean.toml
    - Chưa kiểm thử một MCP server bên ngoài, chưa ghi tài liệu checklist trust/reconnect cụ thể theo từng server.
 
 5. **Soak test 24 giờ (M16).**
-   - Chưa có báo cáo chạy liên tục 24 giờ.
-   - Vì vậy chưa đủ cơ sở tuyên bố production-ready hoặc đánh giá rò rỉ memory/connection/task leak.
+   - Đã bắt đầu: pid `174054`, commit `27e9994`, khởi động **2026-11-13 11:07 ICT**, hết hạn
+     **2026-11-14 ~11:07 ICT**. Rà `/tmp/bean-run/serve.log` khi hết hạn để báo cáo lỗi,
+     restart, memory, WS reconnect (mục 5).
+   - Chưa có báo cáo chạy đầy đủ 24 giờ — chờ đến hết hạn mới đủ cơ sở tuyên bố
+     production-ready hoặc đánh giá rò rỉ memory/connection/task leak.
 
 ### 6.3. Backlog kỹ thuật từ `docs/known-issues.md`
 
