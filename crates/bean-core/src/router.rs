@@ -12,7 +12,7 @@ use anyhow::Result as AnyResult;
 use bean_llm::LlmProvider;
 use bean_security::checkpoint::CheckpointStore;
 use bean_security::{AuditLog, SessionPolicy};
-use bean_skills::{SkillCatalog, SkillDraftDecision, SkillError};
+use bean_skills::{SkillCatalog, SkillDraft, SkillDraftDecision, SkillError};
 use bean_tools::{AlertSink, ToolRegistry, truncate_chars};
 use bean_types::config::LlmProviderKind;
 use bean_types::{
@@ -23,7 +23,7 @@ use tokio::sync::{Mutex as AsyncMutex, broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{RunOutcome, RunTurnArgs, run_turn_outcome};
-use crate::learning::{ReflectionArgs, reflect};
+use crate::learning::{ReflectionArgs, looks_like_complaint, reflect};
 use crate::run_io::Decision;
 use crate::store::{Store, StoreError};
 

@@ -6,7 +6,7 @@
 use bean_llm::{ChatRequest, LlmProvider};
 use bean_memory::{StoreError, ensure_daily_budget, record_usage};
 use bean_security::untrusted::wrap;
-use bean_skills::{NewSkillDraft, SkillCatalog, SkillDraft, SkillDraftKind};
+use bean_skills::{NewSkillDraft, SkillDraftKind};
 use bean_tools::truncate_chars;
 use bean_types::{Config, Message, Role, SessionId};
 use tokio_util::sync::CancellationToken;
@@ -39,8 +39,6 @@ pub(crate) enum LearningError {
     Draft(#[from] bean_skills::SkillError),
     #[error("lỗi lưu lịch sử reflection: {0}")]
     Store(#[from] crate::store::StoreError),
-    #[error("task reflection nội bộ lỗi: {0}")]
-    Internal(String),
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -64,7 +62,6 @@ pub(crate) struct ReflectionArgs<'a> {
     pub store: &'a dyn Store,
     pub llm: &'a dyn LlmProvider,
     pub config: &'a Config,
-    pub catalog: &'a SkillCatalog,
     pub transcript: &'a [Message],
     pub loaded_skills: &'a [String],
     pub session: SessionId,
@@ -74,8 +71,13 @@ pub(crate) struct ReflectionArgs<'a> {
     pub cancel: CancellationToken,
 }
 
-/// Chạy một reflection độc lập. `Ok(None)` nghĩa là quy trình không đáng tái sử dụng.
-pub(crate) async fn reflect(args: ReflectionArgs<'_>) -> Result<Option<SkillDraft>, LearningError> {
+/// Chạy một reflection độc lập. Trả đề xuất dạng **candidate** (K16 phương án (b)):
+/// caller lưu vào trạng thái chờ của catalog và chỉ tạo draft + thông báo ở đầu lượt
+/// kế tiếp khi text của lượt đó không mang phản hồi tiêu cực — reflection không còn
+/// đụng catalog. `Ok(None)` nghĩa là quy trình không đáng tái sử dụng.
+pub(crate) async fn reflect(
+    args: ReflectionArgs<'_>,
+) -> Result<Option<NewSkillDraft>, LearningError> {
     let evidence = transcript_evidence(args.transcript, args.loaded_skills);
     let request = ChatRequest {
         system: REFLECTION_PROMPT,
@@ -156,11 +158,49 @@ pub(crate) async fn reflect(args: ReflectionArgs<'_>) -> Result<Option<SkillDraf
         source_chat_id: args.chat_id.to_string(),
         created_at: args.created_at.to_string(),
     };
-    let catalog = args.catalog.clone();
-    let draft = tokio::task::spawn_blocking(move || catalog.create_draft(input))
-        .await
-        .map_err(|error| LearningError::Internal(error.to_string()))??;
-    Ok(Some(draft))
+    Ok(Some(input))
+}
+
+/// (K16 phương án (b)) Heuristic nhận phản hồi tiêu cực của người dùng ở lượt kế
+/// tiếp: đề xuất đang chờ bị bỏ vĩnh viễn thay vì hiện lên làm phiền.
+///
+/// So theo **cụm từ**, không so từ đơn: "sai"/"wrong"/"no" đơn lẻ sẽ nuốt cả câu
+/// trung tính hay tích cực ("chưa thấy sai ở đâu", "nói không cần nữa"…) và làm mất
+/// một đề xuất có thể tốt. Heuristic dùng làm lớp lọc thô — người dùng vẫn duyệt/bỏ
+/// draft qua `/approve`//`reject` như bình thường.
+pub(crate) fn looks_like_complaint(text: &str) -> bool {
+    const PHRASES: &[&str] = &[
+        // Tiếng Việt.
+        "sai rồi",
+        "làm sai",
+        "bị sai",
+        "sai hết",
+        "kết quả sai",
+        "không đúng",
+        "chưa đúng",
+        "không phải vậy",
+        "không phải thế",
+        "không phải ý",
+        "làm lại",
+        "đừng làm",
+        "hỏng rồi",
+        "không ổn",
+        "tệ quá",
+        // Tiếng Anh.
+        "not right",
+        "is wrong",
+        "was wrong",
+        "that's wrong",
+        "you're wrong",
+        "didn't work",
+        "doesn't work",
+        "try again",
+        "redo",
+        "not what i asked",
+        "incorrect",
+    ];
+    let lowered = text.to_lowercase();
+    PHRASES.iter().any(|phrase| lowered.contains(phrase))
 }
 
 fn transcript_evidence(messages: &[Message], loaded_skills: &[String]) -> String {
@@ -237,4 +277,29 @@ fn invalid_response_with_text(raw: &str, reason: &serde_json::Error) -> Learning
     LearningError::InvalidResponse(format!(
         "không tìm thấy object JSON đúng schema ({reason}); nguyên văn model trả: {shown}"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::looks_like_complaint;
+
+    #[test]
+    fn complaint_phrases_match_case_insensitively() {
+        assert!(looks_like_complaint("Sai rồi, làm lại đi"));
+        assert!(looks_like_complaint("KẾT QUẢ SAI hết rồi"));
+        assert!(looks_like_complaint("không phải ý tôi muốn"));
+        assert!(looks_like_complaint("This is wrong"));
+        assert!(looks_like_complaint("It didn't work, try again"));
+        assert!(looks_like_complaint("NOT WHAT I ASKED"));
+    }
+
+    #[test]
+    fn neutral_and_positive_turns_do_not_look_like_complaints() {
+        assert!(!looks_like_complaint("tốt lắm, cảm ơn"));
+        assert!(!looks_like_complaint("chưa thấy sai ở đâu cả"));
+        assert!(!looks_like_complaint("Nói không cần nữa nhé"));
+        assert!(!looks_like_complaint("Làm tiếp việc kia đi"));
+        assert!(!looks_like_complaint("tóm tắt lại quy trình release"));
+        assert!(!looks_like_complaint(""));
+    }
 }

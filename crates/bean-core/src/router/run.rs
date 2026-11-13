@@ -68,6 +68,10 @@ impl Router {
                 return;
             }
         };
+        // (K16 phương án (b)) Đầu lượt kế tiếp của cùng phiên: thăng hạng đề xuất
+        // reflection đang chờ — text lượt này không tiêu cực mới hiện draft + thông
+        // báo. Slash command không qua `execute` nên không bao giờ thăng hạng.
+        self.resolve_pending_promotion(&queued, &config).await;
         let policy = if queued.background_allowed_tools.is_some() {
             // Scheduler không dùng allow-in-session của một phiên tương tác.
             Arc::new(SessionPolicy::new())
@@ -214,6 +218,162 @@ impl Router {
         }
     }
 
+    /// (K16 phương án (b)) Thăng hạng các đề xuất reflection đang chờ của phiên này.
+    ///
+    /// Reflection của lượt trước đã lưu candidate vào state của catalog (chưa tạo
+    /// draft, chưa báo người dùng). Lượt kế tiếp bắt đầu mà text không tiêu cực ⇒
+    /// tạo draft + thông báo; nếu tiêu cực ⇒ bỏ vĩnh viễn (audit còn dấu vết).
+    ///
+    /// Race đã biết: reflection của lượt trước có thể chưa kịp lưu candidate khi
+    /// lượt này bắt đầu (provider chậm) — candidate khi đó chỉ chờ sang lượt kế tiếp
+    /// nữa, không mất. Lỗi thăng hạng không bao giờ làm hỏng lượt người dùng.
+    async fn resolve_pending_promotion(&self, queued: &QueuedRun, config: &Config) {
+        if !config.learning.enabled {
+            return;
+        }
+        let Ok(catalog) = self.inner.skills.catalog() else {
+            return;
+        };
+        let session_id = queued.session_id;
+        let proposals = match tokio::task::spawn_blocking(move || {
+            catalog.take_pending_proposals(session_id.get())
+        })
+        .await
+        {
+            Ok(Ok(proposals)) => proposals,
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    error = %error,
+                    "không đọc được đề xuất reflection chờ; giữ lại cho lượt sau"
+                );
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "spawn_blocking đọc đề xuất chờ lỗi");
+                return;
+            }
+        };
+        if proposals.is_empty() {
+            return;
+        }
+        if looks_like_complaint(&queued.incoming.text) {
+            tracing::info!(
+                session_id = %session_id,
+                count = proposals.len(),
+                "learning: lượt kế tiếp mang phản hồi tiêu cực — bỏ đề xuất đang chờ"
+            );
+            self.audit_learning_candidate_discard(queued, proposals.len());
+            return;
+        }
+        for proposal in proposals {
+            let name = proposal.name.clone();
+            let promote_catalog = self.inner.skills.catalog().ok();
+            let promoted = match promote_catalog {
+                Some(promote_catalog) => {
+                    tokio::task::spawn_blocking(move || promote_catalog.create_draft(proposal))
+                        .await
+                }
+                None => {
+                    tracing::warn!(skill = %name, "mất catalog giữa lúc thăng hạng — bỏ đề xuất chờ");
+                    continue;
+                }
+            };
+            match promoted {
+                Ok(Ok(draft)) => {
+                    self.notify_skill_draft(
+                        queued.session_id,
+                        &queued.incoming.channel,
+                        &queued.incoming.chat_id,
+                        &queued.incoming.user_id,
+                        &draft,
+                    )
+                    .await;
+                }
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        skill = %name,
+                        error = %error,
+                        "bỏ đề xuất chờ: tạo draft không hợp lệ lúc thăng hạng"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "spawn_blocking tạo draft lúc thăng hạng lỗi");
+                }
+            }
+        }
+    }
+
+    /// K16+K19: việc bỏ đề xuất vì phản hồi tiêu cực phải còn dấu vết audit JSONL,
+    /// cùng định dạng tool call với quyết định draft (`skill_draft_approve/reject`).
+    fn audit_learning_candidate_discard(&self, queued: &QueuedRun, count: usize) {
+        let Some(log) = &self.inner.audit else {
+            return;
+        };
+        let args = serde_json::json!({
+            "session_id": queued.session_id.get(),
+            "count": count,
+            "outcome": "discarded_complaint",
+        });
+        let entry = bean_security::entry_now(
+            queued.session_id.get(),
+            &queued.incoming.channel,
+            "learning_candidate_discard",
+            &args,
+        );
+        if let Err(error) = log.record(&entry) {
+            tracing::warn!(error = %error, "không ghi được audit bỏ đề xuất learning");
+        }
+    }
+
+    /// Lưu message + gửi thông báo skill nháp qua kênh của lượt — dùng chung cho
+    /// đường thăng hạng K16 (điểm duy nhất thông báo draft).
+    async fn notify_skill_draft(
+        &self,
+        session_id: SessionId,
+        channel: &str,
+        chat_id: &str,
+        user_id: &str,
+        draft: &SkillDraft,
+    ) {
+        let verb = match draft.kind {
+            bean_skills::SkillDraftKind::New => "mới",
+            bean_skills::SkillDraftKind::Update => "sửa",
+        };
+        let text = format!(
+            "Đề xuất skill {verb} `{}` đã sẵn sàng để duyệt.\nLý do: {}\nDuyệt: /approve {} · Bỏ: /reject {}",
+            draft.name, draft.reason, draft.id, draft.id
+        );
+        match self
+            .inner
+            .store
+            .append(
+                session_id,
+                bean_types::Message::assistant(Some(text.clone()), Vec::new()),
+            )
+            .await
+        {
+            Ok(message_id) => {
+                let outbound = bean_types::Outbound {
+                    session_id,
+                    message_id,
+                    text,
+                    kind: bean_types::OutboundKind::Notification,
+                    action: Some(bean_types::OutboundAction::SkillDraft {
+                        id: draft.id.clone(),
+                        name: draft.name.clone(),
+                        actor: user_id.to_string(),
+                    }),
+                };
+                if let Err(error) = self.notify(channel, chat_id, outbound).await {
+                    tracing::warn!(error = %error, "gửi thông báo skill nháp thất bại");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "không lưu thông báo skill nháp");
+            }
+        }
+    }
+
     pub(super) fn spawn_reflection(
         &self,
         queued: QueuedRun,
@@ -242,7 +402,6 @@ impl Router {
                 store: router.inner.store.as_ref(),
                 llm: llm.as_ref(),
                 config: &config,
-                catalog: &catalog,
                 transcript: &outcome.transcript,
                 loaded_skills: &outcome.loaded_skills,
                 session: queued.session_id,
@@ -253,49 +412,31 @@ impl Router {
             })
             .await;
             match result {
-                Ok(Some(draft)) => {
-                    let verb = match draft.kind {
-                        bean_skills::SkillDraftKind::New => "mới",
-                        bean_skills::SkillDraftKind::Update => "sửa",
-                    };
-                    let text = format!(
-                        "Đề xuất skill {verb} `{}` đã sẵn sàng để duyệt.\nLý do: {}\nDuyệt: /approve {} · Bỏ: /reject {}",
-                        draft.name, draft.reason, draft.id, draft.id
-                    );
-                    match router
-                        .inner
-                        .store
-                        .append(
-                            queued.session_id,
-                            bean_types::Message::assistant(Some(text.clone()), Vec::new()),
-                        )
-                        .await
-                    {
-                        Ok(message_id) => {
-                            let outbound = bean_types::Outbound {
-                                session_id: queued.session_id,
-                                message_id,
-                                text,
-                                kind: bean_types::OutboundKind::Notification,
-                                action: Some(bean_types::OutboundAction::SkillDraft {
-                                    id: draft.id,
-                                    name: draft.name,
-                                    actor: queued.incoming.user_id.clone(),
-                                }),
-                            };
-                            if let Err(error) = router
-                                .notify(
-                                    &queued.incoming.channel,
-                                    &queued.incoming.chat_id,
-                                    outbound,
-                                )
-                                .await
-                            {
-                                tracing::warn!(error = %error, "gửi thông báo skill nháp thất bại");
-                            }
+                // (K16 phương án (b)) Reflection chỉ sinh candidate — lưu vào trạng
+                // thái chờ của catalog và GIỮ reservation (như khi create_draft cũ
+                // thành công); draft thực sự được tạo + thông báo ở đầu lượt kế
+                // tiếp của cùng phiên (resolve_pending_promotion).
+                Ok(Some(proposal)) => {
+                    let added =
+                        tokio::task::spawn_blocking(move || catalog.add_pending_proposal(proposal))
+                            .await;
+                    match added {
+                        Ok(Ok(())) => {
+                            tracing::info!(
+                                session_id = %queued.session_id,
+                                "reflection lưu đề xuất ở trạng thái chờ — thăng hạng ở đầu lượt kế tiếp (K16)"
+                            );
+                        }
+                        Ok(Err(error)) => {
+                            tracing::warn!(
+                                error = %error,
+                                "không lưu được đề xuất chờ; nhả chỗ cooldown"
+                            );
+                            router.inner.learning_gate.release(reservation);
                         }
                         Err(error) => {
-                            tracing::warn!(error = %error, "không lưu thông báo skill nháp");
+                            tracing::warn!(error = %error, "spawn_blocking lưu đề xuất chờ lỗi");
+                            router.inner.learning_gate.release(reservation);
                         }
                     }
                 }

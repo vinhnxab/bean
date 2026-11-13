@@ -224,6 +224,30 @@ async fn wait_notification(notifications: &SentNotifications) -> Outbound {
     .unwrap()
 }
 
+/// (K16) Chờ reflection lưu đề xuất ở trạng thái chờ (chưa phải draft) — điểm
+/// đồng bộ xác định trước khi gửi lượt kế tiếp, tránh race promotion/relection.
+async fn wait_pending(catalog: &SkillCatalog) {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if !catalog.pending_proposals().unwrap().is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+/// (K16) Sau run chưa thăng hạng thì không được có notification nào.
+async fn assert_no_notification(notifications: &SentNotifications) {
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        notifications.0.lock().unwrap().is_empty(),
+        "chưa được có notification trước khi thăng hạng"
+    );
+}
+
 #[tokio::test]
 async fn eligible_run_creates_reviewable_draft_but_does_not_activate_it() {
     let (_temp, router, catalog, notifications) = fixture(
@@ -231,11 +255,19 @@ async fn eligible_run_creates_reviewable_draft_but_does_not_activate_it() {
             tool_calls(5),
             LlmResponse::text_only("đã hoàn tất"),
             proposal("release-checklist", "new"),
+            LlmResponse::text_only("rất rõ ràng"), // lượt 2: agent trả lời trung tính
         ],
         5,
     )
     .await;
     run(&router, "làm checklist phát hành").await;
+    wait_pending(&catalog).await;
+    // (K16) Sau run 1: chỉ candidate — chưa có draft, chưa báo người dùng.
+    assert_no_notification(&notifications).await;
+    assert!(catalog.list_drafts().unwrap().is_empty());
+
+    // Lượt kế tiếp trung tính ⇒ thăng hạng: draft + notification.
+    run(&router, "tốt lắm, cảm ơn").await;
     let out = wait_notification(&notifications).await;
     assert!(matches!(
         out.action,
@@ -258,21 +290,34 @@ async fn reflection_uses_small_model_when_configured() {
             tool_calls(5),
             LlmResponse::text_only("đã hoàn tất"),
             proposal("small-model-skill", "new"),
+            LlmResponse::text_only("rất rõ ràng"), // lượt 2: agent trả lời trung tính
         ]),
         models: Mutex::new(vec![]),
     });
     let (_temp, router, catalog, notifications) =
         fixture_with_llm(provider.clone(), 5, Some("m-re".into())).await;
     run(&router, "làm checklist").await;
-    wait_notification(&notifications).await;
-    assert_eq!(catalog.list_drafts().unwrap().len(), 1);
-    // Hai lượt đầu của run chính dùng model mặc định; lượt reflection (cuối)
+    wait_pending(&catalog).await;
+    // Hai lượt đầu của run chính dùng model mặc định; lượt reflection (thứ ba)
     // phải dùng small_model. Block để guard không vượt ra ngoài (lint
     // `await_holding_lock` phân tích lexical scope).
     {
         let models = provider.models.lock().unwrap();
         assert_eq!(models.len(), 3);
         assert_eq!(models.last().map(String::as_str), Some("m-re"));
+    }
+
+    run(&router, "cảm ơn, rõ ràng lắm").await;
+    wait_notification(&notifications).await;
+    assert_eq!(catalog.list_drafts().unwrap().len(), 1);
+    // Lượt 2 chỉ là agent loop (thăng hạng không gọi LLM) — lại dùng model chính.
+    {
+        let models = provider.models.lock().unwrap();
+        assert_eq!(models.len(), 4);
+        assert_eq!(
+            models.last().map(String::as_str),
+            Some(Config::default().llm.model.as_str())
+        );
     }
 
     // Không cấu hình small_model ⇒ reflection dùng model chính.
@@ -336,12 +381,17 @@ async fn proposal_rate_limit_prevents_second_reflection() {
     )
     .await;
     run(&router, "lần một").await;
-    wait_notification(&notifications).await;
+    wait_pending(&catalog).await;
+    assert!(catalog.list_drafts().unwrap().is_empty());
+    // Lượt 2 vừa thăng hạng candidate của lượt 1 vừa đủ điều kiện reflection —
+    // nhưng cooldown đã tick lúc reflection lượt 1 nên reflection lượt 2 bị chặn.
     run(&router, "lần hai").await;
+    wait_notification(&notifications).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     let drafts = catalog.list_drafts().unwrap();
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].name, "first-skill");
+    assert!(catalog.pending_proposals().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -403,6 +453,7 @@ async fn update_proposal_is_diff_and_only_loaded_skill_can_be_updated() {
             ]),
             LlmResponse::text_only("làm theo cách tốt hơn"),
             proposal("existing-skill", "update"),
+            LlmResponse::text_only("ok"), // lượt 2: agent trả lời trung tính
         ],
         1,
     )
@@ -413,6 +464,8 @@ async fn update_proposal_is_diff_and_only_loaded_skill_can_be_updated() {
     catalog.reload().unwrap();
 
     run(&router, "nạp skill rồi làm khác hướng dẫn").await;
+    wait_pending(&catalog).await;
+    run(&router, "cảm ơn, đúng ý tôi").await;
     wait_notification(&notifications).await;
     let draft = catalog.list_drafts().unwrap().remove(0);
     assert_eq!(draft.kind, bean_skills::SkillDraftKind::Update);
@@ -463,11 +516,14 @@ async fn approval_rejects_actor_outside_allowlist() {
             tool_calls(5),
             LlmResponse::text_only("xong"),
             proposal("reviewed-skill", "new"),
+            LlmResponse::text_only("ok"), // lượt 2: agent trả lời trung tính
         ],
         5,
     )
     .await;
     run(&router, "tạo đề xuất").await;
+    wait_pending(&catalog).await;
+    run(&router, "cảm ơn nhé").await;
     wait_notification(&notifications).await;
     let id = catalog.list_drafts().unwrap()[0].id.clone();
     assert!(matches!(
@@ -563,4 +619,130 @@ async fn draft_decisions_are_written_to_audit_log() {
     assert_eq!(approve_ok["args"]["name"], "approved-skill");
     assert_eq!(approve_ok["args"]["status"], "approved");
     assert!(approve_ok["ts"].as_str().is_some(), "phải có thời điểm");
+}
+
+/// (K16) Lượt kế tiếp mang phản hồi tiêu cực ⇒ candidate bị bỏ vĩnh viễn: lượt 3
+/// trung tính cũng không phục hồi được — không draft, không notification.
+#[tokio::test]
+async fn complaint_discards_candidate_permanently() {
+    let (_temp, router, catalog, notifications) = fixture(
+        vec![
+            tool_calls(5),
+            LlmResponse::text_only("xong"),
+            proposal("discarded-skill", "new"),
+            LlmResponse::text_only("xin lỗi, để làm lại"),
+            LlmResponse::text_only("đã sửa lại"),
+        ],
+        5,
+    )
+    .await;
+    run(&router, "làm checklist").await;
+    wait_pending(&catalog).await;
+
+    run(&router, "sai rồi, làm lại đi").await;
+    assert_no_notification(&notifications).await;
+    assert!(catalog.list_drafts().unwrap().is_empty());
+    assert!(catalog.pending_proposals().unwrap().is_empty());
+
+    run(&router, "ok giờ tốt rồi").await;
+    assert_no_notification(&notifications).await;
+    assert!(catalog.list_drafts().unwrap().is_empty());
+    assert!(catalog.pending_proposals().unwrap().is_empty());
+}
+
+/// (K16) Candidate nằm trong state file của catalog: dựng lại Router trên cùng
+/// thư mục dữ liệu (tương đương restart tiến trình) vẫn thăng hạng được.
+#[tokio::test]
+async fn candidate_survives_router_rebuild() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace_path = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace_path).unwrap();
+    let workspace = Arc::new(CapWorkspace::open(workspace_path).unwrap());
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    registry.register(Arc::new(Probe)).unwrap();
+    let skills_root = temp.path().join("skills");
+    let catalog = SkillCatalog::load_with_paths(
+        std::slice::from_ref(&skills_root),
+        skills_root.clone(),
+        skills_root.join("_drafts"),
+    );
+    let mut config = Config::default();
+    config.agent.max_steps = 4;
+    config.agent.allowed_users.push("test:user".into());
+    config.learning.min_tool_calls = 5;
+    config.learning.proposal_interval_minutes = 60;
+    let notifications = Arc::new(SentNotifications::default());
+
+    let first = Router::new(RouterDeps {
+        config_path: None,
+        speech: None,
+        default_profile: config.llm.as_profile(),
+        config: config.clone(),
+        store: Arc::new(MemoryStore::new()),
+        registry: Arc::new(registry),
+        llm: Arc::new(FakeProvider::new(vec![
+            tool_calls(5),
+            LlmResponse::text_only("xong"),
+            proposal("restart-skill", "new"),
+        ])),
+        audit: None,
+        skills_index: catalog.index(),
+        skills: Some(catalog.clone()),
+        llm_state_path: None,
+        checkpoints: None,
+    });
+    first.register_channel(notifications.clone()).unwrap();
+    run(&first, "làm checklist").await;
+    wait_pending(&catalog).await;
+    drop(first);
+
+    // "Restart": Router thứ hai trên cùng temp paths — catalog dựng lại từ đĩa
+    // phải đọc lại candidate, store mới vẫn chọn phiên có cùng id (MemoryStore).
+    let workspace = Arc::new(CapWorkspace::open(temp.path().join("workspace")).unwrap());
+    let mut registry = ToolRegistry::with_workspace(workspace);
+    registry.register(Arc::new(Probe)).unwrap();
+    let restarted = Router::new(RouterDeps {
+        config_path: None,
+        speech: None,
+        default_profile: config.llm.as_profile(),
+        config,
+        store: Arc::new(MemoryStore::new()),
+        registry: Arc::new(registry),
+        llm: Arc::new(FakeProvider::new(vec![LlmResponse::text_only(
+            "rất vui khi giúp được",
+        )])),
+        audit: None,
+        skills_index: catalog.index(),
+        skills: Some(catalog.clone()),
+        llm_state_path: None,
+        checkpoints: None,
+    });
+    restarted.register_channel(notifications.clone()).unwrap();
+    run(&restarted, "tốt lắm, cảm ơn").await;
+    wait_notification(&notifications).await;
+    let drafts = catalog.list_drafts().unwrap();
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].name, "restart-skill");
+}
+
+/// (K16) Slash command không phải lượt agent ⇒ không thăng hạng candidate; nó
+/// vẫn nằm chờ lượt agent kế tiếp.
+#[tokio::test]
+async fn slash_command_does_not_promote_candidate() {
+    let (_temp, router, catalog, notifications) = fixture(
+        vec![
+            tool_calls(5),
+            LlmResponse::text_only("xong"),
+            proposal("held-skill", "new"),
+        ],
+        5,
+    )
+    .await;
+    run(&router, "làm checklist").await;
+    wait_pending(&catalog).await;
+
+    run(&router, "/memory").await;
+    assert_no_notification(&notifications).await;
+    assert!(catalog.list_drafts().unwrap().is_empty());
+    assert_eq!(catalog.pending_proposals().unwrap().len(), 1);
 }
