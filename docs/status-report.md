@@ -156,12 +156,14 @@ Dependency chain: `teloxide 0.17.0` → `aquamarine 0.6.0` → `proc-macro-error
 
 ## 5. Trạng thái local trên máy hiện tại
 
-- **Soak 24h đang chạy (lộ trình chất lượng — đề xuất #1):** bắt đầu **2026-11-12 17:42 ICT**
-  sau `make build` + `scripts/beanctl restart` với binary tại commit `790d297`
-  (mang K6 + K33 + K22; docs `1156f11`). Instance pid ghi lúc start: `37541`,
+- **Soak 24h đang chạy (lộ trình chất lượng — đề xuất #1):** bắt đầu **2026-11-13 11:07 ICT**
+  sau `make build` + `scripts/beanctl restart` với binary tại commit `f5cbb25`
+  (mang K16 phương án (b) + D28; docs cùng commit). Instance pid ghi lúc start: `119218`,
   provider NVIDIA GLM-5.3-flash qua `openai_compat`, web `0.0.0.0:7878`, Telegram bật.
-  Rà `/tmp/bean-run/serve.log` (lỗi, restart, memory, WS reconnect) khi hết 24 giờ
-  (**2026-11-13 ~17:42 ICT**) rồi cập nhật mục 6.2.5.
+  **Reset có chủ ý** (soak trước bắt đầu 2026-11-12 17:42 ICT, pid 37541, dừng êm qua
+  SIGTERM sau ~10,5 giờ) — cần chạy binary mới mang K16. Rà `/tmp/bean-run/serve.log`
+  (lỗi, restart, memory, WS reconnect) khi hết 24 giờ (**2026-11-14 ~11:07 ICT**)
+  rồi cập nhật mục 6.2.5.
 
 - Có binary release tại `target/release/bean`.
 - Đã tạo `~/.bean/auth.toml` với quyền `0600`.
