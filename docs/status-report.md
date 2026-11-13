@@ -239,14 +239,14 @@ cp bean.example.toml bean.toml
 | An toàn | S2 | **đã đóng** (2026-09-27) | Lọc trọn chuỗi ESC/OSC cho output của mọi tool `marks_untrusted()` trước khi in ở CLI; tool không untrusted giữ nguyên hành vi — xem `docs/decisions.md` D9.8 |
 | An toàn | S3, S4 | thông tin | `/api/audit` chưa lọc theo người dùng (chấp nhận được khi v1 một người dùng); `allowed_tools` cấp quyền vĩnh viễn — UI nên cảnh báo khi task có tool `Dangerous` |
 | An toàn | K1-followup | thấp | Cân nhắc chỉ bật cờ khi summary thực sự tổng hợp từ nội dung untrusted; **chưa làm ngay**, cần dữ liệu dùng thật |
-| Độ bền DB | K2–K4 | trung bình | Context đọc toàn bộ lịch sử; store worker không timeout; một writer có thể bị query FTS chặn |
-| Store semantics | K5–K7 | trung bình | Memory search lẫn message lượt hiện tại; `clear` chưa xoá summary; `MemoryStore`/`SqliteStore` có thể lệch hành vi |
+| Độ bền DB | K2–K4 | **đã đóng** (2026-11-11/12) | `load_history_within_budget` đọc theo trang trong ngân sách; store có trần 10s; tách connection chỉ đọc — FTS nặng không còn chặn `append` |
+| Store semantics | K5, K6 | **đã đóng** (2026-11-11/12) | `memory_search` loại message của lượt đang chạy; `clear` xoá cả `summary` ở cả hai store, test hành vi chung; K7 (MemoryStore/SqliteStore lệch) vẫn mở |
 | Search | K8–K9 | thấp | BM25 chỉ tương đối theo nguồn; cú pháp FTS bị giới hạn |
-| E2E | K11 | trung bình | Thiếu E2E bền vững cho memory save/search |
+| E2E | K11 | **đã đóng** (2026-11-12) | `memory_survives_restart_in_real_binary` trong `make e2e`: memory_save → SIGTERM → restart cùng `data.dir` → memory_search thấy ghi nhớ, phiên + DB còn nguyên |
 | Provider thật | K12, K17 | **đã đóng** (2026-11-09) | Compaction + reflection đã chạy với model thật qua khung eval opt-in (`evals/tasks-real/`, key từ env); còn streaming thật (M17) và Anthropic/Ollama — thiếu key |
 | Telegram | K15 | **đã đóng** (2026-11-10) | Smoke bot thật pass: chat, confirm inline (audit đúng actor), Dangerous, `/stop`, reconnect, đồng thời web; callback người lạ unit-tested |
-| Learning | K16, K19, K20 | trung bình/thấp | Chưa có tín hiệu phàn nàn; draft decision chưa có audit bền vững; scheduler draft chưa có inline approval Telegram |
-| Learning E2E | K18 | trung bình | Chưa có flow E2E task nhiều bước → notification → duyệt skill → run kế tiếp dùng skill |
+| Learning | K16, K20 | trung bình/thấp | Chưa có tín hiệu phàn nàn (cần chủ dự án chốt phương án); scheduler draft chưa có inline approval Telegram. K19 đã đóng 2026-11-12: duyệt/bỏ draft ghi audit JSONL với actor, cả lần thử lỗi |
+| Learning E2E | K18 | **đã đóng** (2026-11-12) | `learning_draft_approval_roundtrip_in_real_binary` trong `make e2e`: 5 tool call → notification WS → draft qua REST → catalog chưa thấy trước duyệt → approve → audit JSONL → run 2 nạp được skill |
 | Dependency | K21 | thấp | `proc-macro-error2` future-incompatibility warning qua `aquamarine`/`teloxide` |
 
 **Lưu ý:** K13 (`/new` chỉ ở adapter) và K14 (chưa có API/UI memory files) trong tài liệu backlog đã cũ so với code hiện tại: `/new` đã được xử lý trong Router và UI đã có `GET/PUT /api/memory/files/:name`. Hai mục này nên được đóng hoặc cập nhật trong một đợt tài liệu riêng.
