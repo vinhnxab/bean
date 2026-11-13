@@ -20,6 +20,11 @@ pub struct EvalTask {
     pub description: String,
     /// Tin nhắn người dùng gửi cho agent trong lượt eval.
     pub prompt: String,
+    /// Lượt kế tiếp gửi vào **cùng phiên** sau lượt chính. Cần cho khẳng định phụ
+    /// thuộc lượt sau: với reflection trì hoãn (K16 phương án (b)) draft chỉ được
+    /// thăng hạng ở đầu lượt kế tiếp mà text không phản hồi tiêu cực.
+    #[serde(default)]
+    pub followup_prompt: Option<String>,
     /// Ghi đè `agent.max_steps` (mặc định của runner: 12 — eval không cần 25 bước).
     #[serde(default)]
     pub max_steps: Option<u32>,

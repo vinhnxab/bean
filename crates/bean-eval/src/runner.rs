@@ -229,6 +229,13 @@ async fn run_task_inner(
             task.id
         );
     }
+    if task.assert.draft_created.unwrap_or(false) && task.followup_prompt.is_none() {
+        bail!(
+            "task `{}` khẳng định `draft_created` nhưng thiếu `followup_prompt` — với \
+             reflection trì hoãn (K16), draft chỉ được thăng hạng ở đầu lượt kế tiếp",
+            task.id
+        );
+    }
 
     // 1. Môi trường cách ly: workspace + data + skills đều trong thư mục tạm.
     let temp = tempfile::tempdir().context("tạo thư mục tạm cho eval")?;
@@ -358,14 +365,51 @@ async fn run_task_inner(
         .map_err(|error| anyhow::anyhow!("submit run eval thất bại: {error}"))?;
 
     let mut collector = EventCollector::new(task.timeout_seconds);
-    let outcome = collector
+    let mut outcome = collector
         .drive(&router, &mut events)
         .await
         .context("chờ run eval")?;
+
+    // 8. (K16) Reflection trì hoãn: draft chỉ được thăng hạng ở ĐẦU lượt kế tiếp
+    //    của cùng phiên. Chờ reflection kịp lưu candidate rồi mới gửi lượt kế
+    //    tiếp trung tính; provider thật cần trần chờ lớn hơn (network + retry).
+    if let Some(catalog) = &catalog
+        && want_draft
+        && task.followup_prompt.is_some()
+    {
+        let wait_ms = if wants_fake(task, options.provider) {
+            REFLECTION_WAIT_MS
+        } else {
+            REFLECTION_WAIT_REAL_MS
+        };
+        wait_for_pending(catalog, wait_ms).await;
+    }
+    if let Some(followup) = task.followup_prompt.clone() {
+        router
+            .submit(Incoming::new(
+                "eval",
+                task.id.as_str(),
+                "eval:user",
+                followup,
+            ))
+            .await
+            .map_err(|error| anyhow::anyhow!("submit lượt kế tiếp eval thất bại: {error}"))?;
+        let followup_outcome = collector
+            .drive(&router, &mut events)
+            .await
+            .context("chờ lượt kế tiếp eval")?;
+        // Chấm theo lượt CUỐI trong phiên; lỗi của lượt kế luôn được tính.
+        if followup_outcome.error.is_some() {
+            outcome = followup_outcome;
+        } else {
+            outcome.end_reason = followup_outcome.end_reason;
+            outcome.final_text = followup_outcome.final_text;
+        }
+    }
     drop(events);
     drop(router);
 
-    // 8. Reflection chạy bất đồng bộ sau Final — chờ draft (nếu task yêu cầu).
+    // 9. Reflection chạy bất đồng bộ sau Final — chờ draft (nếu task yêu cầu).
     //    Provider thật cần trần chờ lớn hơn: network + retry backoff.
     let draft_count = match &catalog {
         Some(catalog) => {
@@ -379,7 +423,7 @@ async fn run_task_inner(
         None => 0,
     };
 
-    // 9. Dữ liệu chấm: file workspace + summary (nguồn sự thật là DB).
+    // 10. Dữ liệu chấm: file workspace + summary (nguồn sự thật là DB).
     let files = read_workspace_files(&workspace_path)?;
     let summary = store
         .summary(session)
@@ -519,6 +563,22 @@ async fn wait_for_drafts(catalog: &SkillCatalog, expected: bool, wait_ms: u64) -
         let count = catalog.list_drafts().map_or(0, |drafts| drafts.len());
         if count > 0 || !expected || tokio::time::Instant::now() >= deadline {
             return count;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// (K16) Chờ reflection lưu đề xuất ở trạng thái chờ: draft chỉ được thăng hạng
+/// ở đầu lượt kế tiếp, nên phải đợi candidate xuất hiện trước khi gửi lượt đó.
+/// Hết trần chỉ trả về mà không báo lỗi — assert `draft_created` sẽ chấm vi phạm.
+async fn wait_for_pending(catalog: &SkillCatalog, wait_ms: u64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(wait_ms);
+    loop {
+        let has_pending = catalog
+            .pending_proposals()
+            .is_ok_and(|pending| !pending.is_empty());
+        if has_pending || tokio::time::Instant::now() >= deadline {
+            return;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

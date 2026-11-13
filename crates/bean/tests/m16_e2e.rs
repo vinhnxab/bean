@@ -741,9 +741,10 @@ async fn memory_survives_restart_in_real_binary() {
     stop_server(&mut child).await;
 }
 
-/// (K18) Learning loop xuyên qua binary/server thật: run ≥ 5 tool call → notification →
-/// xem draft/diff qua REST → loader CHƯA thấy skill → duyệt → skill xuất hiện → run kế
-/// tiếp nạp được skill. Trước đây chỉ có unit test trong tiến trình.
+/// (K18 + K16) Learning loop xuyên qua binary/server thật: run ≥ 5 tool call →
+/// reflection chỉ lưu **candidate** (KHÔNG notification, REST drafts rỗng) → lượt
+/// kế tiếp trung tính thăng hạng: Notification + draft hiện qua REST → loader CHƯA
+/// thấy skill → duyệt → skill xuất hiện → run kế tiếp nạp được skill.
 #[tokio::test]
 async fn learning_draft_approval_roundtrip_in_real_binary() {
     let env = setup_env(&["files", "skills"], true).await;
@@ -770,6 +771,7 @@ async fn learning_draft_approval_roundtrip_in_real_binary() {
             ], "stop": "tool_use" },
             { "text": "hoàn tất", "stop": "end_turn" },
             { "text": proposal_text, "stop": "end_turn" },
+            { "text": "tốt lắm, cảm ơn", "stop": "end_turn" },
             { "tool_calls": [{ "id": "l1", "name": "load_skill", "args": { "name": "e2e-reusable-skill" } }], "stop": "tool_use" },
             { "text": "đã nạp skill", "stop": "end_turn" }
         ] }),
@@ -827,14 +829,64 @@ async fn learning_draft_approval_roundtrip_in_real_binary() {
         tool_ends, 5,
         "run phải chạy đủ 5 tool call trước reflection"
     );
-    // Notification báo draft chờ duyệt — gửi sau Final khi reflection xong.
+
+    // (K16) Sau run 1: reflection chỉ lưu candidate — KHÔNG được có Notification
+    // trong cửa sổ 500ms, và REST phải thấy danh sách draft rỗng.
+    let mut saw_notification = false;
+    for _ in 0..10 {
+        match tokio::time::timeout(Duration::from_millis(50), next_event(&mut socket)).await {
+            Err(_) => break,
+            Ok(event) => {
+                if matches!(event, ServerMsg::Notification { .. }) {
+                    saw_notification = true;
+                }
+            }
+        }
+    }
+    assert!(
+        !saw_notification,
+        "run 1 chưa được báo Notification — reflection phải lưu candidate chờ (K16)"
+    );
+    let drafts: Value = client
+        .get(format!("{}/api/skills/drafts", env.origin))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        drafts["drafts"].as_array().unwrap().len(),
+        0,
+        "chưa thăng hạng thì chưa được có draft: {drafts}"
+    );
+
+    // Lượt kế tiếp trung tính ⇒ thăng hạng ở ĐẦU lượt: Notification đến trước
+    // Final của lượt đó.
+    send(
+        &mut socket,
+        json!({ "type": "start", "session_id": session_id, "text": "tốt lắm, cảm ơn" }),
+    )
+    .await;
+    assert!(
+        matches!(
+            wait_for(&mut socket, |event| matches!(
+                event,
+                ServerMsg::Notification { .. } | ServerMsg::Final { .. }
+            ))
+            .await,
+            ServerMsg::Notification { .. }
+        ),
+        "thăng hạng K16 phải báo Notification ở đầu lượt kế tiếp"
+    );
     assert!(matches!(
         wait_for(&mut socket, |event| matches!(
             event,
-            ServerMsg::Notification { .. }
+            ServerMsg::Final { .. }
         ))
         .await,
-        ServerMsg::Notification { .. }
+        ServerMsg::Final { .. }
     ));
 
     // Draft xem được qua REST kèm diff/nội dung.

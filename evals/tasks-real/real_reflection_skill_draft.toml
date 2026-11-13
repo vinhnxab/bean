@@ -17,10 +17,12 @@
 # Chạy (key chỉ từ biến môi trường, không bao giờ nằm trong file):
 #   bean eval run --tasks evals/tasks-real --provider real
 id = "real_reflection_skill_draft"
-description = "K17: agent thật gộp 5 mảnh quy trình thành CHECKLIST.md (6 tool call) ⇒ reflection sinh skill nháp hợp lệ chờ duyệt."
+description = "K17: agent thật gộp 5 mảnh quy trình thành CHECKLIST.md (6 tool call) ⇒ reflection lưu candidate; lượt kế tiếp trung tính thăng hạng thành skill nháp (K16)."
 prompt = """Đọc 5 file deploy-1.md, deploy-2.md, deploy-3.md, deploy-4.md, deploy-5.md bằng tool read_file, sau đó gộp toàn bộ các bước thành một file duy nhất tên CHECKLIST.md bằng tool write_file (giữ nguyên các bước, đánh số thứ tự).
-Không dùng tool nào khác ngoài read_file và write_file.
+Khô dùng tool nào khác ngoài read_file và write_file.
 Cuối cùng, kết thúc câu trả lời bằng một đoạn nêu rõ: quy trình 5 bước vừa gộp đáng được lưu thành skill để các lần phát hành sau tái sử dụng."""
+# (K16) Lượt kế tiếp trung tính của cùng phiên — draft chỉ được thăng hạng ở đây.
+followup_prompt = "Cảm ơn, tóm tắt lại checklist vừa tạo."
 max_steps = 8
 timeout_seconds = 240
 
