@@ -53,7 +53,7 @@
 | **M12 — Telegram** | 🟡 Adapter + mock test | `810577f` | teloxide long polling, allowlist, rate limit, tách tin UTF-16, inline confirm, reconnect, shutdown | **Chưa chạy bot Telegram thật** (K15) |
 | **M13 — Scheduler** | 🟡 Logic + smoke ảo | `cbcd744` | Cron/timezone, task CRUD, scheduler tick, notification, outbox | Chưa chứng minh “7h mỗi sáng” qua Telegram/UI thật |
 | **M14 — MCP** | ✅ Local stdio server | `7ef375a` | rmcp stdio client, discovery, trust/confirm, reconnect, reaping, MCP test server thật trong tiến trình | Chưa thử MCP server bên thứ ba trong môi trường triển khai |
-| **M15 — Learning loop** | 🟡 Code + fake test | `a9052ba` | Reflection, draft, rate limit, duyệt/bỏ qua UI, REST và Telegram | Thiếu E2E đầy đủ (K18), tín hiệu phàn nàn (K16), audit bền vững (K19), provider thật (K17) |
+| **M15 — Learning loop** | 🟡 Gần hoàn tất | `a9052ba` | Reflection, draft, rate limit, duyệt/bỏ qua UI, REST và Telegram; reflection trì hoãn đến lượt kế tiếp (K16, D28) | K20 (scheduler draft chưa có inline Telegram); luồng 2 lượt K16 chưa chạy lại với provider thật |
 | **M16 — Hardening/deploy** | 🟡 Gần hoàn tất | `8e83849` | Token budget, structured logs, graceful shutdown, reconnect, embedded UI, headless build, systemd, Dockerfiles, README, audit, binary E2E | **Chưa soak 24 giờ**; chưa cài systemd production; chưa đẩy image production; chưa chạy Playwright |
 | **M17(A) — Streaming** | ✅ Hoàn thành | `882363d` | SSE Anthropic/OpenAI-compat, gom delta/tool call/usage, `TextDelta` qua WS, UI hiện dần, reconnect giữ text và refetch REST | Chưa kiểm thử thủ công với provider thật do chưa có API key |
 | **M18 — Discord adapter** | 🚫 Đã loại bỏ | — | — | Chủ dự án bỏ hẳn 2026-09-26: Discord không có tín hiệu API chặn trùng token (Telegram trả 409) và có vòng đời interaction riêng (3s/15 phút). Xem `Plan.md` mục 5.0 |
@@ -102,7 +102,7 @@
 - Context budget và compaction không cắt sai cặp tool.
 - Truy xuất: `memory_search` loại message của lượt đang chạy khỏi kết quả (K5); context builder đọc lịch sử **theo trang** từ mới nhất lùi về cũ, dừng khi đủ ngân sách — không đọc toàn bộ mỗi bước (K2) (lộ trình mục 6, 2026-11-11).
 - `MEMORY.md`, `USER.md`, memory entries.
-- Skills từ project/user directory; skill draft chỉ kích hoạt sau duyệt.
+- Skills từ project/user directory; skill draft chỉ kích hoạt sau duyệt; reflection lưu candidate ở trạng thái chờ, chỉ thành draft khi lượt kế tiếp của cùng phiên không phản hồi tiêu cực (K16, D28, 2026-11-13).
 
 ### Web UI
 
@@ -142,6 +142,7 @@
 | Checkpoint/rollback workspace (mục 5c lộ trình) | ✅ Pass | `bean-security` 5 test (chụp/restore/trần/prune + proptest cây ngẫu nhiên); `bean-core` 4 test `checkpoint_flow` (rollback về trước khi ghi; chưa có gì thay đổi; checkpoint tắt ⇒ tool ghi vẫn chạy; scheduler từ chối); E2E binary thật `rollback_restores_workspace_in_real_binary` (duyệt 2 confirm, file sinh sau checkpoint bị xoá, snapshot ngoài jail, result qua REST đúng). Chi tiết D26.1–D26.9. **Còn kiểm chứng tay với model thật** qua Telegram/web (ghi file xong bảo hoàn tác) — người dùng sẽ thử |
 | Truy xuất bộ nhớ K5 + K2 (mục 6 lộ trình) | ✅ Pass | K5: `memory_search_bo_message_cua_luot_dang_chay` (sqlite) — message của lượt đang chạy bị loại, lịch sử lượt trước + session khác vẫn thấy, gọi ngoài lượt vẫn thấy đủ. K2: `build_windowed_history_equals_full_history_trim` (250 message, nhóm tool đúng biên trang 200 — windowed ≡ full-trim) + `build_with_large_budget_returns_whole_history_with_tool_group_intact` (nhóm tool vắt biên trang giữ nguyên thứ tự chuẩn hoá) |
 | Diff duyệt hành động (D27) | ✅ Pass | `bean-tools` 9 test `diff.rs` (context thật + số dòng chuẩn, trần 50 dòng + note, fallback file quá lớn không treo, tiếng Việt + emoji, chỉ khác newline) + 9 test `confirm_details` (fake `WorkspaceFs`: tạo mới/ghi đè/nhị phân/lỗi I/O/thiếu args/old không duy nhất/wire qua tool thật) + `bean-core` 2 integration test (prompt chứa `+dòng mới`, không còn `content=`; cảnh báo old xuất hiện 2 lần) + web 3 test `ConfirmCard` (màu +/−/header, mô tả trước diff không tô, không diff không sinh span). Bug thật bắt được: bản đầu LCS chạy trên đoạn giữa sau trim ⇒ hunk mất context hai phía — giữ prefix/suffix dạng `Equal` trong dãy op |
+| Reflection trì hoãn K16 (D28) | ✅ Pass | `bean-skills` 10 test (candidate FIFO theo phiên, sống qua reload, validate rẻ + thăng hạng, hồi quy không ghi file khi state rỗng — bug thật: `make check` ghi bẩn `crates/bean/skills/`); `bean-core` learning 12/12 (complaint bỏ vĩnh viễn + audit, sống qua rebuild Router, slash command không promote, luồng 2 lượt promote sau phản hồi trung tính); eval fake/real thêm `followup_prompt`; E2E mở rộng (run 1 không Notification, run 2 Notification trước Final) |
 
 ### Ghi chú về warning dependency
 
@@ -245,7 +246,7 @@ cp bean.example.toml bean.toml
 | E2E | K11 | **đã đóng** (2026-11-12) | `memory_survives_restart_in_real_binary` trong `make e2e`: memory_save → SIGTERM → restart cùng `data.dir` → memory_search thấy ghi nhớ, phiên + DB còn nguyên |
 | Provider thật | K12, K17 | **đã đóng** (2026-11-09) | Compaction + reflection đã chạy với model thật qua khung eval opt-in (`evals/tasks-real/`, key từ env); còn streaming thật (M17) và Anthropic/Ollama — thiếu key |
 | Telegram | K15 | **đã đóng** (2026-11-10) | Smoke bot thật pass: chat, confirm inline (audit đúng actor), Dangerous, `/stop`, reconnect, đồng thời web; callback người lạ unit-tested |
-| Learning | K16, K20 | trung bình/thấp | Chưa có tín hiệu phàn nàn (cần chủ dự án chốt phương án); scheduler draft chưa có inline approval Telegram. K19 đã đóng 2026-11-12: duyệt/bỏ draft ghi audit JSONL với actor, cả lần thử lỗi |
+| Learning | K20 | thấp | Scheduler draft chưa có inline approval Telegram. K19 đã đóng 2026-11-12: duyệt/bỏ draft ghi audit JSONL với actor, cả lần thử lỗi. **K16 đã đóng 2026-11-13:** reflection lưu candidate trạng thái chờ, lượt kế tiếp cùng phiên không phàn nàn mới thăng hạng thành draft; phản hồi tiêu cực bỏ vĩnh viễn + audit `learning_candidate_discard` (D28) |
 | Learning E2E | K18 | **đã đóng** (2026-11-12) | `learning_draft_approval_roundtrip_in_real_binary` trong `make e2e`: 5 tool call → notification WS → draft qua REST → catalog chưa thấy trước duyệt → approve → audit JSONL → run 2 nạp được skill |
 | Dependency | K21 | thấp | `proc-macro-error2` future-incompatibility warning qua `aquamarine`/`teloxide` |
 

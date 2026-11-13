@@ -917,3 +917,36 @@ tool thật) + `bean-core` 2 integration test (prompt chứa `+dòng mới`, kh�
 `content=`; cảnh báo `old` xuất hiện 2 lần) + web 3 test `ConfirmCard` (màu dòng
 +/−/header; phần mô tả trước diff không tô; prompt không diff không sinh span).
 `make check` xanh.
+
+## 28. Reflection trì hoãn đến lượt kế tiếp — tín hiệu phàn nàn (D28.x — 2026-11-13, lộ trình chất lượng K16)
+
+Learning loop M15 tạo draft ngay khi run đủ điều kiện; phản hồi sửa sai của người
+dùng ở lượt sau chỉ đến khi draft đã thông báo — không thu hồi được. K16 chọn
+phương án (b): reflection vẫn chạy ngay (giữ nguyên chi phí/scheduling), nhưng
+kết quả chờ lượt kế tiếp **cùng phiên** xác nhận không tiêu cực mới thành draft.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D28.1 | Candidate lưu trong `.state.json` (trường `pending: Vec<NewSkillDraft>`, `#[serde(default)]`) thay vì bảng SQLite mới | State draft đã bền qua restart ở file này (rate limit); không thêm bảng/migration cho dữ liệu ít (≤ 1 candidate/phiên) | File nhỏ đọc/ghi atomic mỗi lần đổi; state cũ không có trường vẫn đọc được |
+| D28.2 | `looks_like_complaint` khớp theo **cụm từ** đã liệt kê (VN+EN), lowercase substring — không LLM, không sentiment API | Tín hiệu rẻ, deterministic, test được; bỏ nhầm chỉ mất một candidate (an toàn lệch về phía không làm phiền) | “chưa thấy sai ở đâu cả” chứa “sai” nhưng không khớp cụm từ nào — đã có test chốt hành vi |
+| D28.3 | Chỉ lượt kế tiếp **cùng phiên** mới thăng hạng (`take_pending_proposals(session_id)`); candidate của phiên khác giữ nguyên | Đề xuất sinh từ quy trình của phiên đó; phiên khác không có ngữ cảnh để “xác nhận không tiêu cực” | Người dùng không quay lại phiên thì candidate nằm chờ vô hạn — chấp nhận, kích thước nhỏ |
+| D28.4 | Phản hồi tiêu cực ⇒ **bỏ vĩnh viễn** + audit `learning_candidate_discard` (pattern K19, args `{session_id, count, outcome}`) | Người dùng vừa chê kết quả của chính quy trình sẽ được đề xuất — đề xuất đó chắc chắn không muốn | Không hỏi lại; muốn có lại phải làm task tương tự đủ điều kiện lần nữa |
+| D28.5 | Cooldown tick tại thời điểm reflection (`last_proposal_at = created_at` của candidate), không tại lúc thăng hạng | Promote có thể đến muộn tuỳ ý; tick muộn sẽ kéo dài chu kỳ đề xuất vô định | Hai reflection gần nhau vẫn bị cooldown chặn đúng như thiết kế cũ |
+| D28.6 | Validate **rẻ** khi lưu candidate (kebab-case, reason 1–500, source, RFC3339); validate **đắt** (skill tồn tại, nội dung không đổi) chỉ chạy lúc thăng hạng qua `create_draft`; lỗi thăng hạng chỉ bỏ candidate + warn | Lỗi lúc lưu không được phép làm hỏng lượt người dùng đang chạy; lỗi lúc thăng hạng không được phép làm hỏng lượt kế tiếp | Candidate xấu có thể nằm tới lượt kế mới bị phát hiện — chấp nhận, chỉ mất một candidate |
+| D28.7 | Take/discard trên state rỗng **không ghi file**; trả `Err` trước khi mutate nếu state lỗi | Hàm chạy ở đầu mọi lượt — ghi vô ích mỗi lượt tạo file trong CWD của mọi tiến trình (bug thật: `make check` làm bẩn `crates/bean/skills/`); lỗi state không được tự “sửa” bằng ghi đè | Không có — hành vi đúng nguyên thủy, bản đầu thiếu nhánh rỗng |
+| D28.8 | Reservation giữ lại khi lưu candidate thành công (giữ nguyên ngữ nghĩa giữ sau `create_draft` cũ); chỉ release khi `Ok(None)`/`Err`/lưu thất bại | Candidate đã chiếm cooldown; nếu release thì reflection có thể chạy lại ngay lượt sau và sinh trùng | Thất bại lưu candidate vẫn release như cũ |
+
+**Kiểm chứng:** `bean-skills` 10 test (roundtrip FIFO theo phiên, sống qua reload,
+validate rẻ + thăng hạng qua `create_draft`, hồi quy không ghi file khi rỗng);
+`bean-core` learning 12/12 (`complaint_discards_candidate_permanently`,
+`candidate_survives_router_rebuild`, `slash_command_does_not_promote_candidate`,
+luồng 2 lượt promote sau phản hồi trung tính…); eval fake + real thêm
+`followup_prompt` (luồng 2 lượt, chấm `final_contains` ở lượt cuối); E2E
+`learning_draft_approval_roundtrip_in_real_binary` mở rộng (run 1 không
+Notification, run 2 Notification trước Final). `make check` xanh, CI 4/4 tại
+`d5cd0a0`.
+
+**Race đã biết (chấp nhận, có comment trong code):** reflection của lượt N chạy
+song song với đầu lượt N+1 — nếu chưa kịp lưu thì candidate chỉ chờ sang lượt
+N+2, không mất. Test/eval chờ `wait_pending`/`wait_for_pending` trước khi gửi
+lượt kế tiếp.
