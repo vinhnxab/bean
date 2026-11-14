@@ -114,6 +114,30 @@ export const en: Record<MessageKey, string> = {
   "notify.pushTitle": "New message from Bean",
   "notify.pushBody": "A scheduled task or a proposed skill has a new message for you.",
   "notify.errorTitle": "Bean hit an error",
+  // --- Notifications section in Settings -------------------------------------
+  "notify.panel.title": "Background notifications and sound",
+  "notify.panel.hint":
+    "Both fire only while the Bean window is not in front of you — on the chat screen the confirmation card and run status are signal enough.",
+  "notify.panel.desktop": "System notifications",
+  "notify.panel.sound": "Called-by-name sound",
+  "notify.panel.on": "On",
+  "notify.panel.off": "Off",
+  "notify.panel.unsupported": "Not supported by this browser",
+  "notify.panel.name": "Name to call",
+  "notify.panel.namePlaceholder": "Vinh Mr",
+  "notify.panel.nameHint":
+    "Bean speaks your name with the chime, e.g. “Hey Vinh Mr, Bean finished replying.”. Leave empty for a chime only.",
+  "notify.panel.nameSaved": "Name saved",
+  "notify.panel.test": "Test sound",
+  // --- Called-by-name sound (speaker button on TopNav) ------------------------
+  "sound.enable": "Enable called-by-name sound",
+  "sound.disable": "Disable called-by-name sound",
+  "sound.defaultName": "there",
+  "sound.phrase.reply": "Hey {name}, Bean finished replying.",
+  "sound.phrase.confirm": "Hey {name}, Bean needs your confirmation.",
+  "sound.phrase.push": "Hey {name}, Bean has a new message for you.",
+  "sound.phrase.error": "Hey {name}, Bean hit an error.",
+  "sound.testPhrase": "Hey {name}, Bean sounds are ready.",
   "sessions.archived": "Archived conversations",
   "sessions.showArchived": "Show archived",
   "sessions.search": "Search conversations",
@@ -381,6 +405,8 @@ export const en: Record<MessageKey, string> = {
   "settings.section.voiceDescription": "Configure voice: toggle the mic button, pick the provider.",
   "settings.section.password": "Change password",
   "settings.section.passwordDescription": "Update your Bean login password.",
+  "settings.section.notifications": "Notifications",
+  "settings.section.notificationsDescription": "Background alerts and called-by-name sound.",
   // --- Change password (/settings/password) --------------------------------
   "password.panelTitle": "Change password",
   "password.panelHint":

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ServerMsg } from "@/api/bindings";
-import { maybeNotifyServerMessage, notifyContentFor } from "@/features/chat/notifyEvents";
+import { maybeAlertServerMessage, notifyContentFor } from "@/features/chat/notifyEvents";
 import type { Translate } from "@/i18n";
 import { vi as vietnamese } from "@/i18n/vi";
+import { enableSound, resetAudioContextForTests } from "@/lib/attention";
 import { NOTIFY_STORAGE_KEY } from "@/lib/notify";
+import { installFakeAttention } from "@/test/attention";
 import { type FakeNotificationInstance, installFakeNotifications, stubPageContext } from "@/test/notify";
 
 /**
@@ -12,7 +14,13 @@ import { type FakeNotificationInstance, installFakeNotifications, stubPageContex
  * đọc, test phải khẳng định đúng CHUỖI hiển thị ("Bean đã trả lời xong"), không
  * phải chỉ "đã tra từ điển".
  */
-const t: Translate = (key) => vietnamese[key];
+const t: Translate = (key, values) => {
+  const template = vietnamese[key];
+  if (!values) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in values ? String(values[name]) : match,
+  );
+};
 
 describe("features/chat/notifyEvents — nội dung thông báo", () => {
   it("final: tiêu đề trả lời xong + preview câu trả lời, tag theo run", () => {
@@ -143,6 +151,7 @@ describe("features/chat/notifyEvents — nội dung thông báo", () => {
 
 describe("features/chat/notifyEvents — bắn và chống trùng", () => {
   let fake: ReturnType<typeof installFakeNotifications>;
+  let attention: ReturnType<typeof installFakeAttention>;
 
   const finalMsg = (runId: string): Extract<ServerMsg, { type: "final" }> => ({
     type: "final",
@@ -154,11 +163,14 @@ describe("features/chat/notifyEvents — bắn và chống trùng", () => {
 
   beforeEach(() => {
     fake = installFakeNotifications();
+    attention = installFakeAttention();
     fake.setPermission("granted");
     window.localStorage.setItem(NOTIFY_STORAGE_KEY, "1");
   });
   afterEach(() => {
     fake.restore();
+    attention.restore();
+    resetAudioContextForTests();
     window.localStorage.clear();
   });
 
@@ -175,9 +187,9 @@ describe("features/chat/notifyEvents — bắn và chống trùng", () => {
     withHiddenTab(() => {
       const seen: string[] = [];
 
-      expect(maybeNotifyServerMessage(finalMsg("run-1"), t, seen)).toBe(true);
+      expect(maybeAlertServerMessage(finalMsg("run-1"), t, "vi", seen)).toBe(true);
       // Socket phát lại cùng sự kiện (lag/replay): khoá đã ghi — không bắn lần 2.
-      expect(maybeNotifyServerMessage(finalMsg("run-1"), t, seen)).toBe(false);
+      expect(maybeAlertServerMessage(finalMsg("run-1"), t, "vi", seen)).toBe(false);
       expect(fake.instances).toHaveLength(1);
     });
   });
@@ -188,8 +200,9 @@ describe("features/chat/notifyEvents — bắn và chống trùng", () => {
     try {
       const seen: string[] = [];
 
-      expect(maybeNotifyServerMessage(finalMsg("run-1"), t, seen)).toBe(false);
+      expect(maybeAlertServerMessage(finalMsg("run-1"), t, "vi", seen)).toBe(false);
       expect(fake.instances).toHaveLength(0);
+      expect(attention.spoken).toHaveLength(0);
       expect(seen).toContain("final:run-1");
     } finally {
       restoreContext();
@@ -207,7 +220,7 @@ describe("features/chat/notifyEvents — bắn và chống trùng", () => {
       reset: false,
     };
 
-    expect(maybeNotifyServerMessage(delta, t, seen)).toBe(false);
+    expect(maybeAlertServerMessage(delta, t, "vi", seen)).toBe(false);
     expect(seen).toHaveLength(0);
   });
 
@@ -215,23 +228,91 @@ describe("features/chat/notifyEvents — bắn và chống trùng", () => {
     withHiddenTab(() => {
       const seen: string[] = [];
       for (let index = 0; index < 205; index += 1) {
-        maybeNotifyServerMessage(finalMsg(`run-${index}`), t, seen);
+        maybeAlertServerMessage(finalMsg(`run-${index}`), t, "vi", seen);
       }
       expect(seen).toHaveLength(200);
 
       // Khoá cổ nhất ("final:run-0") đã bị đẩy ra — bắn lại là hợp lệ.
-      expect(maybeNotifyServerMessage(finalMsg("run-0"), t, seen)).toBe(true);
+      expect(maybeAlertServerMessage(finalMsg("run-0"), t, "vi", seen)).toBe(true);
     });
   });
 
   it("bắn thật thì instance mang đúng tiêu đề tiếng Việt từ từ điển", () => {
     withHiddenTab(() => {
       const seen: string[] = [];
-      maybeNotifyServerMessage(finalMsg("run-1"), t, seen);
+      maybeAlertServerMessage(finalMsg("run-1"), t, "vi", seen);
 
       const instance = fake.instances[0] as FakeNotificationInstance;
       expect(instance.title).toBe("Bean đã trả lời xong");
       expect(instance.body).toBe("xong");
+    });
+  });
+
+  it("âm thanh: đã bật + tab ẩn thì chime + đọc câu gọi tên; chưa bật thì im", () => {
+    withHiddenTab(() => {
+      const seen: string[] = [];
+      // Âm thanh chưa bật: chỉ thông báo nền.
+      expect(maybeAlertServerMessage(finalMsg("run-1"), t, "vi", seen)).toBe(true);
+      expect(attention.spoken).toHaveLength(0);
+
+      enableSound();
+      // Khoá "final:run-1" đã ghi ở trên — sự kiện cũ không kêu lại; run mới thì có.
+      expect(maybeAlertServerMessage(finalMsg("run-2"), t, "vi", seen)).toBe(true);
+      expect(attention.spoken).toHaveLength(1);
+      expect(attention.spoken[0]?.text).toBe("Bạn ơi, Bean trả lời xong rồi.");
+      expect(attention.tones).toHaveLength(2);
+    });
+  });
+
+  it("âm thanh theo loại sự kiện: confirm/notification/error có câu riêng", () => {
+    withHiddenTab(() => {
+      enableSound();
+      const seen: string[] = [];
+
+      const confirmMsg: Extract<ServerMsg, { type: "confirm_request" }> = {
+        type: "confirm_request",
+        session_id: 3,
+        run_id: "run-2",
+        confirm_id: "c-1",
+        prompt: "Viết file ghi-chu.md",
+        risk: "confirm",
+        allow_session_option: true,
+        timeout_seconds: 300,
+        role: null,
+      };
+      const pushMsg: Extract<ServerMsg, { type: "notification" }> = {
+        type: "notification",
+        session_id: 12,
+        message_id: 77,
+      };
+      const errorMsg: Extract<ServerMsg, { type: "error" }> = {
+        type: "error",
+        session_id: 1,
+        run_id: "run-3",
+        code: "budget",
+        message: "Ngân sách token/ngày đã hết.",
+      };
+
+      maybeAlertServerMessage(confirmMsg, t, "vi", seen);
+      maybeAlertServerMessage(pushMsg, t, "vi", seen);
+      maybeAlertServerMessage(errorMsg, t, "vi", seen);
+
+      expect(attention.spoken.map((item) => item.text)).toEqual([
+        "Bạn ơi, Bean cần bạn duyệt một hành động.",
+        "Bạn ơi, Bean vừa nhắn bạn.",
+        "Bạn ơi, Bean gặp lỗi rồi.",
+      ]);
+    });
+  });
+
+  it("một sự kiện bắn cả hai kênh khi cả hai đều bật", () => {
+    withHiddenTab(() => {
+      enableSound();
+      const seen: string[] = [];
+
+      expect(maybeAlertServerMessage(finalMsg("run-1"), t, "vi", seen)).toBe(true);
+      expect(fake.instances).toHaveLength(1);
+      expect(attention.spoken).toHaveLength(1);
     });
   });
 });

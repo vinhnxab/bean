@@ -118,6 +118,30 @@ export const vi = {
   "notify.pushTitle": "Bean gửi tin nhắn mới",
   "notify.pushBody": "Có tin nhắn mới từ tác vụ định kỳ hoặc kỹ năng đề xuất.",
   "notify.errorTitle": "Bean gặp lỗi khi xử lý",
+  // --- Mục "Thông báo" trong Cài đặt ----------------------------------------
+  "notify.panel.title": "Thông báo nền và âm thanh",
+  "notify.panel.hint":
+    "Cả hai chỉ phát khi cửa sổ Bean không hiển thị trước mắt bạn — đang nhìn màn hình chat thì thẻ xác nhận và trạng thái run đã đủ tín hiệu.",
+  "notify.panel.desktop": "Thông báo hệ thống",
+  "notify.panel.sound": "Âm thanh gọi tên",
+  "notify.panel.on": "Đang bật",
+  "notify.panel.off": "Đang tắt",
+  "notify.panel.unsupported": "Trình duyệt không hỗ trợ",
+  "notify.panel.name": "Tên được gọi",
+  "notify.panel.namePlaceholder": "Vinh Mr",
+  "notify.panel.nameHint":
+    "Bean đọc tên khi phát âm thanh, ví dụ “Vinh Mr ơi, Bean trả lời xong rồi.”. Để trống thì chỉ phát chime.",
+  "notify.panel.nameSaved": "Đã lưu tên gọi",
+  "notify.panel.test": "Thử âm thanh",
+  // --- Âm thanh gọi tên (nút loa trên TopNav) --------------------------------
+  "sound.enable": "Bật âm thanh gọi tên",
+  "sound.disable": "Tắt âm thanh gọi tên",
+  "sound.defaultName": "Bạn",
+  "sound.phrase.reply": "{name} ơi, Bean trả lời xong rồi.",
+  "sound.phrase.confirm": "{name} ơi, Bean cần bạn duyệt một hành động.",
+  "sound.phrase.push": "{name} ơi, Bean vừa nhắn bạn.",
+  "sound.phrase.error": "{name} ơi, Bean gặp lỗi rồi.",
+  "sound.testPhrase": "{name} ơi, âm thanh của Bean đã sẵn sàng.",
   "sessions.archived": "Hội thoại đã lưu trữ",
   "sessions.showArchived": "Xem đã lưu",
   "sessions.search": "Tìm hội thoại",
@@ -386,6 +410,8 @@ export const vi = {
   "settings.section.voiceDescription": "Cấu hình giọng nói: bật/tắt nút mic, chọn nhà cung cấp.",
   "settings.section.password": "Đổi mật khẩu",
   "settings.section.passwordDescription": "Cập nhật mật khẩu đăng nhập vào Bean.",
+  "settings.section.notifications": "Thông báo",
+  "settings.section.notificationsDescription": "Chuông nền và âm thanh gọi tên khi rời tab.",
   // --- Đổi mật khẩu (/settings/password) -----------------------------------
   "password.panelTitle": "Đổi mật khẩu",
   "password.panelHint":

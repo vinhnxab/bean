@@ -1,6 +1,7 @@
 //! Sidebar phải cho màn **Cài đặt**: điều hướng giữa các section.
 
 import {
+  BellRingIcon,
   Building2Icon,
   CpuIcon,
   KeyRoundIcon,
@@ -43,6 +44,12 @@ const SETTINGS_SECTIONS: {
     labelKey: "settings.section.password",
     descKey: "settings.section.passwordDescription",
     icon: KeyRoundIcon,
+  },
+  {
+    to: "/settings/notifications",
+    labelKey: "settings.section.notifications",
+    descKey: "settings.section.notificationsDescription",
+    icon: BellRingIcon,
   },
   {
     to: "/settings/channels",

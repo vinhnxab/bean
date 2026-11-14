@@ -1,6 +1,8 @@
 import type { ServerMsg } from "@/api/bindings";
-import type { Translate } from "@/i18n";
-import { canNotifyNow, type DesktopNotification, showDesktopNotification } from "@/lib/notify";
+import type { Lang, Translate } from "@/i18n";
+import type { AttentionKind } from "@/lib/attention";
+import { getAttentionName, playAttention } from "@/lib/attention";
+import { type DesktopNotification, showDesktopNotification } from "@/lib/notify";
 import { eventKey } from "@/store/chat";
 
 /**
@@ -17,6 +19,14 @@ import { eventKey } from "@/store/chat";
  *
  * Sự kiện quá trình (`text_delta`, `tool_start`…) KHÔNG thông báo — đó là nhiễu
  * cho đúng lý do UI chat đã hiển thị chúng.
+ *
+ * # Hai kênh cho cùng một sự kiện
+ *
+ * Thông báo hệ thống (thẻ của hệ điều hành) và âm thanh gọi tên (`lib/attention`)
+ * phục vụ hai kiểu tình huống: người nhìn máy khác (đọc được nội dung) và người
+ * đeo tai nghe/rời xa màn hình (chỉ nghe được chime + lời gọi tên). Một sự kiện
+ * có thể bắn cả hai; điều kiện và cách tắt của từng kênh độc lập (nút chuông/
+ * nút loa trên TopNav).
  *
  * # Vì sao cần bộ nhớ khoá riêng dù store đã dedupe
  *
@@ -75,31 +85,51 @@ export function notifyContentFor(
   }
 }
 
+/** Ánh xạ sự kiện WS → loại câu âm thanh. `null` với sự kiện không đáng phát tiếng. */
+function attentionKindFor(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): AttentionKind | null {
+  switch (message.type) {
+    case "final":
+      return "reply";
+    case "confirm_request":
+      return "confirm";
+    case "notification":
+      return "push";
+    case "error":
+      return "error";
+    default:
+      return null;
+  }
+}
+
 /**
- * Cân nhắc bắn thông báo cho một sự kiện; trả `true` nếu **đã bắn thật**.
- * `seenKeys` là mảng khoá đã bắn (do caller giữ — ref trong component), cắt bớt
- * khi vượt trần để phiên chạy lâu không phình vô hạn.
+ * Cân nhắc cảnh báo cho một sự kiện qua cả hai kênh; trả `true` nếu **có kênh
+ * nào đã phát thật**.
+ *
+ * `seenKeys` là mảng khoá đã bắn (do caller giữ — ref trong component), dùng
+ * CHUNG cho cả hai kênh để một sự kiện không kêu hai lần khi socket phát lại,
+ * cắt bớt khi vượt trần để phiên chạy lâu không phình vô hạn. Điều kiện của
+ * từng kênh (`canNotifyNow`/`canPlayAttentionNow`) được kiểm bên trong — hàm
+ * này chỉ lo dedupe và ánh xạ nội dung.
  */
-export function maybeNotifyServerMessage(
+export function maybeAlertServerMessage(
   message: Exclude<ServerMsg, { type: "sync" | "pong" }>,
   t: Translate,
+  lang: Lang,
   seenKeys: string[],
 ): boolean {
   const key = eventKey(message);
-  if (
-    key === null ||
-    (message.type !== "final" &&
-      message.type !== "confirm_request" &&
-      message.type !== "notification" &&
-      message.type !== "error")
-  ) {
-    return false;
-  }
+  if (key === null) return false;
+  const kind = attentionKindFor(message);
+  if (kind === null) return false;
   if (seenKeys.includes(key)) return false;
   seenKeys.push(key);
   if (seenKeys.length > 200) seenKeys.splice(0, seenKeys.length - 200);
-  if (!canNotifyNow()) return false;
+
+  let alerted = false;
   const content = notifyContentFor(message, t);
-  if (!content) return false;
-  return showDesktopNotification(content);
+  if (content !== null) {
+    alerted = showDesktopNotification(content);
+  }
+  if (playAttention(kind, getAttentionName(), t, lang)) alerted = true;
+  return alerted;
 }

@@ -4,6 +4,7 @@ import { PageShell } from "@/components/ui/Page";
 import { AdvancedPanel } from "@/features/settings/AdvancedPanel";
 import { ChannelsPanel } from "@/features/settings/ChannelsPanel";
 import { IntegrationsPanel } from "@/features/settings/IntegrationsPanel";
+import { NotificationsPanel } from "@/features/settings/NotificationsPanel";
 import { PasswordPanel } from "@/features/settings/PasswordPanel";
 import { ProvidersPanel } from "@/features/settings/ProvidersPanel";
 import { useSettings } from "@/features/settings/queries";
@@ -30,6 +31,7 @@ const VALID_SECTIONS = [
   "providers",
   "voice",
   "password",
+  "notifications",
   "channels",
   "search",
   "integrations",
@@ -54,6 +56,8 @@ export function SettingsPage() {
         <VoicePanel />
       ) : section === "password" ? (
         <PasswordPanel />
+      ) : section === "notifications" ? (
+        <NotificationsPanel />
       ) : section === "channels" ? (
         <ChannelsPanel />
       ) : section === "search" ? (

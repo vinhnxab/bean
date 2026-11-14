@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 
 import { BeanAvatar } from "@/components/brand/BeanAvatar";
 import { NotifyToggle } from "@/components/NotifyToggle";
+import { SoundToggle } from "@/components/SoundToggle";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DropdownMenu,
@@ -141,8 +142,10 @@ export function TopNav({
         {/* Icon trơn: top nav là hàng công cụ toàn icon, nhãn chữ sẽ phá nhịp —
             `aria-label` của `ThemeToggle` vẫn nói đủ "Chuyển sang giao diện sáng". */}
         <ThemeToggle className="size-8" />
-        {/* Cùng nhóm lựa chọn toàn cục của thiết bị: thông báo nền khi tab ẩn. */}
+        {/* Cùng nhóm lựa chọn toàn cục của thiết bị: thông báo nền + âm thanh
+            gọi tên khi tab ẩn. Tên gọi cấu hình ở Cài đặt → Thông báo. */}
         <NotifyToggle className="size-8" />
+        <SoundToggle className="size-8" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
