@@ -135,7 +135,7 @@
 | CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4). Flake flaky lặp lại lần 2 trên `d4d72f7` (2026-11-10, local xanh): `ci.yml` giờ in dòng test fail ra **annotations** để lần kế chẩn đoán được mà không cần đăng nhập đọc log |
 | Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
 | K15 Telegram thật | ✅ Smoke tay trên bot thật | Chat end-to-end, confirm inline keyboard (audit `decided_by: telegram:8845250886`), Dangerous không nút phiên, `/stop`, reconnect 2 lần, đồng thời web — chi tiết `docs/known-issues.md` K15 |
-| Failover + model phụ + prompt cache | ✅ Đã kiểm chứng với model thật | Task eval `real_failover_dead_primary` (opt-in, key từ env): primary chết chắc (cổng 9) — 3 lần retry ~9s → log "chuyển sang provider dự phòng" → fallback NVIDIA GLM-5.3-flash trả lời bằng model riêng của profile nó → run kết thúc `final` (1599/52 token). Bug thật bắt được trong lần chạy đầu: fallback nhận model override của primary (`dead-model`) → 404; đã sửa — override chỉ áp cho primary, fallback luôn chạy model riêng (test `fallback_ignores_model_override`). Máy đang chạy đã bật `fallback_profiles = ["open-router"]`, restart `beanctl` sạch, banner CLI `provider: failover` |
+| Failover + model phụ + prompt cache | ✅ Đã kiểm chứng với model thật | Task eval `real_failover_dead_primary` (opt-in, key từ env): primary chết chắc (cổng 9) — 3 lần retry ~9s → log "chuyển sang provider dự phòng" → fallback NVIDIA GLM-5.3-flash trả lời bằng model riêng của profile nó → run kết thúc `final` (1599/52 token). Bug thật bắt được trong lần chạy đầu: fallback nhận model override của primary (`dead-model`) → 404; đã sửa — override chỉ áp cho primary, fallback luôn chạy model riêng (test `fallback_ignores_model_override`). Máy đang chạy đã bật `fallback_profiles = ["open-router"]`, restart `beanctl` sạch, banner CLI `provider: failover`. **Kiểm chứng thêm 2026-11-14 trên Telegram thật (instance serve đang chạy):** set `NVIDIA_KEY` sai qua `secrets.env` → restart → nhắn "test failover" từ Telegram → NVIDIA trả `HTTP 403 Authorization failed` (4xx không retry) → log `"provider lỗi tạm thời (streaming + model override) — chuyển sang provider dự phòng"` → open-router trả lời bình thường qua Telegram, người dùng không thấy lỗi; khôi phục key gốc + restart xong. Kết quả tương tự kịch bản eval nhưng trên dây thật qua kênh Telegram |
 | 7 unit test `FailoverProvider` + wire cache Anthropic | ✅ Pass | 503/401 failover, Decode không failover, hết đường trả lỗi cuối, stream trước delta đầu, fallback bỏ qua model override; `system` có `cache_control: ephemeral` khi bật, string khi tắt; reflection dùng `small_model` (test ghi lại model) |
 | Tool song song (mục 5a lộ trình) | ✅ Pass | 171 test bean-core: đo `max_active` chứng minh 2 Safe chạy đồng thời; kill-switch chạy tuần lại; batch trộn Safe+Confirm chỉ hỏi 1 xác nhận; 4 test phân nhóm (`partition_tool_calls`); 3 test chuẩn hoá thứ tự; test cancel giữ cặp theo ngữ nghĩa mới. Bug thật bắt được: huỷ bị đếm như lỗi tool → gợi ý "thất bại 2 lần" gắn sai vào result huỷ (D24.5, đã sửa) |
 | Kế hoạch có cấu trúc (mục 5b lộ trình) | ✅ Pass | `bean-tools` 40 test (5 plan: schema+ràng buộc → None, trần 200 ký tự theo char, tóm tắt đúng); `agent_loop` 21 test (2 mới: plan hợp lệ phát `on_plan` + giữ cặp tool_use/tool_result; args sai không phát). Bug thật bắt được: `parse_plan_steps` bản đầu chỉ kiểm schema, `steps: []` lọt qua được phát ra UI — gộp `validate_steps` dùng chung cho loop và tool (D25.2). Web 233 test (chat store plan: ghi đè/final xoá, dedupe, `applySync` khôi phục; PlanCard) |
@@ -157,13 +157,14 @@ Dependency chain: `teloxide 0.17.0` → `aquamarine 0.6.0` → `proc-macro-error
 
 ## 5. Trạng thái local trên máy hiện tại
 
-- **Soak 24h đang chạy (lộ trình chất lượng — đề xuất #1):** bắt đầu **2026-11-13 11:07 ICT**
-  sau `make build` + `scripts/beanctl restart` với binary tại commit `27e9994`
-  (mang K17 follow-up: reflection retry parse lỗi đúng một lần + log lý do dừng `stop_reason`;
-  K16/D28 đã có từ trước). Instance pid ghi lúc start: `174054`,
-  provider NVIDIA GLM-5.3-flash qua `openai_compat`, web `0.0.0.0:7878`, Telegram bật.
-  Rà `/tmp/bean-run/serve.log` (lỗi, restart, memory, WS reconnect) khi hết 24 giờ
-  (**2026-11-14 ~11:07 ICT**) rồi cập nhật mục 6.2.5.
+- **Soak 24h ĐÃ GIÁN ĐOẠN có chủ ý (2026-11-14 ~12:08 ICT)** sau **15 giờ 38 phút** để test
+  failover trên Telegram thật (bảng mục 4) — instance pid `174054`, commit `dce00dd`,
+  bắt đầu 2026-11-13 11:07 ICT. Log giai đoạn này còn lưu tại
+  `/tmp/bean-soak-log-15h38p.txt` (59 dòng): không crash, không restart bất ngờ, chỉ
+  WARN đã biết (TAVILY key, provider 503/timeout tạm thời — retry 3 lần rồi tiếp tục,
+  Telegram polling lỗi mạng thoáng qua). K16/K17 hoạt động đúng qua nhiều phiên
+  (session 28: candidate → thăng hạng, cooldown bỏ qua đúng hạn).
+  Cần chạy lại 24h đầy đủ trước khi tuyên bố production-ready (mục 6.2.5).
 
 - Soak trước (pid `119218`, commit `f5cbb25`, mang K16) đã reset có chủ ý và dừng êm qua SIGTERM;
   soak trước nữa (pid `37541`, bắt đầu 2026-11-12 17:42 ICT) dừng êm sau ~10,5 giờ.
@@ -233,10 +234,10 @@ cp bean.example.toml bean.toml
    - Chưa kiểm thử một MCP server bên ngoài, chưa ghi tài liệu checklist trust/reconnect cụ thể theo từng server.
 
 5. **Soak test 24 giờ (M16).**
-   - Đã bắt đầu: pid `174054`, commit `27e9994`, khởi động **2026-11-13 11:07 ICT**, hết hạn
-     **2026-11-14 ~11:07 ICT**. Rà `/tmp/bean-run/serve.log` khi hết hạn để báo cáo lỗi,
-     restart, memory, WS reconnect (mục 5).
-   - Chưa có báo cáo chạy đầy đủ 24 giờ — chờ đến hết hạn mới đủ cơ sở tuyên bố
+   - Lần gần nhất dừng có chủ ý sau **15 giờ 38 phút** (2026-11-14 ~12:08 ICT) để test
+     failover Telegram thật — log còn tại `/tmp/bean-soak-log-15h38p.txt`, sạch
+     (chi tiết mục 5).
+   - Chưa có báo cáo chạy đầy đủ 24 giờ — cần chạy lại trước khi tuyên bố
      production-ready hoặc đánh giá rò rỉ memory/connection/task leak.
 
 ### 6.3. Backlog kỹ thuật từ `docs/known-issues.md`
