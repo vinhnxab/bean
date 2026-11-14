@@ -51,8 +51,8 @@
 | **M10 — UI chat** | 🟡 Test xanh | `7ad3c42` | Login, chat, tool card, confirm card, Stop, realtime state | Chưa có Playwright/browser test thật |
 | **M11 — UI quản lý** | 🟡 Test xanh | `d0ab3db` | Sessions, memory, skills, tasks, audit, status; responsive; i18n `vi`/`en` | Chưa kiểm chứng responsive bằng trình duyệt thật |
 | **M12 — Telegram** | 🟡 Adapter + mock test | `810577f` | teloxide long polling, allowlist, rate limit, tách tin UTF-16, inline confirm, reconnect, shutdown | **Chưa chạy bot Telegram thật** (K15) |
-| **M13 — Scheduler** | 🟡 Logic + smoke ảo | `cbcd744` | Cron/timezone, task CRUD, scheduler tick, notification, outbox | Chưa chứng minh “7h mỗi sáng” qua Telegram/UI thật |
-| **M14 — MCP** | ✅ Local stdio server | `7ef375a` | rmcp stdio client, discovery, trust/confirm, reconnect, reaping, MCP test server thật trong tiến trình | Chưa thử MCP server bên thứ ba trong môi trường triển khai |
+| **M13 — Scheduler** | ✅ Hoàn thành | `cbcd744` | Cron/timezone, task CRUD, scheduler tick, notification, outbox. **Kiểm chứng thật 2026-11-14:** task cron tạo qua Telegram kích hoạt đúng 16:20 ICT, gửi tin qua `Router::notify`, agent tự huỷ task theo prompt (bảng mục 4, mục 6.2.3) | Hiển thị `Notification` trên web UI chưa test riêng (task test gắn kênh telegram) |
+| **M14 — MCP** | ✅ Đã kiểm chứng bên thứ ba | `7ef375a` | rmcp stdio client, discovery, trust/confirm, reconnect, reaping, MCP test server thật trong tiến trình. **Kiểm chứng thật 2026-11-14:** `@modelcontextprotocol/server-everything` (npm) kết nối + đăng ký 13 tool, `trust=false` (mục 6.2.4) | Một lần gọi tool thật qua chat (thẻ Confirm → untrusted) chưa test; checklist trust/reconnect theo từng server bổ sung khi dùng thêm |
 | **M15 — Learning loop** | 🟡 Gần hoàn tất | `a9052ba` | Reflection, draft, rate limit, duyệt/bỏ qua UI, REST và Telegram; reflection trì hoãn đến lượt kế tiếp (K16, D28) | K20 (scheduler draft chưa có inline Telegram); luồng 2 lượt K16 chưa chạy lại với provider thật |
 | **M16 — Hardening/deploy** | 🟡 Gần hoàn tất | `8e83849` | Token budget, structured logs, graceful shutdown, reconnect, embedded UI, headless build, systemd, Dockerfiles, README, audit, binary E2E | **Chưa soak 24 giờ**; chưa cài systemd production; chưa đẩy image production; chưa chạy Playwright |
 | **M17(A) — Streaming** | ✅ Hoàn thành | `882363d` | SSE Anthropic/OpenAI-compat, gom delta/tool call/usage, `TextDelta` qua WS, UI hiện dần, reconnect giữ text và refetch REST | Chưa kiểm thử thủ công với provider thật do chưa có API key |
@@ -132,7 +132,7 @@
 | `make build` | ✅ Pass | Web build + Rust release có UI nhúng |
 | `make build-headless` | ✅ Pass | Release không UI, không cần Node |
 | Playwright | ⬜ Chưa có | Là tuỳ chọn trong M16 |
-| CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4). Flake flaky lặp lại lần 2 trên `d4d72f7` (2026-11-10, local xanh): `ci.yml` giờ in dòng test fail ra **annotations** để lần kế chẩn đoán được mà không cần đăng nhập đọc log |
+| CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4). Flake flaky lặp lại lần 2 trên `d4d72f7` (2026-11-10, local xanh): `ci.yml` giờ in dòng test fail ra **annotations** để lần kế chẩn đoán được mà không cần đăng nhập đọc log. Sự cố thứ ba (2026-11-14): 3 advisory RUSTSEC mới từ quinn (RUSTSEC-2026-0523/0524/0538) → khoá `quinn-proto 0.11.19` + `quinn-udp 0.5.16` (commit `fix(deps)` `59e1943`), CI xanh lại 4/4 |
 | Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
 | K15 Telegram thật | ✅ Smoke tay trên bot thật | Chat end-to-end, confirm inline keyboard (audit `decided_by: telegram:8845250886`), Dangerous không nút phiên, `/stop`, reconnect 2 lần, đồng thời web — chi tiết `docs/known-issues.md` K15 |
 | Failover + model phụ + prompt cache | ✅ Đã kiểm chứng với model thật | Task eval `real_failover_dead_primary` (opt-in, key từ env): primary chết chắc (cổng 9) — 3 lần retry ~9s → log "chuyển sang provider dự phòng" → fallback NVIDIA GLM-5.3-flash trả lời bằng model riêng của profile nó → run kết thúc `final` (1599/52 token). Bug thật bắt được trong lần chạy đầu: fallback nhận model override của primary (`dead-model`) → 404; đã sửa — override chỉ áp cho primary, fallback luôn chạy model riêng (test `fallback_ignores_model_override`). Máy đang chạy đã bật `fallback_profiles = ["open-router"]`, restart `beanctl` sạch, banner CLI `provider: failover`. **Kiểm chứng thêm 2026-11-14 trên Telegram thật (instance serve đang chạy):** set `NVIDIA_KEY` sai qua `secrets.env` → restart → nhắn "test failover" từ Telegram → NVIDIA trả `HTTP 403 Authorization failed` (4xx không retry) → log `"provider lỗi tạm thời (streaming + model override) — chuyển sang provider dự phòng"` → open-router trả lời bình thường qua Telegram, người dùng không thấy lỗi; khôi phục key gốc + restart xong. Kết quả tương tự kịch bản eval nhưng trên dây thật qua kênh Telegram |
@@ -144,6 +144,8 @@
 | Diff duyệt hành động (D27) | ✅ Pass | `bean-tools` 9 test `diff.rs` (context thật + số dòng chuẩn, trần 50 dòng + note, fallback file quá lớn không treo, tiếng Việt + emoji, chỉ khác newline) + 9 test `confirm_details` (fake `WorkspaceFs`: tạo mới/ghi đè/nhị phân/lỗi I/O/thiếu args/old không duy nhất/wire qua tool thật) + `bean-core` 2 integration test (prompt chứa `+dòng mới`, không còn `content=`; cảnh báo old xuất hiện 2 lần) + web 3 test `ConfirmCard` (màu +/−/header, mô tả trước diff không tô, không diff không sinh span). Bug thật bắt được: bản đầu LCS chạy trên đoạn giữa sau trim ⇒ hunk mất context hai phía — giữ prefix/suffix dạng `Equal` trong dãy op |
 | Reflection trì hoãn K16 (D28) | ✅ Pass | `bean-skills` 10 test (candidate FIFO theo phiên, sống qua reload, validate rẻ + thăng hạng, hồi quy không ghi file khi state rỗng — bug thật: `make check` ghi bẩn `crates/bean/skills/`); `bean-core` learning 12/12 (complaint bỏ vĩnh viễn + audit, sống qua rebuild Router, slash command không promote, luồng 2 lượt promote sau phản hồi trung tính); eval fake/real thêm `followup_prompt`; E2E mở rộng (run 1 không Notification, run 2 Notification trước Final) |
 | Reflection retry + stop reason (K17 follow-up) | ✅ Pass | `bean-core` learning 15/15 — 3 test mới với provider đếm lượt: retry parse lỗi thành công (4 lần gọi: 2 vòng chính + 2 reflection, candidate → draft sau lượt trung tính); retry cạn đúng một lần (không có lần gọi thứ 5, không candidate/notification); `BudgetExceeded` chặn retry (3 lần gọi — usage 3M vượt ngân sách 2M ngay trong `drive_reflection`, không phải `InvalidResponse` nên không retry). Unit test `parse_error_includes_stop_reason_for_diagnosis` (JSON cắt + MaxTokens → lỗi kèm `max_tokens` + nguyên văn; text thường + EndTurn → `end_turn`). Root cause truncation thật đã chẩn đoán: GLM reasoning tràn `max_tokens=4096` (proxy log: gọi thẳng provider `finish=stop`, qua Bean `finish_reason=length`). CI 4/4 tại `174245a` |
+| Scheduler thật (M13) | ✅ Đã kiểm chứng trên instance đang chạy (2026-11-14) | Task #2 tạo qua Telegram (cron `20 16 14 11 *`, prompt tự dặn agent gọi `list_tasks` + `cancel_task` sau khi gửi; `allowed_tools=["list_tasks","cancel_task"]` nên run scheduler không bị chặn xác nhận). Scheduler kích hoạt đúng 16:20 ICT, agent chạy prompt và gửi "Chào từ scheduler — M13 kiểm chứng thành công" qua Telegram (`Router::notify`), sau đó tự huỷ task đúng hướng dẫn. Bằng chứng: messages seq 53–60 trong session telegram (seq 53: "Đã tạo task #2; lần chạy kế tiếp: 2026-11-14T09:20:00.000000Z"; seq 55: prompt của run scheduler; seq 59: "Đã huỷ task #2"). Task gắn kênh telegram nên thông báo đi Telegram — hiển thị Notification trên web UI chưa test riêng |
+| MCP server bên thứ ba (M14) | ✅ Đã kết nối + đăng ký tool trên instance đang chạy (2026-11-14) | Server `@modelcontextprotocol/server-everything` (npm v2.3.0) khai báo trong `bean.toml` thay server `example` hỏng, `trust=false`; log khởi động: `Service initialized as client` (protocol 2025-11-25, "Everything Reference Server") + `đã đăng ký MCP tools, server: everything, tool_count: 13` — tool tên `mcp__everything__*`, mỗi lần gọi là thẻ Confirm. Pitfall vận hành: `npx`/`node` ở `~/.local/bin` không có trong PATH của tiến trình Bean — `command` phải là đường dẫn tuyệt đối và set `env.PATH` tường minh (npx là script shebang cần `node` cho tiến trình con). Chưa test một lần gọi tool thật end-to-end qua chat |
 
 ### Ghi chú về warning dependency
 
@@ -225,13 +227,15 @@ cp bean.example.toml bean.toml
    - Chat thường end-to-end (session 19: "chào bean" → trả lời 4s); tool `Confirm`/`Dangerous` duyệt qua inline keyboard, audit ghi đúng actor `telegram:8845250886`; `/stop` huỷ run giữa chừng sạch; reconnect qua 2 lần restart; web + Telegram một instance.
    - Còn lại thuộc soak 24h (mục 5) — không phải K15. Callback người lạ chỉ unit test (cần tài khoản thứ hai để smoke tay).
 
-3. **Scheduler thật (M13).**
-   - Có test fake clock và smoke một giờ ảo.
-   - Chưa chứng minh tác vụ “7h mỗi sáng” thật sự gửi qua Telegram và xuất hiện trong UI trên máy đang chạy.
+3. **Scheduler thật (M13).** — **ĐÃ ĐÓNG (2026-11-14): task cron thật kích hoạt đúng giờ và gửi tin qua Telegram.**
+   - Task #2 tạo qua Telegram (cron `20 16 14 11 *`): scheduler kích hoạt đúng 16:20 ICT, agent chạy prompt đã lưu và gửi "Chào từ scheduler — M13 kiểm chứng thành công" qua Telegram (`Router::notify`), sau đó tự huỷ task theo hướng dẫn trong prompt (`allowed_tools=["list_tasks","cancel_task"]` nên run scheduler không bị chặn xác nhận).
+   - Bằng chứng: messages seq 53–60 trong session telegram (seq 53: "Đã tạo task #2; lần chạy kế tiếp: 2026-11-14T09:20:00.000000Z"; seq 55: prompt của run scheduler; seq 59: "Đã huỷ task #2").
+   - Còn lại: hiển thị `Notification` trên web UI chưa test riêng — task test gắn kênh telegram nên thông báo đi Telegram.
 
-4. **MCP bên thứ ba (M14).**
-   - Đã kết nối MCP stdio server thật trong test process.
-   - Chưa kiểm thử một MCP server bên ngoài, chưa ghi tài liệu checklist trust/reconnect cụ thể theo từng server.
+4. **MCP bên thứ ba (M14).** — **ĐÃ ĐÓNG (2026-11-14): MCP stdio server bên ngoài kết nối + đăng ký tool thành công trên instance đang chạy.**
+   - Server `@modelcontextprotocol/server-everything` (npm v2.3.0) khai báo trong `bean.toml` với `trust=false`; log khởi động xác nhận `Service initialized as client` (protocol 2025-11-25) + `đã đăng ký MCP tools, server: everything, tool_count: 13` — tool tên `mcp__everything__*`, mỗi lần gọi là thẻ Confirm.
+   - Pitfall vận hành: `npx`/`node` cài ở `~/.local/bin` không có trong PATH của tiến trình Bean — `command` phải là đường dẫn tuyệt đối và set `env.PATH` tường minh trong config MCP (npx là script shebang cần `node` cho tiến trình con).
+   - Còn lại: một lần gọi tool thật end-to-end qua chat (thẻ Confirm → duyệt → kết quả bọc untrusted) — hiện mới chứng minh kết nối + đăng ký tool; checklist trust/reconnect theo từng server bổ sung khi dùng thêm server thật khác.
 
 5. **Soak test 24 giờ (M16).**
    - Lần gần nhất dừng có chủ ý sau **15 giờ 38 phút** (2026-11-14 ~12:08 ICT) để test
@@ -274,13 +278,10 @@ cp bean.example.toml bean.toml
 
 ### Chưa đạt tiêu chí “vận hành thật”
 
-- Provider thật với hội thoại dài.
-- Telegram bot thật.
-- Scheduler thật với Telegram/UI.
-- MCP server bên thứ ba.
 - Soak test 24 giờ.
-- CI và deploy production.
+- Deploy production (systemd/Docker trên host thật, diễn tập backup/restore).
 - Playwright/browser E2E.
+- Biến thể provider còn lại: Anthropic thật, Ollama, streaming thật với model thật (thiếu key tương ứng).
 
 
 ## 8. Ngoài phạm vi v1
@@ -317,8 +318,8 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [x] M17(A) streaming token hoàn thành.
 - [x] Provider thật đã smoke test (OpenRouter qua `openai_compat`, 2026-11-02).
 - [x] Telegram bot thật đã smoke test (K15, 2026-11-10 — chat, confirm, `/stop`, reconnect).
-- [ ] Scheduler thật đã kiểm chứng.
-- [ ] MCP server bên thứ ba đã kiểm thử.
+- [x] Scheduler thật đã kiểm chứng (2026-11-14 — task cron kích hoạt đúng giờ, gửi tin qua Telegram, tự huỷ task; UI Notification chưa test riêng).
+- [x] MCP server bên thứ ba đã kiểm thử (2026-11-14 — `@modelcontextprotocol/server-everything`, 13 tool đăng ký; gọi tool end-to-end chưa test).
 - [x] S1 đã xử lý (2026-09-26).
 - [x] K1 đã xử lý (2026-09-27) — bọc `<untrusted_content>` + bật `untrusted_seen` khi có summary.
 - [x] S2 đã xử lý (2026-09-27) — lọc escape terminal cho output tool untrusted ở CLI.
