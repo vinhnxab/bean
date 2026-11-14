@@ -1,9 +1,8 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
-import { resetAudioContextForTests } from "@/lib/attention";
 import { NotificationsPanel } from "@/features/settings/NotificationsPanel";
+import { resetAudioContextForTests } from "@/lib/attention";
 import { installFakeAttention } from "@/test/attention";
 import { renderManagement } from "@/test/management";
 import { installFakeNotifications } from "@/test/notify";
