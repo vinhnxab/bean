@@ -250,7 +250,10 @@ function ChatSession({ sessionId }: { sessionId: number }) {
           aria-live="polite"
           aria-relevant="additions text"
         >
-          <div className="max-w-none">
+          {/* Cột đọc về lại bề rộng vừa phải (`max-w-3xl`, căn giữa): dòng dài
+              quá ~70–80 ký tự làm mắt mất dấu khi xuống dòng; khối code dài vẫn
+              cuộn ngang bên trong khối của nó, không phụ thuộc bề rộng cột. */}
+          <div className="mx-auto max-w-3xl">
             {history.isPending ? (
               <p className="py-8 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
             ) : null}

@@ -2,6 +2,7 @@ import { LogOutIcon, MenuIcon, PanelRightIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 
 import { BeanAvatar } from "@/components/brand/BeanAvatar";
+import { NotifyToggle } from "@/components/NotifyToggle";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DropdownMenu,
@@ -140,6 +141,8 @@ export function TopNav({
         {/* Icon trơn: top nav là hàng công cụ toàn icon, nhãn chữ sẽ phá nhịp —
             `aria-label` của `ThemeToggle` vẫn nói đủ "Chuyển sang giao diện sáng". */}
         <ThemeToggle className="size-8" />
+        {/* Cùng nhóm lựa chọn toàn cục của thiết bị: thông báo nền khi tab ẩn. */}
+        <NotifyToggle className="size-8" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

@@ -13,6 +13,8 @@ import type { DecisionDto, ServerMsg } from "@/api/bindings";
 import { api } from "@/api/client";
 import { ChatSocket, type SocketStatus } from "@/api/ws";
 import { queryKeys } from "@/features/auth/queries";
+import { maybeNotifyServerMessage } from "@/features/chat/notifyEvents";
+import { useI18n } from "@/i18n";
 import { playBase64Audio } from "@/lib/audio";
 import { useChatStore } from "@/store/chat";
 
@@ -41,6 +43,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const applySync = useChatStore((state) => state.applySync);
   const applyServerMessage = useChatStore((state) => state.applyServerMessage);
   const setConfirmSubmitting = useChatStore((state) => state.setConfirmSubmitting);
+  const { t } = useI18n();
+
+  // Thông báo nền đọc `t` qua ref: callback của socket nằm trong effect với deps
+  // ổn định — đưa `t` thẳng vào sẽ dựng lại socket mỗi lần đổi ngôn ngữ. Như
+  // `seeded` trong ChatPage, gán ref lúc render là pattern đã có của codebase.
+  const tRef = useRef(t);
+  tRef.current = t;
+  // Khoá các sự kiện đã bắn thông báo — tái dùng `eventKey` của store, giữ ở ref
+  // để callback socket đọc/ghi mà không tạo lại (mảng bị biến đổi tại chỗ).
+  const notifiedKeys = useRef<string[]>([]);
 
   // Session đã phát một lượt `voice = true` và đang chờ `final` để đọc thành tiếng.
   // Là `ref` vì không tham gia render — chỉ là bộ nhớ giữa `sendStart` và sự kiện
@@ -89,6 +101,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
             voiceTurns.current.delete(message.session_id);
             void speakReply(message.text);
           }
+          // Thông báo hệ thống khi tab đang ẩn: trả lời xong, cần xác nhận, tin
+          // chủ động, lỗi. Tự dedupe theo `eventKey` — bắn trùng không xảy ra khi
+          // socket phát lại sự kiện.
+          maybeNotifyServerMessage(message, tRef.current, notifiedKeys.current);
         }
       },
     });

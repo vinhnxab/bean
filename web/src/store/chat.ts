@@ -77,7 +77,12 @@ function runFor(state: ChatState, sessionId: number, update: Partial<SessionRunS
   return merged;
 }
 
-function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): string | null {
+/**
+ * Khoá dedupe của một sự kiện — dùng chung cho store (khử trùng trùng lặp) và
+ * cho thông báo nền (mỗi sự kiện chỉ bắn một lần). `null` với sự kiện delta
+ * dòng: chúng không bao giờ dedupe theo nội dung.
+ */
+export function eventKey(message: Exclude<ServerMsg, { type: "sync" | "pong" }>): string | null {
   if (message.type === "text_delta") return null;
   switch (message.type) {
     case "queued":

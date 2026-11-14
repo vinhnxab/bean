@@ -1,9 +1,10 @@
-import { lazy } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { lazy, useEffect } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { ChatLayout } from "@/features/chat/ChatLayout";
 import { RealtimeProvider } from "@/features/chat/RealtimeProvider";
+import { OPEN_SESSION_EVENT } from "@/lib/notify";
 
 /**
  * Tách từng màn thành chunk riêng.
@@ -45,9 +46,28 @@ const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
 
+/**
+ * Cầu nối giữa thông báo hệ thống và router: nhấp vào thông báo (`lib/notify`
+ * phát sự kiện toàn cục kèm `sessionId`) mở đúng hội thoại đó. Đặt trong
+ * `BrowserRouter` vì cần `useNavigate`; render `null`, không chiếm UI.
+ */
+function SessionOpener() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    function open(event: Event) {
+      const id = (event as CustomEvent<number>).detail;
+      if (Number.isSafeInteger(id) && id > 0) navigate(`/sessions/${id}`);
+    }
+    window.addEventListener(OPEN_SESSION_EVENT, open);
+    return () => window.removeEventListener(OPEN_SESSION_EVENT, open);
+  }, [navigate]);
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <SessionOpener />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedRoute />}>

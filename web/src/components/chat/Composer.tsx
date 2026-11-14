@@ -102,7 +102,7 @@ export function Composer({
     // cộng chỉ ~68px kể cả dòng gợi ý phím. Ngang giữ 12px để nút không dính mép.
     <div className="bg-gradient-to-t from-surface via-surface to-transparent px-3 py-2">
       <form
-        className="mx-auto max-w-4xl"
+        className="mx-auto max-w-3xl"
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
