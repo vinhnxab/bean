@@ -107,6 +107,13 @@ pub enum EvalCommand {
         /// File metrics JSONL.
         file: PathBuf,
     },
+
+    /// Xem lại quỹ đạo một run (`trajectory/<task_id>.json`) dạng text dễ đọc —
+    /// trả lời câu hỏi vì sao model chọn sai tool mà không phải đọc JSON thô.
+    Trajectory {
+        /// File trajectory JSON do `bean eval run` ghi.
+        file: PathBuf,
+    },
 }
 
 /// Tham số của `mcp`.

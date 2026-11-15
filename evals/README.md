@@ -20,6 +20,7 @@ bean eval run                                   # mọi task trong evals/tasks
 bean eval run --only fake_multistep_fix_note    # một task
 bean eval run --provider real                   # ép provider thật (bỏ qua script)
 bean eval report evals/out/metrics.jsonl        # tổng hợp một file metrics
+bean eval trajectory evals/out/trajectory/<id>.json   # xem lại băng ghi một run
 ```
 
 ## Task hiện có
@@ -27,6 +28,9 @@ bean eval report evals/out/metrics.jsonl        # tổng hợp một file metric
 | Task | Đo gì | Gắn với |
 |---|---|---|
 | `fake_multistep_fix_note` | Vòng lặp nhiều bước, confirm `write_file`, hiệu ứng file trong workspace | máy eval |
+| `fake_multistep_bugfix_config` | Sửa bug cấu hình: tìm file sai qua `glob`, sửa đúng một file, file kế bên phải nguyên vẹn | máy eval — đo chính xác khi sửa |
+| `fake_multistep_find_info` | Tìm thông tin qua `grep` + `read`, trả lời không cần ghi file | máy eval — đo truy xuất |
+| `fake_multistep_tool_error_recovery` | Bước đầu đọc nhầm tên file ⇒ lỗi tool ⇒ tự sửa cách làm | mục 6 AGENTS — đo tự sửa sau lỗi |
 | `fake_compaction_long_history` | Lịch sử 30 message vượt 70% ngân sách ⇒ compaction lưu summary, run không lỗi | K12 (chạy `--provider real` để kiểm chứng với model thật) |
 | `fake_reflection_skill_draft` | Run ≥5 tool call thành công ⇒ reflection sinh skill nháp, không tự kích hoạt | K17 (như trên) |
 
@@ -77,6 +81,9 @@ Lưu ý với model free (quan sát thật 2026-11-09):
    files_equal, summary_saved, draft_created...). Task không có assert nào vẫn
    chạy — dùng để lấy đường cơ sở metrics.
 4. Chạy `cargo test -p bean-eval` — task fake mới phải pass như một regression.
+5. Chạy lại task để xem lại diễn biến: `bean eval trajectory evals/out/trajectory/<id>.json`
+   in lại cả run theo dòng (tool start/end kèm trạng thái, confirm kèm mức rủi ro,
+   final/error) — dùng khi model chọn sai tool mà không biết vì sao.
 
 Nguyên tắc: task eval không đụng dữ liệu thật — runner dựng workspace/SQLite/
 skills trong thư mục tạm và xoá sau khi chạy.

@@ -27,7 +27,15 @@ pub async fn run(args: &EvalArgs) -> Result<i32> {
             out,
         } => run_all(tasks, only.as_deref(), provider.as_deref(), out).await,
         EvalCommand::Report { file } => report(file).map(|()| 0),
+        EvalCommand::Trajectory { file } => trajectory(file).map(|()| 0),
     }
+}
+
+fn trajectory(file: &std::path::Path) -> Result<()> {
+    let replay = bean_eval::load_trajectory(file)
+        .with_context(|| format!("đọc trajectory {}", file.display()))?;
+    print!("{}", bean_eval::render_trajectory(&replay));
+    Ok(())
 }
 
 async fn run_all(

@@ -52,8 +52,9 @@ fn real_tasks_parse_and_are_opt_in() {
 async fn all_fake_tasks_pass_and_metrics_are_written() {
     let tasks = load_tasks_dir(&tasks_dir()).unwrap();
     assert!(
-        tasks.len() >= 3,
-        "cần ít nhất 3 task eval (multistep, compaction, reflection)"
+        tasks.len() >= 6,
+        "cần ít nhất 6 task eval: multistep, bugfix, find-info, error-recovery, \
+         compaction, reflection"
     );
     let out = tempfile::tempdir().unwrap();
     let options = RunOptions {
@@ -106,6 +107,43 @@ async fn all_fake_tasks_pass_and_metrics_are_written() {
         reflection.draft_count > 0,
         "reflection phải sinh skill nháp"
     );
+
+    // Task bugfix phải chạm đúng 1 confirm (write_file) — sửa file, xin duyệt 1 lần.
+    let bugfix = results
+        .iter()
+        .find(|result| result.task_id.contains("bugfix"))
+        .expect("phải có task bugfix");
+    assert_eq!(
+        bugfix.confirm_count, 1,
+        "write_file là Confirm — đúng 1 lần duyệt"
+    );
+
+    // Task error-recovery: lần gọi đầu đọc file không tồn tại phải LỖI trong
+    // trajectory nhưng run vẫn kết thúc final — hành vi tự sửa sau lỗi tool.
+    let recovery = results
+        .iter()
+        .find(|result| result.task_id.contains("error_recovery"))
+        .expect("phải có task error_recovery");
+    assert_eq!(
+        recovery.tools_called,
+        vec!["read_file", "glob", "read_file"],
+        "lần 1 sai tên file → glob → đọc đúng; không lặp lại y nguyên lần hỏng"
+    );
+
+    // Replay quỹ đạo: mỗi task một file trajectory, nạp + render lại được.
+    for result in &results {
+        let path = out
+            .path()
+            .join("trajectory")
+            .join(format!("{}.json", result.task_id));
+        let trajectory = bean_eval::load_trajectory(&path)
+            .unwrap_or_else(|error| panic!("đọc trajectory của {}: {error}", result.task_id));
+        let rendered = bean_eval::render_trajectory(&trajectory);
+        assert!(
+            rendered.contains(&result.task_id) && rendered.contains("final"),
+            "render phải nêu task + kết thúc final: {rendered}"
+        );
+    }
 
     // Metrics JSONL ghi đủ một dòng mỗi task.
     let records = MetricsRecord::read_all(&out.path().join("metrics.jsonl")).unwrap();

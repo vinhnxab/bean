@@ -1,0 +1,35 @@
+# Task eval — sửa bug nhiều bước trong workspace nhiều file (FakeProvider).
+#
+# Khác `fake_multistep_fix_note` (1 file, 2 tool call): task này đòi model
+# khám phá cấu trúc (glob), chọn **đúng file** trong nhiều ứng viên, sửa đúng
+# chỗ và **không đụng** file còn lại — tính chính xác của hành động sửa lỗi,
+# không chỉ "có gọi tool hay không".
+id = "fake_multistep_bugfix_config"
+description = "3 file cấu hình/code: tìm file chứa port sai (8081 → 8080), sửa đúng file đó, file khác phải giữ nguyên."
+prompt = "Ứng dụng không chạy được vì port trong cấu hình trùng dịch vụ khác — port đúng phải là 8080. Tìm file cấu hình trong workspace, sửa đúng chỗ và báo lại file nào đã đổi."
+max_steps = 8
+timeout_seconds = 60
+
+[llm]
+script = """
+{"responses":[
+ {"tool_calls":[{"id":"c1","name":"glob","args":{"pattern":"config/*.toml"}}],"stop":"tool_use"},
+ {"tool_calls":[{"id":"c2","name":"read_file","args":{"path":"config/app.toml"}}],"stop":"tool_use"},
+ {"tool_calls":[{"id":"c3","name":"write_file","args":{"path":"config/app.toml","content":"# Cau hinh web\\nport = 8080\\nretries = 3\\n"}}],"stop":"tool_use"},
+ {"text":"Đã sửa xong: port 8081 → 8080 trong config/app.toml. Các file khác giữ nguyên.","stop":"end_turn"}
+]}
+"""
+
+[setup.files]
+"README.md" = "Ung dung doc cau hinh tu thu muc config/ khi khoi dong.\n"
+"config/app.toml" = "# Cau hinh web\nport = 8081\nretries = 3\n"
+"config/db.toml" = "pool = 5\ntimeout_ms = 2000\n"
+
+[assert]
+end_reason = "final"
+tool_sequence = ["glob", "read_file", "write_file"]
+min_tool_calls = 3
+max_tool_calls = 3
+confirm_count = 1
+files_equal = { "config/app.toml" = "# Cau hinh web\nport = 8080\nretries = 3\n", "config/db.toml" = "pool = 5\ntimeout_ms = 2000\n" }
+final_contains = ["8080"]

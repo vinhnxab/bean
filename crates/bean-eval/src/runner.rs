@@ -27,6 +27,7 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::recorder::UsageRecorder;
+use crate::replay::TrajectoryFile;
 use crate::report::MetricsRecord;
 use crate::task::{EvalTask, TaskLlmProvider, load_tasks_dir};
 
@@ -698,6 +699,7 @@ fn wants_fake(task: &EvalTask, choice: ProviderChoice) -> bool {
 }
 
 /// Ghi trajectory JSON (kể cả run lỗi — càng lỗi càng cần băng ghi).
+/// Kiểu băng ghi nằm ở [`crate::replay`] — một nơi duy nhất cho ghi + đọc lại.
 fn write_trajectory(path: &Path, trajectory: &TrajectoryFile) {
     match serde_json::to_string_pretty(trajectory) {
         Ok(json) => {
@@ -707,19 +709,4 @@ fn write_trajectory(path: &Path, trajectory: &TrajectoryFile) {
         }
         Err(error) => tracing::warn!(%error, "serialize trajectory thất bại"),
     }
-}
-
-/// Băng ghi đầy đủ của một run, ghi `trajectory/<task_id>.json`.
-#[derive(Debug, Serialize, Deserialize)]
-struct TrajectoryFile {
-    /// Task tạo ra run này.
-    task_id: String,
-    /// Tên provider (`fake`, `openai_compat`, ...).
-    provider: String,
-    /// Model cấu hình.
-    model: String,
-    /// Chuỗi sự kiện theo thứ tự thời gian.
-    events: Vec<TrajectoryEvent>,
-    /// Text cuối nếu run kết thúc bình thường.
-    final_text: Option<String>,
 }

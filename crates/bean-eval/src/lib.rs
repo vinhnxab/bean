@@ -15,17 +15,22 @@
 //! * Trajectory của mỗi run ghi JSON riêng để debug vì sao model chọn sai tool.
 //!
 //! Chạy: `bean eval run` (mặc định `evals/tasks`, ghi `evals/out`); xem lại:
-//! `bean eval report <metrics.jsonl>`.
+//! `bean eval report <metrics.jsonl>` · `bean eval trajectory <trajectory/<id>.json>`
+//! (in lại diễn biến một run để debug việc model chọn sai tool).
 #![forbid(unsafe_code)]
 
 mod assertion;
 mod recorder;
+mod replay;
 mod report;
 mod runner;
 mod task;
 
 pub use assertion::{Assertions, ExpectedEnd};
 pub use recorder::UsageRecorder;
+pub use replay::{TrajectoryFile, load_trajectory, render_trajectory};
 pub use report::{MetricsRecord, TaskSummary, print_report, summarize};
-pub use runner::{ProviderChoice, RunOptions, TaskResult, run_task, run_tasks, run_tasks_in_dir};
+pub use runner::{
+    ProviderChoice, RunOptions, TaskResult, TrajectoryEvent, run_task, run_tasks, run_tasks_in_dir,
+};
 pub use task::{EvalTask, PrefillSpec, TaskLlm, load_tasks_dir};

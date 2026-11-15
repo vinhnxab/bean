@@ -1,0 +1,33 @@
+# Task eval — tìm thông tin trong nhiều file, trả lời không ghi dữ liệu (FakeProvider).
+#
+# Đo nhóm tác vụ "tra cứu": model phải dùng tool tìm kiếm (grep) định vị biên
+# bản đúng giữa nhiều file nhiễu, đọc lại rồi trả lời — và **không được ghi/sửa
+# file nào** (tools_forbidden). Đây là nửa còn lại của "tác vụ thật" bên cạnh
+# sửa bug: đọc hiểu + tổng hợp, không phải ghi đè.
+id = "fake_multistep_find_info"
+description = "3 biên bản họp: tìm ngân sách hạ tầng tháng 11 bằng grep + read_file, trả lời con số, cấm ghi file."
+prompt = "Thư mục notes chứa các biên bản họp. Ngân sách hạ tầng tháng 11 được duyệt bao nhiêu? Tìm trong biên bản rồi trả lời; chỉ đọc, không ghi hay sửa file nào."
+max_steps = 8
+timeout_seconds = 60
+
+[llm]
+script = """
+{"responses":[
+ {"tool_calls":[{"id":"c1","name":"grep","args":{"pattern":"Ngan sach ha tang","rel":"notes"}}],"stop":"tool_use"},
+ {"tool_calls":[{"id":"c2","name":"read_file","args":{"path":"notes/2026-11-12.md"}}],"stop":"tool_use"},
+ {"text":"Ngân sách hạ tầng tháng 11 được duyệt 42 triệu đồng (theo biên bản notes/2026-11-12.md).","stop":"end_turn"}
+]}
+"""
+
+[setup.files]
+"notes/2026-11-10.md" = "Hop ky thuat: chot ke hoach trien khai phien ban moi.\n"
+"notes/2026-11-12.md" = "Hop ke toan: Ngan sach ha tang thang 11 duoc duyet 42 trieu dong.\n"
+"notes/2026-11-14.md" = "Hop van hanh: len lich bao tri may chu vao cuoi tuan.\n"
+
+[assert]
+end_reason = "final"
+tool_sequence = ["grep", "read_file"]
+min_tool_calls = 2
+max_tool_calls = 2
+tools_forbidden = ["write_file"]
+final_contains = ["42 triệu"]
