@@ -46,8 +46,8 @@
 | **M5 — Memory** | 🟡 Code + test xanh | `c22bde5`, `b29ae73` | SQLite, FTS5, context budget, compaction an toàn, `MEMORY.md`/`USER.md`, memory tools, `/new`, persistence | Chưa có E2E memory bền vững (K11) và hội thoại dài với provider thật (K12) |
 | **M6 — Skills** | 🟡 Code + fake flow | `0a1187c` | Loader, progressive disclosure, `load_skill`, `create_skill`, skill draft | Chưa chứng minh model thật luôn nạp và làm theo skill |
 | **M7 — Web tools** | ✅ Tự động | `2582f6c` | `web_fetch`, `web_search`, HTML→text, untrusted wrapper, chống SSRF/redirect/DNS rebinding | Chưa smoke test với API tìm kiếm thật |
-| **M8 — Router/Channel** | ✅ Hoàn thành | `d85aac4` | Router, queue theo session, cancel, confirm, outbox retry, slash commands ở lõi, CLI qua Router | K13 trong known-issues đã cũ; `/new` thực tế đã ở Router |
-| **M9 — Web server** | ✅ Hoàn thành | `41e105d` | Auth Argon2id + cookie, REST, WebSocket, `ts-rs`, CSP/Origin/CSRF/rate limit, SPA embedded | K14 đã cũ; API/UI memory file đã tồn tại |
+| **M8 — Router/Channel** | ✅ Hoàn thành | `d85aac4` | Router, queue theo session, cancel, confirm, outbox retry, slash commands ở lõi, CLI qua Router | K13 đã đóng 2026-11-15; `/new` đã ở Router từ milestone này |
+| **M9 — Web server** | ✅ Hoàn thành | `41e105d` | Auth Argon2id + cookie, REST, WebSocket, `ts-rs`, CSP/Origin/CSRF/rate limit, SPA embedded | K14 đã đóng 2026-11-15; API/UI memory file đã có từ milestone này |
 | **M10 — UI chat** | 🟡 Test xanh | `7ad3c42` | Login, chat, tool card, confirm card, Stop, realtime state | Chưa có Playwright/browser test thật |
 | **M11 — UI quản lý** | 🟡 Test xanh | `d0ab3db` | Sessions, memory, skills, tasks, audit, status; responsive; i18n `vi`/`en` | Chưa kiểm chứng responsive bằng trình duyệt thật |
 | **M12 — Telegram** | 🟡 Adapter + mock test | `810577f` | teloxide long polling, allowlist, rate limit, tách tin UTF-16, inline confirm, reconnect, shutdown | **Chưa chạy bot Telegram thật** (K15) |
@@ -254,16 +254,16 @@ cp bean.example.toml bean.toml
 | An toàn | S3, S4 | thông tin | `/api/audit` chưa lọc theo người dùng (chấp nhận được khi v1 một người dùng); `allowed_tools` cấp quyền vĩnh viễn — UI nên cảnh báo khi task có tool `Dangerous` |
 | An toàn | K1-followup | thấp | Cân nhắc chỉ bật cờ khi summary thực sự tổng hợp từ nội dung untrusted; **chưa làm ngay**, cần dữ liệu dùng thật |
 | Độ bền DB | K2–K4 | **đã đóng** (2026-11-11/12) | `load_history_within_budget` đọc theo trang trong ngân sách; store có trần 10s; tách connection chỉ đọc — FTS nặng không còn chặn `append` |
-| Store semantics | K5, K6 | **đã đóng** (2026-11-11/12) | `memory_search` loại message của lượt đang chạy; `clear` xoá cả `summary` ở cả hai store, test hành vi chung; K7 (MemoryStore/SqliteStore lệch) vẫn mở |
+| Store semantics | K5–K7 | **đã đóng** (2026-11-11 → 15) | `memory_search` loại message của lượt đang chạy; `clear` xoá cả `summary` ở cả hai store; K7 đóng 2026-11-15: bộ test hành vi chung hai store (`src/store/tests/`) + vá drift `list_sessions` Unicode (`bean_lower`) |
 | Search | K8–K9 | thấp | BM25 chỉ tương đối theo nguồn; cú pháp FTS bị giới hạn |
 | E2E | K11 | **đã đóng** (2026-11-12) | `memory_survives_restart_in_real_binary` trong `make e2e`: memory_save → SIGTERM → restart cùng `data.dir` → memory_search thấy ghi nhớ, phiên + DB còn nguyên |
 | Provider thật | K12, K17 | **đã đóng** (2026-11-09) | Compaction + reflection đã chạy với model thật qua khung eval opt-in (`evals/tasks-real/`, key từ env); còn streaming thật (M17) và Anthropic/Ollama — thiếu key |
 | Telegram | K15 | **đã đóng** (2026-11-10) | Smoke bot thật pass: chat, confirm inline (audit đúng actor), Dangerous, `/stop`, reconnect, đồng thời web; callback người lạ unit-tested |
 | Learning | K20 | thấp | Scheduler draft chưa có inline approval Telegram. K19 đã đóng 2026-11-12: duyệt/bỏ draft ghi audit JSONL với actor, cả lần thử lỗi. **K16 đã đóng 2026-11-13:** reflection lưu candidate trạng thái chờ, lượt kế tiếp cùng phiên không phàn nàn mới thăng hạng thành draft; phản hồi tiêu cực bỏ vĩnh viễn + audit `learning_candidate_discard` (D28) |
 | Learning E2E | K18 | **đã đóng** (2026-11-12) | `learning_draft_approval_roundtrip_in_real_binary` trong `make e2e`: 5 tool call → notification WS → draft qua REST → catalog chưa thấy trước duyệt → approve → audit JSONL → run 2 nạp được skill |
-| Dependency | K21 | thấp | `proc-macro-error2` future-incompatibility warning qua `aquamarine`/`teloxide` |
+| Dependency | K21 | **đã đóng** (2026-10-01) | `proc-macro-error2` đã vá E0365 trong `vendor/` qua `[patch.crates-io]`; `make audit` xanh |
 
-**Lưu ý:** K13 (`/new` chỉ ở adapter) và K14 (chưa có API/UI memory files) trong tài liệu backlog đã cũ so với code hiện tại: `/new` đã được xử lý trong Router và UI đã có `GET/PUT /api/memory/files/:name`. Hai mục này nên được đóng hoặc cập nhật trong một đợt tài liệu riêng.
+**Lưu ý:** K13 và K14 đã đóng 2026-11-15 sau khi xác minh code hiện tại: `/new` (cùng các slash command khác) xử lý ở Router lõi (`router/command.rs`) và `GET/PUT /api/memory/files/:name` đã có trong web + UI.
 
 ## 7. Khoảng cách so với đặc tả v1
 
@@ -304,7 +304,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
    thêm cảnh báo UI cho task `Dangerous`; cân nhắc `K1-followup` nếu dùng thật thấy mỏi tay.
 2. **Vận hành tối thiểu:** tạo `bean.toml`, đặt secret qua biến môi trường, chạy một smoke test provider thật và một smoke test Telegram thật.
 3. **E2E bền vững:** đóng gói K11 và K18; kiểm tra restart, scheduler, learning draft và skill activation.
-4. **Độ bền:** xử lý hoặc ghi nhận rõ K2–K7 trước khi có phiên dài và DB lớn.
+4. **Độ bền:** K2–K7 đã đóng toàn bộ (2026-11-11 → 15); nhóm còn lại của backlog là K8–K9 (thấp) chờ dữ liệu dùng thật.
 5. **Phát hành:** thêm CI, soak test 24 giờ, Playwright tùy chọn, cài systemd/Docker trên host thật và diễn tập backup/restore.
 6. **Kênh chat:** không còn việc mở thêm kênh. M18 (Discord) đã bị loại bỏ 2026-09-26.
 

@@ -98,12 +98,15 @@ pub(super) fn list_sessions(
     limit: usize,
 ) -> Result<Vec<SessionSummary>, StoreError> {
     let query = query.unwrap_or_default();
-    let pattern = format!("%{query}%");
+    // K7: lower từ Rust để khớp MemoryStore (`to_lowercase`) — LIKE của SQLite
+    // chỉ gập ASCII, tìm "TỔNG" không thấy "Tổng"; `bean_lower(title)` gập cả
+    // Unicode. `%`/`_` trong query vẫn là wildcard như trước.
+    let pattern = format!("%{}%", query.to_lowercase());
     let mut stmt = conn
         .prepare(
             "SELECT id, channel, chat_id, user_id, title, archived, created_at, updated_at \
          FROM sessions WHERE user_id = ?1 AND (?2 IS NULL OR archived = ?2) \
-         AND (?3 = '' OR title LIKE ?4) ORDER BY updated_at DESC LIMIT ?5",
+         AND (?3 = '' OR bean_lower(title) LIKE ?4) ORDER BY updated_at DESC LIMIT ?5",
         )
         .map_err(internal)?;
     let rows = stmt

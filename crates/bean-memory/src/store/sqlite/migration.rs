@@ -24,6 +24,7 @@ pub(crate) fn configure(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(PRAGMA_SQL).map_err(internal)?;
     conn.busy_timeout(Duration::from_secs(5))
         .map_err(internal)?;
+    register_sql_functions(conn)?;
     Ok(())
 }
 
@@ -38,7 +39,38 @@ pub(crate) fn configure_reader(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(READER_PRAGMA_SQL).map_err(internal)?;
     conn.busy_timeout(Duration::from_secs(5))
         .map_err(internal)?;
+    register_sql_functions(conn)?;
     Ok(())
+}
+
+/// Đăng ký hàm SQL riêng của Bean trên một connection.
+///
+/// # Vì sao cần `bean_lower` (K7)
+///
+/// `LIKE` của SQLite chỉ gập hoa/thường cho **ASCII**, nên tìm tiêu đề phiên
+/// "TỔNG" không thấy "Tổng" — trong khi `MemoryStore` dùng
+/// `str::to_lowercase()` (Unicode) và khớp. Hai bản cài đặt phải cùng ngữ nghĩa
+/// (K7): đăng ký hàm lower Unicode-aware của Rust và dùng trong
+/// `list_sessions`, MemoryStore giữ nguyên. Tên `bean_lower` thay vì ghi đè
+/// `lower` dựng sẵn để không ảnh hưởng mọi truy vấn khác — hàm này chỉ phục vụ
+/// tìm tiêu đề phiên.
+fn register_sql_functions(conn: &Connection) -> Result<(), StoreError> {
+    use rusqlite::functions::FunctionFlags;
+    use rusqlite::types::Value;
+
+    conn.create_scalar_function(
+        "bean_lower",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            use rusqlite::types::ValueRef;
+            match context.get_raw(0) {
+                ValueRef::Null => Ok(Value::Null),
+                other => Ok(Value::Text(other.as_str()?.to_lowercase())),
+            }
+        },
+    )
+    .map_err(internal)
 }
 
 /// Migration tuần tự theo `user_version` (agents.md mục 8.1).
