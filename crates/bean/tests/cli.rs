@@ -337,8 +337,21 @@ async fn chat_pipe_confirm_for_write_file_does_not_deadlock() {
     )
     .unwrap();
 
+    // data.dir phải nằm trong thư mục tạm: không có `--config` thì data.dir mặc
+    // định về `~/.bean` thật — test từng làm rò audit/checkpoint vào data của
+    // người dùng (và prune mất checkpoint cũ theo `keep`).
+    let data_dir = dir.path().join("data");
+    let config = dir.path().join("bean.toml");
+    std::fs::write(
+        &config,
+        format!("[data]\ndir = {}\n", toml_str(&data_dir.to_string_lossy())),
+    )
+    .unwrap();
+
     let mut child = tokio::process::Command::new(bin())
         .args([
+            "--config",
+            config.to_str().unwrap(),
             "chat",
             "--fake-llm",
             script.to_str().unwrap(),
@@ -372,4 +385,9 @@ async fn chat_pipe_confirm_for_write_file_does_not_deadlock() {
         dir.path().join("ws/kiem-tra.txt").exists(),
         "file phải được ghi sau khi cho phép: {stdout}"
     );
+}
+
+/// Chuỗi TOML an toàn cho đường dẫn (escape `\\` trước khi bọc `""`).
+fn toml_str(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\"))
 }

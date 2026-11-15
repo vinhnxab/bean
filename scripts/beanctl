@@ -31,6 +31,9 @@ LOG="/tmp/bean-run/serve.log"
 launch() {
   mkdir -p "$(dirname "$LOG")"
   (
+    # Đường dẫn tương đối trong bean.toml (workspace, skills) giải theo CWD của
+    # tiến trình — luôn cd về repo để workspace không đổi theo nơi gọi beanctl.
+    cd "$REPO" || exit 1
     export RUST_LOG="${RUST_LOG:-info,bean_security=warn}"
     exec setsid "$BIN" --config "$CONFIG" serve >>"$LOG" 2>&1 </dev/null
   ) &
@@ -118,6 +121,8 @@ case "${1:-start}" in
     if [ -z "${XAUTHORITY:-}" ] && [ -f "$HOME/.Xauthority" ]; then
       export XAUTHORITY="$HOME/.Xauthority"
     fi
+    # Như launch(): đường dẫn tương đối trong bean.toml giải theo CWD.
+    cd "$REPO" || exit 1
     exec "$BIN" --config "$CONFIG" serve
     ;;
   *) echo "Dùng: beanctl {start|stop|restart|status|run}" >&2; exit 2 ;;
