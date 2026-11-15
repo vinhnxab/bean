@@ -191,7 +191,8 @@ async fn chat_with_openai_compat_provider_round_trip() {
     std::fs::write(
         &config_path,
         format!(
-            "[llm]\nprovider = \"openai_compat\"\nmodel = \"test-model\"\napi_key_env = \"BEAN_TEST_KEY\"\nbase_url = \"{}/v1\"\nmax_tokens = 64\n",
+            "[data]\ndir = \"{}\"\n\n[llm]\nprovider = \"openai_compat\"\nmodel = \"test-model\"\napi_key_env = \"BEAN_TEST_KEY\"\nbase_url = \"{}/v1\"\nmax_tokens = 64\n",
+            dir.path().join("data").display(),
             server.uri()
         ),
     )
@@ -239,10 +240,13 @@ async fn chat_survives_provider_error() {
 
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("bean.toml");
+    // `[data]` bắt buộc: thiếu thì data.dir rơi về `~/.bean` mặc định — hai test
+    // chat song song cùng mở DB thật là nguồn flake "database is locked" (CI).
     std::fs::write(
         &config_path,
         format!(
-            "[llm]\nprovider = \"openai_compat\"\nmodel = \"m\"\napi_key_env = \"BEAN_TEST_KEY\"\nbase_url = \"{}/v1\"\nmax_tokens = 64\n",
+            "[data]\ndir = \"{}\"\n\n[llm]\nprovider = \"openai_compat\"\nmodel = \"m\"\napi_key_env = \"BEAN_TEST_KEY\"\nbase_url = \"{}/v1\"\nmax_tokens = 64\n",
+            dir.path().join("data").display(),
             server.uri()
         ),
     )
