@@ -13,6 +13,7 @@
 //! ├─ command.rs      enum DbCommand — 51 lệnh + kênh trả lời
 //! ├─ worker.rs       worker_loop + dispatch (chạm connection)
 //! ├─ migration.rs    pragma, migration, tiện ích chung
+//! ├─ q_fts_sanitize.rs  làm sạch query FTS trước khi đưa vào `MATCH` (K9)
 //! └─ q_*.rs          truy vấn SQL, mỗi file một nhóm nghiệp vụ
 //! ```
 //!
@@ -29,6 +30,7 @@ mod command;
 mod impl_store;
 mod inner;
 pub(crate) mod migration;
+mod q_fts_sanitize;
 mod q_history_search;
 mod q_mcp;
 mod q_memory_outbox;

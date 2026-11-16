@@ -30,7 +30,8 @@ struct MemorySaveParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct MemorySearchParams {
-    /// Từ khoá tìm kiếm; nhiều từ cách nhau bởi dấu cách đều phải xuất hiện.
+    /// Từ khoá tìm kiếm. Ký hiệu bị bỏ qua khi tìm (K9): `C++` tìm như `C`,
+    /// `rust-lang` thành `rust` + `lang`; nhiều từ cách nhau bởi dấu cách đều phải xuất hiện.
     query: String,
 }
 

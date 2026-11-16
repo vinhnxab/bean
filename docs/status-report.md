@@ -256,7 +256,7 @@ cp bean.example.toml bean.toml
 | An toàn | K1-followup | thấp | Cân nhắc chỉ bật cờ khi summary thực sự tổng hợp từ nội dung untrusted; **chưa làm ngay**, cần dữ liệu dùng thật |
 | Độ bền DB | K2–K4 | **đã đóng** (2026-11-11/12) | `load_history_within_budget` đọc theo trang trong ngân sách; store có trần 10s; tách connection chỉ đọc — FTS nặng không còn chặn `append` |
 | Store semantics | K5–K7 | **đã đóng** (2026-11-11 → 15) | `memory_search` loại message của lượt đang chạy; `clear` xoá cả `summary` ở cả hai store; K7 đóng 2026-11-15: bộ test hành vi chung hai store (`src/store/tests/`) + vá drift `list_sessions` Unicode (`bean_lower`) |
-| Search | K8–K9 | thấp | BM25 chỉ tương đối theo nguồn; cú pháp FTS bị giới hạn |
+| Search | K8–K9 | **đã đóng** (2026-11-16) | K8 đóng dạng đặc ta: test characterization khoá "thứ tự giữa nguồn là quy ước" (giữ chuẩn hoá per-source); K9 vá thật: `sanitize_fts_query` tách theo dãy ký tự (`rust-lang` → `rust lang`, `C++` → `C`) + ghi rõ trong description tool |
 | E2E | K11 | **đã đóng** (2026-11-12) | `memory_survives_restart_in_real_binary` trong `make e2e`: memory_save → SIGTERM → restart cùng `data.dir` → memory_search thấy ghi nhớ, phiên + DB còn nguyên |
 | Provider thật | K12, K17 | **đã đóng** (2026-11-09) | Compaction + reflection đã chạy với model thật qua khung eval opt-in (`evals/tasks-real/`, key từ env); còn streaming thật (M17) và Anthropic/Ollama — thiếu key |
 | Telegram | K15 | **đã đóng** (2026-11-10) | Smoke bot thật pass: chat, confirm inline (audit đúng actor), Dangerous, `/stop`, reconnect, đồng thời web; callback người lạ unit-tested |
@@ -305,7 +305,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
    thêm cảnh báo UI cho task `Dangerous`; cân nhắc `K1-followup` nếu dùng thật thấy mỏi tay.
 2. **Vận hành tối thiểu:** tạo `bean.toml`, đặt secret qua biến môi trường, chạy một smoke test provider thật và một smoke test Telegram thật.
 3. **E2E bền vững:** đóng gói K11 và K18; kiểm tra restart, scheduler, learning draft và skill activation.
-4. **Độ bền:** K2–K7 đã đóng toàn bộ (2026-11-11 → 15); nhóm còn lại của backlog là K8–K9 (thấp) chờ dữ liệu dùng thật.
+4. **Độ bền:** K2–K9 đã đóng toàn bộ (2026-11-11 → 16) — nhóm Search đóng 2026-11-16 (K8 đặc ta hành vi, K9 tách từ).
 5. **Phát hành:** thêm CI, soak test 24 giờ, Playwright tùy chọn, cài systemd/Docker trên host thật và diễn tập backup/restore.
 6. **Kênh chat:** không còn việc mở thêm kênh. M18 (Discord) đã bị loại bỏ 2026-09-26.
 

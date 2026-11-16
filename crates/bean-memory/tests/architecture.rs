@@ -32,7 +32,7 @@ const MIN_SQLITE_MODULES: usize = 12;
 /// Số file truy vấn (`q_*.rs`) tối thiểu — mỗi file một nhóm nghiệp vụ.
 const MIN_QUERY_GROUPS: usize = 7;
 
-/// Trần số dòng cho **mỗi** file truy vấn; lớn nhất là `q_session.rs` (~256).
+/// Trần số dòng cho **mỗi** file truy vấn; lớn nhất là `q_history_search.rs` (~290).
 const QUERY_LINE_BUDGET: usize = 300;
 
 /// `mod.rs` phải nhắc tới các module này trong doc — bản đồ để người mới đọc.

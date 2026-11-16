@@ -241,6 +241,40 @@ async fn fts_search_tolerates_special_characters() {
     assert!(store.memory_search("😀", None).await.unwrap().is_empty());
 }
 
+/// (K9) Ký hiệu là ranh giới từ, không nối liền thành từ không tồn tại: `rust-lang`
+/// phải tìm thấy ghi nhớ chứa `rust-lang` (trước khi sửa, sanitize nối thành
+/// `"rustlang"` ⇒ 0 hit), `C++` tìm như `C`; chỉ còn ký hiệu ⇒ rỗng. Chạy trên cả hai
+/// bản để giữ ngữ nghĩa đồng bộ (K7) — `MemoryStore` khớp chuỗi nên tự nhiên đạt.
+#[tokio::test]
+async fn fts5_tu_co_ky_hieu_van_tim_thay() {
+    async fn flow(store: &impl Store) {
+        store
+            .memory_save("đọc tài liệu rust-lang chính thức", "học")
+            .await
+            .unwrap();
+        store
+            .memory_save("dự án viết bằng C++ cần biên dịch", "dev")
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .memory_search("rust-lang", None)
+                .await
+                .unwrap()
+                .is_empty(),
+            "`rust-lang` phải tìm thấy ghi nhớ chứa `rust-lang`"
+        );
+        assert!(
+            !store.memory_search("C++", None).await.unwrap().is_empty(),
+            "`C++` phải tìm thấy ghi nhớ chứa `C++`"
+        );
+        assert!(store.memory_search("+++", None).await.unwrap().is_empty());
+    }
+    let dir = TempDir::new().unwrap();
+    flow(&open(&dir)).await;
+    flow(&MemoryStore::new()).await;
+}
+
 /// Trigger FTS phải đồng bộ khi xoá (`delete_before`, `clear`).
 #[tokio::test]
 async fn delete_and_clear_keep_fts_in_sync() {

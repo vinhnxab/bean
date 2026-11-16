@@ -3,6 +3,7 @@
 use rusqlite::{Connection, params};
 
 use super::migration::internal;
+use super::q_fts_sanitize::sanitize_fts_query;
 use super::q_session::decode_message;
 use crate::store::shared::{sql_limit, truncate_chars};
 use crate::store::types::{MemorySearchHit, MemorySource, StoreError, StoredMessage};
@@ -223,25 +224,64 @@ pub(super) fn bm25_to_score(raw: f64) -> f32 {
     (-raw) as f32
 }
 
-/// Làm sạch query của người dùng/model trước khi đưa vào `MATCH` (agents.md mục 8.4).
-///
-/// Giữ lại ký tự chữ-số (kể cả dấu tiếng Việt) và `_`, bọc mỗi từ khoá trong `\"`.
-/// Trả `None` khi không còn từ khoá nào — khi đó tìm kiếm trả về rỗng thay vì lỗi cú pháp.
-pub(super) fn sanitize_fts_query(query: &str) -> Option<String> {
-    let mut tokens: Vec<String> = Vec::new();
-    for raw in query.split_whitespace() {
-        let cleaned: String = raw
-            .chars()
-            .filter(|ch| ch.is_alphanumeric() || *ch == '_')
-            .collect();
-        if cleaned.is_empty() {
-            continue;
-        }
-        tokens.push(format!("\"{cleaned}\""));
-    }
-    if tokens.is_empty() {
-        None
-    } else {
-        Some(tokens.join(" "))
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use rusqlite::Connection;
+
+    use super::super::migration::{configure, run_migration};
+    use super::{memory_search, sanitize_fts_query, search_memories, search_messages};
+    use crate::store::types::MemorySource;
+
+    /// (K8) Đặc ta hành vi chuẩn hoá điểm **theo nguồn**: thứ tự giữa `memories` và
+    /// `messages` là quy ước (bằng điểm ⇒ ghi nhớ trước), không phải so điểm BM25 gốc
+    /// giữa hai nguồn (xem doc comment `memory_search`).
+    ///
+    /// Dựng dữ liệu để message liên quan hơn hẳn ghi nhớ về điểm gốc — IDF của bảng
+    /// `messages` cao hơn vì có nhiều dòng, TF của message gấp 5 lần. Nếu ai đó bỏ
+    /// chuẩn hoá per-source để "sửa K8" mà không có thiết kế thay thế có chủ đích
+    /// (ví dụ RRF), test này đỏ ngay: khi đó message phải xếp trước ghi nhớ.
+    #[test]
+    fn k8_chuan_hoa_theo_nguon_giu_ghi_nho_dung_truoc() {
+        let conn = Connection::open_in_memory().unwrap();
+        configure(&conn).unwrap();
+        run_migration(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sessions (id, channel, chat_id, title, archived, summary, created_at, updated_at)
+             VALUES (1, 'cli', 'local', '', 0, '', '2026-11-16T00:00:00Z', '2026-11-16T00:00:00Z');
+             INSERT INTO messages (session_id, seq, role, content_json, text_for_search, created_at) VALUES
+               (1, 1, 'user', '{}', 'chủ đề khác hoàn toàn', '2026-11-16T00:00:00Z'),
+               (1, 2, 'user', '{}', 'một chủ đề khác nữa', '2026-11-16T00:00:00Z'),
+               (1, 3, 'user', '{}', 'vinh vinh vinh vinh vinh', '2026-11-16T00:00:00Z'),
+               (1, 4, 'user', '{}', 'lại một chủ đề khác', '2026-11-16T00:00:00Z');
+             INSERT INTO memories (text, tags, created_at) VALUES
+               ('hồ sơ người dùng: Vinh thích cà phê sữa đá, hay làm việc vào buổi tối, và nhiều chi tiết khác khiến văn bản này dài hơn hẳn các message', '', '2026-11-16T00:00:00Z');",
+        )
+        .unwrap();
+
+        let expr = sanitize_fts_query("vinh").unwrap();
+
+        // Điểm BM25 gốc (trước chuẩn hoá): message phải liên quan hơn hẳn ghi nhớ —
+        // đây là giả định của kịch bản; vi phạm nghĩa là test mất ý nghĩa.
+        let raw_memories = search_memories(&conn, &expr, 20).unwrap();
+        let raw_messages = search_messages(&conn, &expr, 20, None).unwrap();
+        assert_eq!(raw_memories.len(), 1);
+        assert_eq!(raw_messages.len(), 1);
+        assert!(
+            raw_messages[0].score > raw_memories[0].score,
+            "giả định K8: message phải mạnh hơn hẳn về điểm gốc (message {}, memory {})",
+            raw_messages[0].score,
+            raw_memories[0].score
+        );
+
+        // Qua `memory_search`: chuẩn hoá per-source làm cả hai đỉnh đều 1.0 và ghi nhớ
+        // đứng trước dù điểm gốc yếu hơn — đúng quy ước ghi trong doc comment.
+        let hits = memory_search(&conn, "vinh", None).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].source, MemorySource::Memories);
+        assert_eq!(hits[0].score, 1.0);
+        assert_eq!(hits[1].source, MemorySource::Message { session_id: 1 });
+        assert_eq!(hits[1].score, 1.0);
     }
 }
