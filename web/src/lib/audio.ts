@@ -40,8 +40,19 @@ export async function blobToBase64(blob: Blob): Promise<string> {
  */
 const RECORD_SAMPLE_RATE = 16_000;
 
-/** Kích thước buffer mỗi lần callback của `ScriptProcessorNode` (số sample). */
+/** Kích thước gói sample mỗi lần worklet gửi về host (số sample). */
 const RECORD_BUFFER_SIZE = 4_096;
+
+/**
+ * URL worklet ghi âm — file tĩnh cùng nguồn gốc.
+ *
+ * # Vì sao không dùng `blob:` URL cho worklet
+ *
+ * CSP của Bean là `default-src 'self'` (mục 15.7, không khai `worker-src`), nên
+ * `audioWorklet.addModule` với URL `blob:` bị chặn. File nằm trong
+ * `public/worklets/` được phục vụ tại đúng đường dẫn này cùng nguồn gốc.
+ */
+const WORKLET_URL = "/worklets/wav-recorder.js";
 
 function writeAscii(view: DataView, offset: number, text: string): void {
   for (let index = 0; index < text.length; index += 1) {
@@ -93,12 +104,18 @@ export function encodeWav(chunks: readonly Float32Array[], sampleRate: number): 
 /**
  * Trình ghi âm micro xuất WAV 16-bit mono cho STT (thay `MediaRecorder`).
  *
+ * Thu PCM qua `AudioWorkletNode` (K32) thay vì `ScriptProcessorNode` đã deprecated:
+ * worklet cùng giao thức gom sample — mỗi gói 4.096 sample gửi về host một bản sao
+ * `Float32Array` qua `port`, phần đuôi chưa đầy gói khi dừng bị bỏ (parity hành vi cũ).
+ *
  * # Bất biến
  *
  * * `stop()`/`cancel()` luôn nhả micro và đóng `AudioContext` — gọi được đúng một lần,
  *   an toàn cả khi AudioContext chưa kịp khởi tạo xong (webapp ghi giữa chừng).
- * * `onaudioprocess` nhận buffer tái sử dụng của trình duyệt — phải `slice()` sao chép
- *   ngay trong callback, không giữ tham chiếu.
+ * * `start()` ném lỗi (từ chối quyền, không load được worklet…) thì không rò tài nguyên:
+ *   micro nhả và `AudioContext` đóng trước khi ném.
+ * * Dữ liệu tới theo message từ worklet — đã là bản sao do processor tự copy, host
+ *   không giữ tham chiếu tới bộ đệm nội bộ của worklet.
  */
 export class WavRecorder {
   private chunks: Float32Array[] = [];
@@ -107,7 +124,7 @@ export class WavRecorder {
   private constructor(
     private readonly context: AudioContext,
     private readonly stream: MediaStream,
-    private readonly node: ScriptProcessorNode,
+    private readonly node: AudioWorkletNode,
     private readonly source: MediaStreamAudioSourceNode,
   ) {}
 
@@ -115,19 +132,33 @@ export class WavRecorder {
   static async start(): Promise<WavRecorder> {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const context = new AudioContext({ sampleRate: RECORD_SAMPLE_RATE });
-    const source = context.createMediaStreamSource(stream);
-    const node = context.createScriptProcessor(RECORD_BUFFER_SIZE, 1, 1);
-    const recorder = new WavRecorder(context, stream, node, source);
-    node.onaudioprocess = (event) => {
-      if (!recorder.stopped) {
-        recorder.chunks.push(event.inputBuffer.getChannelData(0).slice());
-      }
-    };
-    // ScriptProcessorNode chỉ chạy khi có kết nối tới destination; output mặc định
-    // im lặng nên không gây hồi âm micro ra loa.
-    source.connect(node);
-    node.connect(context.destination);
-    return recorder;
+    try {
+      await context.audioWorklet.addModule(WORKLET_URL);
+      const source = context.createMediaStreamSource(stream);
+      const node = new AudioWorkletNode(context, "wav-recorder", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { flushSamples: RECORD_BUFFER_SIZE },
+      });
+      const recorder = new WavRecorder(context, stream, node, source);
+      node.port.onmessage = (event) => {
+        if (!recorder.stopped && event.data instanceof Float32Array) {
+          recorder.chunks.push(event.data);
+        }
+      };
+      // Worklet chỉ chạy khi có kết nối tới destination; output mặc định
+      // im lặng nên không gây hồi âm micro ra loa.
+      source.connect(node);
+      node.connect(context.destination);
+      return recorder;
+    } catch (error) {
+      // Load worklet/tạo node thất bại: nhả micro + đóng context — giữ bất biến
+      // "start() ném lỗi thì không rò tài nguyên".
+      for (const track of stream.getTracks()) track.stop();
+      void context.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   /** Dừng ghi, nhả micro và trả WAV sẵn sàng gửi STT. */
@@ -144,7 +175,7 @@ export class WavRecorder {
 
   private cleanup(): void {
     this.stopped = true;
-    this.node.onaudioprocess = null;
+    this.node.port.onmessage = null;
     this.node.disconnect();
     this.source.disconnect();
     for (const track of this.stream.getTracks()) track.stop();
