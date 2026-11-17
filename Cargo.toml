@@ -110,6 +110,10 @@ url = "2.5.8"
 # M30: giải nén artifact `.tar.gz` của bản update (một định dạng cho mọi nền tảng).
 flate2 = "1"
 tar = "0.4"
+# `bean backup` (M16 vận hành) chụp DB nhất quán qua SQLite backup API; cùng
+# version/features với bean-memory để workspace chỉ resolve một bản. Feature
+# `backup` bật module `rusqlite::backup` (bean-memory không cần nó).
+rusqlite = { version = "0.41.1", features = ["bundled", "functions", "backup"] }
 
 serde_json = "1.0.151"
 tempfile = "3.27.0"

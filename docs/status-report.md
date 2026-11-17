@@ -213,9 +213,9 @@ cp bean.example.toml bean.toml
    - UI hiện mới được kiểm thử bằng Vitest/Testing Library/MSW và WebSocket client test.
 
 4. **Triển khai production thực tế.**
-   - `systemd` unit và Dockerfile đã có nhưng chưa được cài/chạy trên host production.
+   - `systemd` unit và Dockerfile đã có nhưng chưa được cài/chạy trên host production (máy hiện chạy qua `beanctl` — cài systemd tạo hai bộ quản lý vòng đời cho cùng một app, nguy cơ double-instance K27; chỉ làm khi người dùng quyết định chuyển hẳn).
    - Chưa có bằng chứng image production đã build/push/deploy.
-   - Chưa có quy trình backup/restore được kiểm thử trên môi trường thật.
+   - ~~Chưa có quy trình backup/restore được kiểm thử trên môi trường thật.~~ **Đã xong (2026-11-17):** thêm lệnh `bean backup [dest] [--no-secrets]` (SQLite backup API — chụp nhất quán khi instance đang chạy, giữ quyền 0600, có test: DB nhất quán/`--no-secrets`/báo lỗi data.dir thiếu); diễn tập thật: `bean backup` trên `~/.bean` đang serve → giải nén vào `/tmp` → boot instance thứ hai port riêng từ bản restore → login 200 + đủ 29 session thật. Quy trình ghi ở README "Backup và phục hồi". Playwright E2E UI (Chrome thật) cũng đã thêm cùng ngày: `make e2e-ui` (login → chat → duyệt write_file → final; viewport mobile không tràn ngang).
 
 ### 6.2. Đã có code nhưng chưa kiểm chứng thực tế
 

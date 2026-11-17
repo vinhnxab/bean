@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod auth;
+mod backup;
 mod chat;
 mod cli;
 mod config_cmd;
@@ -45,6 +46,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Setup => setup::run_setup(config_path.as_deref()).await,
         Command::Model => setup::run_model(config_path.as_deref()).await,
+        Command::Backup { dest, no_secrets } => backup::run(
+            &backup::BackupArgs { dest, no_secrets },
+            config_path.as_deref(),
+        ),
         // M30: `bean update` không cần cấu hình — nguồn phát hành là hằng số
         // (D23.1), chỉ dùng mạng + đường dẫn binary đang chạy.
         Command::Update { check, no_restart } => {

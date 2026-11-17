@@ -449,9 +449,35 @@ redact, còn auth token chỉ lưu hash. `SIGTERM` và `SIGINT` kích hoạt shu
 Router runs, dừng scheduler, channel, WebSocket server và đóng MCP. Telegram/MCP có
 reconnect; WebSocket client phải gửi `Sync` lại và nạp REST history.
 
-Backup cả `data.dir` (SQLite, auth, audit) và `workspace`; không backup riêng `auth.toml` mà
-bỏ qua database nếu cần khôi phục phiên đăng nhập. Cấu hình và secret có thể tách khỏi
-backup để giảm bề mặt lộ dữ liệu.
+### Backup và phục hồi
+
+`bean backup` chụp toàn bộ `data.dir` thành một file `.tar.gz` nhất quán qua SQLite
+backup API — chạy được ngay cả khi Bean đang serve, không cần dừng (khác `cp` thẳng:
+DB đang chạy `journal_mode=WAL`, copy từng file có thể cho bản chụp hỏng):
+
+```bash
+bean --config bean.toml backup                                # → bean-backup-<thời-gian>.tar.gz ở thư mục hiện tại
+bean --config bean.toml backup /duong/dan/backup.tar.gz
+bean --config bean.toml backup out.tar.gz --no-secrets        # bỏ secrets.env khi archive mang ra khỏi máy
+```
+
+Bên trong archive: `bean.db` (bản chụp nhất quán, không kèm `-wal`/`-shm`),
+`auth.toml`, `secrets.env` (trừ khi `--no-secrets`), `settings-state.json`,
+`audit/`, `checkpoints/`, `skills/`. Quyền file (`0600` cho auth/secrets) được giữ
+nguyên. `workspace/` KHÔNG nằm trong archive — dữ liệu người dùng tự quản, sao chép
+riêng bằng `rsync`/`tar` khi cần (checkpoint mỗi lượt đã nằm trong `checkpoints/`).
+
+Phục hồi: giải nén vào một thư mục `data.dir` **mới** rồi trỏ cấu hình về đó:
+
+```bash
+mkdir -p /duong/dan/data-moi && tar -xzf bean-backup-….tar.gz -C /duong/dan/data-moi
+# sửa [data].dir trong bean.toml (hoặc --config file mới), rồi:
+scripts/beanctl restart
+```
+
+Không giải nén đè lên `data.dir` đang chạy: dừng Bean trước, hoặc restore vào thư mục
+mới (khuyến nghị — quay về bản cũ chỉ là đổi `data.dir` lại). Sau restore, `bean
+doctor` kiểm tra nhanh quyền file và key trước khi `beanctl start`.
 
 ### Khởi động, dừng và xử lý sự cố
 

@@ -742,7 +742,7 @@ tool_tags = ["*"]
 
 Lưu ý khi bật RBAC: mọi identity khác (`telegram:<id>`, `mcp-client:<tên>`) **phải** được liệt kê trong `user_roles`, nếu không sẽ là `no-access`. Tắt/bật tool và đổi cấu hình voice trên UI chỉ dành cho `admin`.
 
-Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean secret set <NAME>` · `bean config set <key> <value>` · `bean setup` · `bean doctor [--online]` · `bean mcp serve [--http]` · `bean update [--check] [--no-restart]` (M30: kiểm tra/cài bản mới từ GitHub Releases — D23 trong `docs/decisions.md`: check tay, chỉ bản stable, tự restart qua `scripts/beanctl` sau khi cài). Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
+Lệnh: `bean chat` (REPL, không cần web) · `bean serve [--fake-llm kichban.json]` (web + Telegram + scheduler) · `bean auth set-password` · `bean auth mcp-token add\|list\|revoke <tên>` · `bean secret set <NAME>` · `bean config set <key> <value>` · `bean setup` · `bean doctor [--online]` · `bean backup [dest] [--no-secrets]` (chụp `data.dir` nhất quán qua SQLite backup API, chạy được khi đang serve — README "Backup và phục hồi") · `bean mcp serve [--http]` · `bean update [--check] [--no-restart]` (M30: kiểm tra/cài bản mới từ GitHub Releases — D23 trong `docs/decisions.md`: check tay, chỉ bản stable, tự restart qua `scripts/beanctl` sau khi cài). Khởi động/dừng **dùng `scripts/beanctl`** (xem `docs/known-issues.md` K27) thay vì tự `kill` + `nohup`.
 
 ---
 

@@ -42,3 +42,6 @@ web/playwright-report/
 
 # Script đo tạm dùng khi chọn crop avatar (sinh tay, không thuộc build)
 web/*.mjs
+
+# Backup do lenh bean backup tao o thu muc hien tai - du lieu nguoi dung, khong commit
+bean-backup-*.tar.gz

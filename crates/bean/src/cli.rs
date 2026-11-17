@@ -70,6 +70,19 @@ pub enum Command {
     /// `evals/tasks/`, ghi metrics JSONL + trajectory để so sánh trước/sau khi
     /// tối ưu. Mọi run nằm trong thư mục tạm — không đụng dữ liệu thật.
     Eval(EvalArgs),
+
+    /// Backup `data.dir` thành một file `.tar.gz` nhất quán (SQLite backup API) —
+    /// chạy được khi Bean đang serve, không cần dừng. Restore: giải nén vào thư
+    /// mục `data.dir` MỚI rồi trỏ cấu hình về đó (README "Logging, backup").
+    Backup {
+        /// File `.tar.gz` đầu ra (mặc định `bean-backup-<thời-gian>.tar.gz` ở thư
+        /// mục hiện tại).
+        dest: Option<PathBuf>,
+
+        /// Không đóng gói `secrets.env` — dùng khi archive mang ra khỏi máy.
+        #[arg(long)]
+        no_secrets: bool,
+    },
 }
 
 /// Tham số của `eval`.

@@ -68,6 +68,10 @@ chrono.workspace = true
 serde_json.workspace = true
 # M29: `bean doctor --online` ping LLM/ElevenLabs/Telegram/web search.
 reqwest.workspace = true
+# `bean backup` (M16 vận hành): chụp SQLite nhất quán + đóng gói tar.gz.
+rusqlite.workspace = true
+tar.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
