@@ -49,24 +49,44 @@ launch() {
   disown
 }
 
+# Tiến trình Bean thật của repo này: cmdline chứa pattern là chưa đủ — shell gọi
+# beanctl có thể mang cùng chuỗi đó (vd `sh -c 'beanctl stop && pgrep -f ...'`) và
+# bị nhầm là Bean (báo động giả 15s + SIGKILL oan shell gọi lệnh). Đối chiếu
+# /proc/<pid>/exe với $BIN mới là nhận diện đúng.
+bean_pids() {
+  local pid exe
+  for pid in $(pgrep -f "target/release/bean --config" 2>/dev/null || true); do
+    [ "$pid" = "$$" ] && continue
+    exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null) || continue
+    [ "$exe" = "$BIN" ] && echo "$pid"
+  done
+}
+
 # stop_all [quiet] — dừng tiến trình Bean ngoài systemd. quiet: im khi không có gì để dừng.
 stop_all() {
-  local quiet="${1:-}" pids
-  # `pgrep -f` khớp cả chính dòng lệnh này nên loại trừ $$ và PPID.
-  pids=$(pgrep -f "target/release/bean --config" 2>/dev/null | grep -vx -e "$$" -e "$PPID" || true)
+  local quiet="${1:-}" pids alive pid state
+  pids=$(bean_pids | tr '\n' ' ')
+  pids="${pids% }"
   if [ -z "$pids" ]; then
     [ -n "$quiet" ] || echo "Không có tiến trình Bean nào đang chạy."
     return 0
   fi
   echo "Đang dừng: $(echo "$pids" | tr '\n' ' ')"
   # SIGTERM để Bean tắt êm (đóng SQLite, huỷ task con). Chờ tối đa 15s rồi mới ép.
+  # Chỉ theo dõi đúng các pid đã thu — pgrep tươi sẽ khớp lại shell gọi lệnh.
   kill -TERM $pids 2>/dev/null
   for _ in $(seq 1 15); do
-    pgrep -f "target/release/bean --config" >/dev/null 2>&1 || { echo "Đã dừng êm."; return 0; }
+    alive=""
+    for pid in $pids; do
+      state=$(cut -d' ' -f3 "/proc/$pid/stat" 2>/dev/null) || continue
+      [ "$state" = "Z" ] && continue   # zombie: đã chết, chỉ chờ parent reap
+      alive="1"
+    done
+    [ -z "$alive" ] && { echo "Đã dừng êm."; return 0; }
     sleep 1
   done
   echo "Không phản hồi SIGTERM trong 15s — dùng SIGKILL."
-  pkill -KILL -f "target/release/bean --config" 2>/dev/null
+  kill -KILL $pids 2>/dev/null
   sleep 1
 }
 
@@ -129,17 +149,21 @@ case "${1:-start}" in
       exit $?
     fi
     check_secrets; stop_all; launch; sleep 3
-    pgrep -f "target/release/bean --config" >/dev/null && echo "Đã restart." || { echo "Không lên, xem $LOG" >&2; exit 1; } ;;
+    bean_pids | grep -q . && echo "Đã restart." || { echo "Không lên, xem $LOG" >&2; exit 1; } ;;
   status)
     if unit_installed; then
-      echo "Unit systemd: $(systemctl --user is-enabled "$UNIT" 2>/dev/null || echo '?') / $(systemctl --user is-active "$UNIT" 2>/dev/null || echo '?')"
+      # is-active/is-enabled in đúng trạng thái (active/inactive/…) và exit != 0
+      # khi inactive — KHÔNG dùng `|| echo '?'` kẻo in thừa dấu ? sau trạng thái.
+      echo "Unit systemd: $(systemctl --user is-enabled "$UNIT" 2>/dev/null) / $(systemctl --user is-active "$UNIT" 2>/dev/null)"
     fi
-    n=$(pgrep -f "target/release/bean --config" | grep -vx -e "$$" -e "$PPID" | wc -l)
+    all_pids=$(bean_pids)
+    n=$(echo "$all_pids" | grep -c .)
     echo "Số tiến trình Bean: $n"
     if [ "$n" -gt 1 ]; then
       echo "⚠  Nhiều hơn một tiến trình — chạy 'beanctl restart' để gom về một."
     fi
-    pgrep -f "target/release/bean --config" | grep -vx -e "$$" -e "$PPID" | while read -r p; do
+    echo "$all_pids" | while read -r p; do
+      [ -n "$p" ] || continue
       echo "  pid $p (đã chạy $(ps -o etime= -p "$p" | tr -d ' '))"
     done
     ss -ltn 2>/dev/null | grep -E '127.0.0.1:(7878|7879)' | sed 's/^/  /' || true
