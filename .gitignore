@@ -36,5 +36,9 @@ auth.toml
 # Ảnh chụp tự phê bình giao diện (sinh bằng `pnpm shot`)
 .screenshots/
 
+# Playwright E2E UI (trace, snapshot lỗi, report)
+web/test-results/
+web/playwright-report/
+
 # Script đo tạm dùng khi chọn crop avatar (sinh tay, không thuộc build)
 web/*.mjs
