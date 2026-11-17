@@ -44,14 +44,22 @@ check-brand:
 
 check: check-rust check-web ## Cổng chất lượng của mỗi milestone
 
-# RUSTSEC-2026-0173 là cảnh báo unmaintained của aquamarine, chỉ nằm trong
-# teloxide 0.17 (latest hiện tại); không phải vulnerability và không có bản sửa.
-# Giữ ignore tường minh để `make audit` không báo pass giả.
+# Các ignore dưới đây là cảnh báo unmaintained (informational), không phải lỗ hổng
+# runtime, và đều KHÔNG có bản vá. Giữ tường minh để `make audit` không báo pass giả.
+# - RUSTSEC-2026-0173: aquamarine, transitive qua teloxide 0.17 (latest hiện tại).
+# - RUSTSEC-2026-0543 / RUSTSEC-2026-0555: chrono + chrono-tz (chronotope ngừng bảo
+#   trì 2026-09-14). chrono là direct dep của 7 crate VÀ transitive qua teloxide,
+#   nên dù migrate workspace sang jiff thì Cargo.lock vẫn chứa chrono — advisory
+#   vẫn bắn cho tới khi teloxide đổi phụ thuộc. Đường dài: theo dõi teloxide hoặc
+#   thay kênh Telegram; quyết định migrate sang jiff/time cần duyệt riêng (quy tắc 4).
 
 audit: ## cargo audit (strict) + pnpm audit --prod
 	@set -e; \
 	if command -v cargo-audit >/dev/null 2>&1; then \
-		$(CARGO) audit -D warnings --ignore RUSTSEC-2026-0173; \
+		$(CARGO) audit -D warnings \
+			--ignore RUSTSEC-2026-0173 \
+			--ignore RUSTSEC-2026-0543 \
+			--ignore RUSTSEC-2026-0555; \
 	elif command -v cargo-deny >/dev/null 2>&1; then \
 		$(CARGO) deny check advisories; \
 	else \
