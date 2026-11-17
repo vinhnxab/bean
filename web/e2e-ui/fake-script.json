@@ -1,0 +1,26 @@
+{
+  "responses": [
+    {
+      "text": "Chào bạn! Đây là câu trả lời E2E cho tin nhắn đầu tiên.",
+      "stop": "end_turn"
+    },
+    {
+      "tool_calls": [
+        {
+          "id": "e2e-w1",
+          "name": "write_file",
+          "args": { "path": "hello-e2e.txt", "content": "Nội dung do E2E ghi" }
+        }
+      ],
+      "stop": "tool_use"
+    },
+    {
+      "text": "Đã ghi hello-e2e.txt sau khi bạn duyệt hành động.",
+      "stop": "end_turn"
+    },
+    {
+      "text": "Trả lời E2E cho viewport mobile.",
+      "stop": "end_turn"
+    }
+  ]
+}

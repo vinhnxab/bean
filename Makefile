@@ -9,7 +9,7 @@ BIN := bean
 
 .DEFAULT_GOAL := help
 
-.PHONY: help types check-rust check-web check-brand check audit build build-headless e2e smoke-scheduler eval \
+.PHONY: help types check-rust check-web check-brand check audit build build-headless e2e e2e-ui smoke-scheduler eval \
         fmt lint test dev-web run-chat clean
 
 help: ## In danh sách target
@@ -70,6 +70,9 @@ build-headless: ## Build Rust release without UI, no Node required
 e2e: ## Binary E2E: login -> chat -> confirm -> Stop -> reconnect Sync
 	$(CARGO) test --locked -p $(BIN) --test m16_e2e -- --nocapture
 	$(CARGO) test --locked -p bean-channels allowlist_blocks_unknown_user_without_reply -- --nocapture
+
+e2e-ui: ## Playwright E2E UI (Chrome that) tren bean serve --fake-llm; khong cham du lieu that
+	cd $(WEB_DIR) && $(PNPM) exec playwright test
 
 smoke-scheduler: ## M16 scheduler smoke: 1 virtual hour with 1ms tick
 	$(CARGO) test --locked -p bean-core --test scheduler one_hour_scheduler_smoke_with_fast_tick -- --nocapture

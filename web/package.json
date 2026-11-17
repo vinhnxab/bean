@@ -13,6 +13,7 @@
     "shot": "node --experimental-strip-types scripts/screenshot.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e-ui": "playwright test",
     "typecheck": "tsc --noEmit",
     "check": "biome check .",
     "check:fix": "biome check --write .",
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/dom": "10.4.2",
     "@testing-library/jest-dom": "7.0.1",

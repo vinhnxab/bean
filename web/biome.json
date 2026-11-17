@@ -4,7 +4,9 @@
     "includes": [
       "src/**",
       "!src/api/generated",
+      "e2e-ui/**",
       "vite.config.ts",
+      "playwright.config.ts",
       "index.html",
       "package.json",
       "tsconfig.json"
