@@ -24,6 +24,15 @@ CONFIG="$REPO/bean.toml"
 ENV_FILE="$HOME/.config/bean/env"
 LOG="/tmp/bean-run/serve.log"
 
+# Khi unit systemd user đã cài (~/.config/systemd/user/bean.service), các lệnh
+# vòng đời delegate sang systemctl để systemd làm supervisor duy nhất — tránh
+# double-instance (K27) và giúp `bean update` (M30) restart đúng đường sau khi
+# cài bản mới. Lệnh `run` vẫn là ExecStart của unit, không đổi.
+UNIT="bean.service"
+UNIT_FILE="$HOME/.config/systemd/user/$UNIT"
+unit_installed() { [ -f "$UNIT_FILE" ]; }
+unit_active() { systemctl --user is-active --quiet "$UNIT" 2>/dev/null; }
+
 # Chạy Bean nền, tách phiên terminal (nó sống sót sau khi terminal đóng) và
 # tách luôn stdin. `setsid` quan trọng: không có nó thì SIGHUP của terminal sẽ
 # giết Bean khi bạn đóng cửa sổ.
@@ -40,12 +49,13 @@ launch() {
   disown
 }
 
+# stop_all [quiet] — dừng tiến trình Bean ngoài systemd. quiet: im khi không có gì để dừng.
 stop_all() {
-  local pids
+  local quiet="${1:-}" pids
   # `pgrep -f` khớp cả chính dòng lệnh này nên loại trừ $$ và PPID.
   pids=$(pgrep -f "target/release/bean --config" 2>/dev/null | grep -vx -e "$$" -e "$PPID" || true)
   if [ -z "$pids" ]; then
-    echo "Không có tiến trình Bean nào đang chạy."
+    [ -n "$quiet" ] || echo "Không có tiến trình Bean nào đang chạy."
     return 0
   fi
   echo "Đang dừng: $(echo "$pids" | tr '\n' ' ')"
@@ -76,6 +86,14 @@ check_secrets() {
 
 case "${1:-start}" in
   start)
+    if unit_installed; then
+      # Đang có instance manual (chưa thuộc systemd)? Dừng trước để không đôi.
+      if ! unit_active; then stop_all quiet; fi
+      check_secrets
+      systemctl --user start "$UNIT"
+      systemctl --user --no-pager status "$UNIT" | head -5
+      exit $?
+    fi
     if [ ! -x "$BIN" ]; then
       echo "LỖI: không có binary $BIN — chạy 'make build' trong $REPO trước." >&2
       exit 1
@@ -95,10 +113,27 @@ case "${1:-start}" in
       exit 1
     fi
     ;;
-  stop)   stop_all ;;
-  restart) check_secrets; stop_all; launch; sleep 3
-           pgrep -f "target/release/bean --config" >/dev/null && echo "Đã restart." || { echo "Không lên, xem $LOG" >&2; exit 1; } ;;
+  stop)
+    if unit_installed; then
+      systemctl --user stop "$UNIT" 2>/dev/null || true
+    fi
+    # Còn tiến trình lẻ loi bên ngoài systemd (migration, crash cũ)? Dừng nốt.
+    stop_all quiet
+    ;;
+  restart)
+    if unit_installed; then
+      if ! unit_active; then stop_all quiet; fi
+      check_secrets
+      systemctl --user restart "$UNIT"
+      systemctl --user --no-pager status "$UNIT" | head -5
+      exit $?
+    fi
+    check_secrets; stop_all; launch; sleep 3
+    pgrep -f "target/release/bean --config" >/dev/null && echo "Đã restart." || { echo "Không lên, xem $LOG" >&2; exit 1; } ;;
   status)
+    if unit_installed; then
+      echo "Unit systemd: $(systemctl --user is-enabled "$UNIT" 2>/dev/null || echo '?') / $(systemctl --user is-active "$UNIT" 2>/dev/null || echo '?')"
+    fi
     n=$(pgrep -f "target/release/bean --config" | grep -vx -e "$$" -e "$PPID" | wc -l)
     echo "Số tiến trình Bean: $n"
     if [ "$n" -gt 1 ]; then

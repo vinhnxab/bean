@@ -7,27 +7,25 @@
 #   scripts/beanctl stop                       # dừng instance manual đang chạy
 #   systemctl --user enable --now bean.service
 #
-# Restart về sau:
-#   systemctl --user restart bean.service
+# Restart về sau: `beanctl restart` cũng được — script tự delegate sang systemctl
+# khi unit đã cài (và nhờ vậy `bean update` M30 restart đúng qua systemd).
 # Xem log:
 #   journalctl --user -u bean.service -f
 #
-# Chạy cả khi chưa đăng nhập (đã bật linger cho vinhnx):
-#   sudo loginctl enable-linger vinhnx         # chỉ cần làm 1 lần
+# Chạy cả khi chưa đăng nhập (bật linger cho user bean):
+#   sudo loginctl enable-linger bean           # chỉ cần làm 1 lần
 
 [Unit]
 Description=Bean personal AI agent (user instance)
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 Type=simple
 # beanctl run: source env (dạng `export ...` mà EnvironmentFile không parse
 # được), fallback DISPLAY/XAUTHORITY cho chrome MCP, rồi exec bean foreground.
-ExecStart=/home/vinhnx/dev/BeanAgent/scripts/beanctl run
+ExecStart=/home/bean/dev/bean/scripts/beanctl run
 # QUAN TRỌNG: Bean nạp bundled skills theo CWD (`PathBuf::from("skills")`
 # trong crates/bean/src/mcp.rs), nên phải chạy đúng từ repo root.
-WorkingDirectory=/home/vinhnx/dev/BeanAgent
+WorkingDirectory=/home/bean/dev/bean
 Restart=on-failure
 RestartSec=5s
 KillSignal=SIGTERM

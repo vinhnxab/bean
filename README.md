@@ -420,6 +420,33 @@ vào image sandbox tool.
 
 ## Cài systemd
 
+### Máy cá nhân: user service (khuyến nghị cho máy của riêng bạn)
+
+Với máy cá nhân không cần user hệ thống hay quyền root: dùng **systemd user service**
+(`deploy/systemd/bean-user.service`). Bean chạy bằng chính tài khoản của bạn, log vào
+journal của user, tự khởi động lại khi lỗi (`Restart=on-failure`) và tự chạy lại sau reboot
+nếu bật linger:
+
+```bash
+cp deploy/systemd/bean-user.service ~/.config/systemd/user/bean.service
+systemctl --user daemon-reload
+scripts/beanctl stop                      # dừng instance manual đang chạy (nếu có)
+systemctl --user enable --now bean.service
+sudo loginctl enable-linger "$USER"       # chạy cả khi chưa đăng nhập — làm 1 lần
+```
+
+Xem log: `journalctl --user -u bean.service -f`.
+
+Sau khi unit đã cài, `scripts/beanctl start|stop|restart|status` **tự delegate sang
+`systemctl --user`** — không có hai bộ quản lý vòng đời song song (tránh double-instance
+K27). Nhờ vậy `bean update` (M30) restart đúng qua systemd mà không cần đổi gì. Lệnh
+`beanctl run` là `ExecStart` của unit (chạy foreground); unit cố ý không hardening sâu
+(PrivateTmp/ProtectHome…) vì chrome MCP cần X11 + `~/.cache`, MCP qua npx cần `~/.npm`,
+sandbox Docker cần docker.sock — tradeoff đã ghi trong comment của unit. Bản unit cho
+server dưới đây thì hardening đầy đủ.
+
+### Máy chủ / deploy production
+
 Binary release không cần Node. Cài user thật, file cấu hình và workspace:
 
 ```bash
