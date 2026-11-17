@@ -40,6 +40,47 @@ describe("StatusPage", () => {
     expect(screen.getByText("telegram")).toBeInTheDocument();
   });
 
+  it("RBAC bật: hiện thêm thanh hạn mức token theo role", async () => {
+    testServer.use(
+      http.get("/api/status", () =>
+        HttpResponse.json({
+          version: "0.1.0",
+          model: "test-model",
+          max_steps: 25,
+          daily_token_budget: 2000,
+          tokens_used: 500,
+          role: "developer",
+          role_daily_token_budget: 1000,
+          role_tokens_used: 750,
+          uptime_seconds: 60,
+          channels: [],
+        }),
+      ),
+    );
+    renderManagement(<StatusPage />);
+    expect(await screen.findByText("750 / 1,000")).toBeInTheDocument();
+    expect(screen.getByText("Tokens today — role developer")).toBeInTheDocument();
+  });
+
+  it("RBAC tắt: không có thanh role", async () => {
+    testServer.use(
+      http.get("/api/status", () =>
+        HttpResponse.json({
+          version: "0.1.0",
+          model: "test-model",
+          max_steps: 25,
+          daily_token_budget: 2000,
+          tokens_used: 500,
+          uptime_seconds: 60,
+          channels: [],
+        }),
+      ),
+    );
+    renderManagement(<StatusPage />);
+    expect(await screen.findByText("500 / 2,000")).toBeInTheDocument();
+    expect(screen.queryByText(/role /)).not.toBeInTheDocument();
+  });
+
   it("hiển thị lỗi", async () => {
     testServer.use(
       http.get("/api/status", () => HttpResponse.json({ code: "boom", message: "no" }, { status: 500 })),

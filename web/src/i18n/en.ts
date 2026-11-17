@@ -241,6 +241,7 @@ export const en: Record<MessageKey, string> = {
   "status.budgetExceeded": "Budget exceeded",
   "status.uptime": "Uptime",
   "status.tokenUsage": "Tokens today",
+  "status.roleTokenUsage": "Tokens today — role {role}",
   "status.channels": "Running channels",
   "status.noChannels": "No channels are running",
   // Model connection dot in the left sidebar header (components/ModelStatusPill).

@@ -151,7 +151,7 @@ pub(super) async fn status(
     State(state): State<WebState>,
     jar: CookieJar,
 ) -> ApiResult<Json<StatusResponse>> {
-    let _ = require_user(&state, &jar).await?;
+    let user_id = require_user(&state, &jar).await?;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let usage = state
         .store
@@ -172,6 +172,29 @@ pub(super) async fn status(
     if state.config.telegram.enabled {
         channels.push("telegram".to_string());
     }
+    // (M21.7) RBAC bật ⇒ hiện luôn cặp số mà agent loop dùng để chặn lượt: ngân
+    // sách hiệu lực của role (`daily_budget_for` — rơi về toàn instance khi role
+    // không khai báo riêng) và token role đã dùng trong ngày. RBAC tắt ⇒ `None`:
+    // khi đó sổ "default" chính là sổ tổng, hiện lại sẽ trùng hai hàng số.
+    let role_info = if state.config.rbac_enabled() {
+        let permissions = state.config.permissions_for(&user_id);
+        let used = state
+            .store
+            .usage_by_role(&today, permissions.usage_scope())
+            .await
+            .map_err(|_| ApiFailure::internal())?;
+        Some((
+            permissions.role.clone(),
+            state.config.daily_budget_for(&permissions),
+            u64::from(used.total()),
+        ))
+    } else {
+        None
+    };
+    let (role, role_daily_token_budget, role_tokens_used) = match role_info {
+        Some((role, budget, used)) => (Some(role), Some(budget), Some(used)),
+        None => (None, None, None),
+    };
     Ok(Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         model: llm.model,
@@ -180,6 +203,9 @@ pub(super) async fn status(
         tokens_used: u64::from(usage.total()),
         uptime_seconds: state.started_at.elapsed().as_secs(),
         channels,
+        role,
+        role_daily_token_budget,
+        role_tokens_used,
     }))
 }
 

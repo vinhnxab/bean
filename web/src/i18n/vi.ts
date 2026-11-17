@@ -248,6 +248,7 @@ export const vi = {
   "status.budgetExceeded": "Đã vượt ngân sách",
   "status.uptime": "Thời gian chạy",
   "status.tokenUsage": "Token hôm nay",
+  "status.roleTokenUsage": "Token hôm nay — role {role}",
   "status.channels": "Kênh đang chạy",
   "status.noChannels": "Không có kênh nào đang chạy",
   // Chấm trạng thái kết nối model ở header sidebar trái (components/ModelStatusPill).

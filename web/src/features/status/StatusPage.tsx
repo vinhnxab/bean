@@ -25,11 +25,6 @@ export function StatusPage() {
   const usage = useUsage();
   const system = useSystem();
   const data = status.data;
-  const percent =
-    data && data.daily_token_budget > 0
-      ? Math.min(100, Math.round((data.tokens_used / data.daily_token_budget) * 100))
-      : 0;
-  const overBudget = data !== undefined && data.tokens_used > data.daily_token_budget;
 
   return (
     <PageShell title={t("status.title")} description={t("status.description")}>
@@ -41,36 +36,20 @@ export function StatusPage() {
           <StatusCard label={t("status.model")} value={data.model} />
           <StatusCard label={t("status.maxSteps")} value={data.max_steps.toLocaleString()} />
           <StatusCard label={t("status.uptime")} value={formatUptime(data.uptime_seconds)} />
-          <Panel className="sm:col-span-2 xl:col-span-3">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">{t("status.tokenUsage")}</p>
-                <p className="mt-1 text-2xl font-bold">
-                  {data.tokens_used.toLocaleString()} / {data.daily_token_budget.toLocaleString()}
-                </p>
-              </div>
-              <span
-                className={
-                  overBudget ? "text-sm font-semibold text-destructive" : "text-sm text-muted-foreground"
-                }
-              >
-                {overBudget ? t("status.budgetExceeded") : `${percent}%`}
-              </span>
-            </div>
-            <div
-              className="mt-3 h-3 overflow-hidden rounded-full bg-accent"
-              role="progressbar"
-              aria-valuenow={percent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={t("status.tokenUsage")}
-            >
-              <div
-                className={overBudget ? "h-full rounded-full bg-destructive" : "h-full rounded-full bg-live"}
-                style={{ width: `${percent}%` }}
-              />
-            </div>
-          </Panel>
+          <BudgetBar
+            label={t("status.tokenUsage")}
+            used={data.tokens_used}
+            budget={data.daily_token_budget}
+            exceededLabel={t("status.budgetExceeded")}
+          />
+          {data.role !== undefined ? (
+            <BudgetBar
+              label={t("status.roleTokenUsage", { role: data.role })}
+              used={data.role_tokens_used ?? 0}
+              budget={data.role_daily_token_budget ?? 0}
+              exceededLabel={t("status.budgetExceeded")}
+            />
+          ) : null}
           <Panel className="sm:col-span-2 xl:col-span-3">
             <h2 className="font-semibold">{t("status.channels")}</h2>
             {data.channels.length > 0 ? (
@@ -111,6 +90,62 @@ function StatusCard({ label, value }: { label: string; value: string }) {
     <Panel>
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="mt-2 break-words text-xl font-bold">{value}</p>
+    </Panel>
+  );
+}
+
+/**
+ * Thanh ngân sách token — dùng chung cho toàn instance và cho role (M21.7).
+ *
+ * # Vì sao hai thanh thay vì một thanh gộp
+ *
+ * Agent loop chặn lượt bằng **hai** trần độc lập (`ensure_daily_budget` +
+ * `ensure_role_daily_budget`): một thanh gộp không thể nói "còn dư nhưng role
+ * của bạn đã cạn" — đúng trường hợp Developer làm hết hạn mức riêng của mình
+ * dù toàn instance còn nhiều.
+ */
+function BudgetBar({
+  label,
+  used,
+  budget,
+  exceededLabel,
+}: {
+  label: string;
+  used: number;
+  budget: number;
+  exceededLabel: string;
+}) {
+  const percent = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0;
+  const overBudget = used > budget;
+
+  return (
+    <Panel className="sm:col-span-2 xl:col-span-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-muted-foreground">{label}</p>
+          <p className="mt-1 text-2xl font-bold">
+            {used.toLocaleString()} / {budget.toLocaleString()}
+          </p>
+        </div>
+        <span
+          className={overBudget ? "text-sm font-semibold text-destructive" : "text-sm text-muted-foreground"}
+        >
+          {overBudget ? exceededLabel : `${percent}%`}
+        </span>
+      </div>
+      <div
+        className="mt-3 h-3 overflow-hidden rounded-full bg-accent"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <div
+          className={overBudget ? "h-full rounded-full bg-destructive" : "h-full rounded-full bg-live"}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
     </Panel>
   );
 }

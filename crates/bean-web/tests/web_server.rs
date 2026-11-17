@@ -267,6 +267,141 @@ async fn authenticated_status_lists_web_and_telegram_channels() {
     assert_eq!(status["channels"], serde_json::json!(["web", "telegram"]));
 }
 
+/// (M21.7) RBAC bật ⇒ `/api/status` trả cặp số mà agent loop dùng để chặn lượt:
+/// ngân sách hiệu lực của role và token role đã dùng — độc lập với cột tổng.
+#[tokio::test]
+async fn status_shows_per_role_budget_when_rbac_enabled() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut config = make_config(&data, &workspace, origin);
+    config.security.daily_token_budget = 10_000;
+    config.roles = vec![RoleConfig {
+        name: "developer".into(),
+        tool_tags: vec!["dev-write".into()],
+        forbid_tags: vec![],
+        allowed_tool_tags: vec![],
+        context_budget_tokens: None,
+        daily_token_budget: Some(500),
+    }];
+    config
+        .agent
+        .user_roles
+        .insert("web:admin".into(), "developer".into());
+    config.validate().unwrap();
+    let store: Arc<MemoryStore> = Arc::new(MemoryStore::new());
+    let (app, _state) = make_state(config, store.clone(), vec![]).await;
+    let token = login(&app, origin).await;
+
+    // Hai sổ độc lập: sổ tổng và sổ riêng role — cùng ngày, khác con số.
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    store
+        .add_usage(
+            &today,
+            Usage {
+                input_tokens: 700,
+                output_tokens: 300,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .add_usage_by_role(
+            &today,
+            "developer",
+            Usage {
+                input_tokens: 100,
+                output_tokens: 50,
+            },
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(get_request("/api/status", origin, Some(&token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status["role"], "developer");
+    // Ngân sách hiệu lực là trần riêng của role, không phải toàn instance.
+    assert_eq!(status["role_daily_token_budget"], 500);
+    assert_eq!(status["role_tokens_used"], 150);
+    // Cột tổng giữ nguyên hành vi cũ.
+    assert_eq!(status["daily_token_budget"], 10_000);
+    assert_eq!(status["tokens_used"], 1_000);
+}
+
+/// Role không khai báo `daily_token_budget` riêng ⇒ trần hiệu lực rơi về ngân sách
+/// toàn instance — đúng công thức `daily_budget_for` mà agent loop dùng.
+#[tokio::test]
+async fn status_role_budget_falls_back_to_global_when_role_has_none() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    let mut config = make_config(&data, &workspace, origin);
+    config.security.daily_token_budget = 10_000;
+    config.roles = vec![RoleConfig {
+        name: "developer".into(),
+        tool_tags: vec!["dev-write".into()],
+        forbid_tags: vec![],
+        allowed_tool_tags: vec![],
+        context_budget_tokens: None,
+        daily_token_budget: None,
+    }];
+    config
+        .agent
+        .user_roles
+        .insert("web:admin".into(), "developer".into());
+    config.validate().unwrap();
+    let store: Arc<MemoryStore> = Arc::new(MemoryStore::new());
+    let (app, _state) = make_state(config, store, vec![]).await;
+    let token = login(&app, origin).await;
+
+    let response = app
+        .oneshot(get_request("/api/status", origin, Some(&token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(status["role"], "developer");
+    assert_eq!(status["role_daily_token_budget"], 10_000);
+    assert_eq!(status["role_tokens_used"], 0);
+}
+
+/// RBAC tắt ⇒ không có sổ riêng role nào (sổ "default" chính là sổ tổng) —
+/// response phải bỏ hẳn ba field role để UI không hiện hàng số trùng.
+#[tokio::test]
+async fn status_omits_role_fields_when_rbac_disabled() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, _store) = fixture(origin, vec![]).await;
+    let token = login(&app, origin).await;
+    let response = app
+        .oneshot(get_request("/api/status", origin, Some(&token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(status.get("role").is_none());
+    assert!(status.get("role_daily_token_budget").is_none());
+    assert!(status.get("role_tokens_used").is_none());
+}
+
 #[tokio::test]
 async fn security_headers_api_404_and_cookie_flags() {
     let origin = "http://127.0.0.1:7878";

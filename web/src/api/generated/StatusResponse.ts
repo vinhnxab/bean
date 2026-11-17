@@ -31,4 +31,19 @@ uptime_seconds: number,
 /**
  * Các channel đang chạy.
  */
-channels: Array<string>, };
+channels: Array<string>, 
+/**
+ * Role của người gọi khi RBAC bật (M21); `None` khi RBAC tắt — khi đó chỉ có
+ * ngân sách toàn instance, không có sổ riêng role nào để hiện.
+ */
+role?: string, 
+/**
+ * Ngân sách token/ngày **hiệu lực cho role này** (`[[roles]].daily_token_budget`,
+ * rơi về ngân sách toàn instance khi role không khai báo riêng) — đúng trần mà
+ * `ensure_role_daily_budget` chặn trong agent loop (M21.7). `None` khi RBAC tắt.
+ */
+role_daily_token_budget?: number, 
+/**
+ * Token role này đã dùng hôm nay (sổ riêng `usage_by_role`). `None` khi RBAC tắt.
+ */
+role_tokens_used?: number, };
