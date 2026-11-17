@@ -312,6 +312,20 @@ describe("chat plan state (D25)", () => {
     expect(useChatStore.getState().runsBySession[2]?.plan).toHaveLength(1);
   });
 
+  it("notification trả effect refetch, không tạo run, và dedupe khi lặp", () => {
+    useChatStore.getState().reset();
+    const message = {
+      type: "notification",
+      session_id: 9,
+      message_id: 5,
+    } as Extract<ServerMsg, { type: "notification" }>;
+    const first = useChatStore.getState().applyServerMessage(message);
+    expect(first).toEqual({ sessionId: 9, messageId: 5, runId: null });
+    // Tin chủ động không thuộc một run — không được dựng trạng thái run ảo.
+    expect(useChatStore.getState().runsBySession[9]).toBeUndefined();
+    expect(useChatStore.getState().applyServerMessage(message)).toBeNull();
+  });
+
   it("applySync khôi phục plan từ snapshot khi client nối lại giữa chừng", () => {
     useChatStore.getState().reset();
     useChatStore.getState().applySync(
