@@ -131,7 +131,7 @@
 | `make smoke-scheduler` | ✅ Pass | Một giờ ảo với fast tick |
 | `make build` | ✅ Pass | Web build + Rust release có UI nhúng |
 | `make build-headless` | ✅ Pass | Release không UI, không cần Node |
-| Playwright | ⬜ Chưa có | Là tuỳ chọn trong M16 |
+| Playwright | ✅ Pass | `make e2e-ui` (2026-11-17): Chrome thật — login → chat → duyệt write_file → final; viewport mobile không tràn ngang. Tuỳ chọn M16 đã đóng |
 | CI | ✅ Xanh 4/4 trên `59efd92` (2026-11-09) | `ci.yml`: check-rust / check-web / eval baseline (fake) / audit. Đã xử lý hai sự cố trong ngày: (1) `cargo audit` báo 4 advisory mới (rmcp 3.4.1 ×3 + libsqlite3-sys) → nâng `rmcp 3.9.0` + `rusqlite 0.41.1` (commit `fix(deps)` `59efd92`); (2) một run fail job check-rust vì test flaky chưa xác định được (pass ở run kế tiếp — xem known-issues mục 4). Flake flaky lặp lại lần 2 trên `d4d72f7` (2026-11-10, local xanh): `ci.yml` giờ in dòng test fail ra **annotations** để lần kế chẩn đoán được mà không cần đăng nhập đọc log. Sự cố thứ ba (2026-11-14): 3 advisory RUSTSEC mới từ quinn (RUSTSEC-2026-0523/0524/0538) → khoá `quinn-proto 0.11.19` + `quinn-udp 0.5.16` (commit `fix(deps)` `59e1943`), CI xanh lại 4/4 |
 | Eval provider thật (K12/K17) | ✅ Đã chạy opt-in với model thật | `bean eval run --tasks evals/tasks-real --provider real` (key từ env, không vào CI): K12 compaction pass (OpenRouter nemotron, ~3,5K/0,7K token); K17 reflection pass (GLM-5.3-flash: 6 tool call → JSON đúng schema → draft tạo được). Model free flaky đã ghi lại trong K17 |
 | Bộ eval đa bước (mục 2 lộ trình) | ✅ Pass | Thêm 3 task fake đa bước vào `evals/tasks/` (tự thành cổng CI "eval baseline"): `fake_multistep_bugfix_config` (glob → sửa đúng một file, file kế bên phải nguyên vẹn — đo chính xác khi sửa), `fake_multistep_find_info` (grep + read → trả lời, cấm `write_file` — đo truy xuất), `fake_multistep_tool_error_recovery` (đọc nhầm tên file → lỗi → tự sửa cách làm — đo hành vi mục 6 AGENTS). Mới: lệnh `bean eval trajectory evals/out/trajectory/<id>.json` in lại diễn biến một run (tool start/end kèm trạng thái, confirm kèm risk, final/error) để debug vì sao model chọn sai tool |
@@ -208,9 +208,7 @@ cp bean.example.toml bean.toml
    - `.github/workflows/ci.yml` (check-rust, check-web, eval baseline fake, audit — trigger push/PR) chạy xanh toàn bộ trên GitHub Actions từ lần chạy đầu; `release.yml` từ M30 cũng xanh khi push tag.
    - `make check`, `make audit`, `make e2e` ngoài CI vẫn là cổng local của mỗi milestone.
 
-3. **Playwright/browser E2E.**
-   - Đây là tuỳ chọn của M16, chưa có.
-   - UI hiện mới được kiểm thử bằng Vitest/Testing Library/MSW và WebSocket client test.
+3. ~~**Playwright/browser E2E.**~~ **Đã xong (2026-11-17):** `make e2e-ui` — Playwright chạy Chrome thật qua binary serve `--fake-llm`: login → chat → duyệt `write_file` qua thẻ diff → final; thêm kiểm tra viewport mobile không tràn ngang. UI vẫn có bộ Vitest/Testing Library/MSW như trước.
 
 4. **Triển khai production thực tế.**
    - ~~`systemd` unit chưa được cài trên host thật~~ **Đã migrate sang systemd user service (2026-11-17).** `deploy/systemd/bean-user.service` cài vào `~/.config/systemd/user/bean.service` + `loginctl enable-linger`; `scripts/beanctl start|stop|restart|status` tự delegate sang `systemctl --user` khi unit đã cài (một bộ quản lý vòng đời duy nhất — hết nguy cơ double-instance K27), `beanctl run` làm `ExecStart`. Diễn tập thật trên máy đang chạy: dừng instance manual (uptime 2 ngày) → `systemctl --user start` → login 200, journal có log JSON, `beanctl status` báo `Unit systemd: enabled / active`, đúng 1 tiến trình; chu kỳ `beanctl stop`/`restart` delegate đều đúng. Bean tự thoát êm sau SIGTERM trong <1s (đo lại 2 lần, gồm instance thật uptime 3 giờ) — dấu hiệu "không phản hồi SIGTERM 15s" lúc migrate là báo động giả của chính `beanctl` (vòng chờ `pgrep -f` khớp cmdline shell gọi lệnh; đã vá cùng ngày, xem K27). Unit cố ý không hardening sâu cho bản user (chrome MCP cần X11/`~/.cache`, npx cần `~/.npm`, sandbox cần docker.sock — tradeoff ghi trong comment unit); bản server `bean.service` giữ hardening đầy đủ, **chưa cài**. Cùng ngày unit đổi `Restart=always` + `StartLimit` 5 lần/5 phút (ở [Unit] — đặt nhầm [Service] bị systemd bỏ qua im lặng, đã dính thật): SIGTERM ngoài systemd làm Bean exit 0 sạch nên on-failure không restart lại, máy mất agent tới khi start tay; đã kiểm chứng 2 chiều — SIGTERM ngoài systemd tự hồi sinh sau 5s (`restart counter is at 1`), `beanctl stop` tường minh vẫn dừng hẳn.
@@ -279,10 +277,10 @@ cp bean.example.toml bean.toml
 
 ### Chưa đạt tiêu chí “vận hành thật”
 
-- Soak test 24 giờ.
-- Deploy production (systemd/Docker trên host thật, diễn tập backup/restore).
-- Playwright/browser E2E.
-- Biến thể provider còn lại: Anthropic thật, Ollama, streaming thật với model thật (thiếu key tương ứng).
+- Soak test 24 giờ đầy đủ (lần gần nhất 15h38p, dừng có chủ ý; từ 2026-11-17 Bean chạy dưới systemd `Restart=always` nên soak tiếp diễn tự nhiên — rà journal định kỳ).
+- ~~Deploy production~~ — systemd user service + linger + backup/restore đã diễn tập thật (2026-11-17); còn lại: push image production (không cấp thiết với máy cá nhân) và tag `v*` thật cho M30.
+- ~~Playwright/browser E2E~~ — đã xong 2026-11-17 (`make e2e-ui`).
+- Biến thể provider còn lại: Anthropic thật, Ollama, streaming thật với model thật (thiếu key tương ứng — chủ dự án để sau cùng).
 
 
 ## 8. Ngoài phạm vi v1
@@ -324,9 +322,9 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [x] S1 đã xử lý (2026-09-26).
 - [x] K1 đã xử lý (2026-09-27) — bọc `<untrusted_content>` + bật `untrusted_seen` khi có summary.
 - [x] S2 đã xử lý (2026-09-27) — lọc escape terminal cho output tool untrusted ở CLI.
-- [ ] E2E memory và learning đầy đủ.
-- [ ] Soak test 24 giờ.
-- [ ] CI và quy trình deploy/backup production.
+- [x] E2E memory và learning đầy đủ (K11, K18 — 2026-11-12).
+- [ ] Soak test 24 giờ (lần gần nhất 15h38p; từ 2026-11-17 instance chạy dưới systemd — coi như soak tiếp diễn, rà journal).
+- [x] CI và quy trình deploy/backup production (CI 4/4 từ 2026-11-09; `bean backup` + diễn tập restore thật, systemd user service + linger — 2026-11-17; còn lại: tag `v*` thật cho M30, push image — tuỳ chọn).
 
 ## 11. Kết luận
 
