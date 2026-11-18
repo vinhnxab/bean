@@ -298,9 +298,9 @@ make check xanh.
 - **LSP-bridge MCP server** (Bean làm MCP *client* nối vào Language Server để hiểu code sâu hơn,
   thu hẹp khoảng cách với OpenCode): rẻ hơn tự viết LSP integration, chỉ cần thêm một entry
   `[[mcp_servers]]` — cân nhắc làm sau M25 nếu Developer role cần sửa codebase lớn/phức tạp hơn.
-- **Checkpoint/rollback cho Developer role** (học từ Cline): snapshot workspace trước khi agent
-  chạy tác vụ nhiều bước, cho phép rollback — đáng làm, rẻ, tăng an toàn rõ rệt; chưa gán số
-  milestone, nên gộp vào M21 hoặc làm milestone riêng ngay sau nếu muốn.
+- ~~**Checkpoint/rollback cho Developer role** (học từ Cline)~~ → **ĐÃ LÀM (D26)**: snapshot
+  workspace trước khi ghi, rollback qua tool `workspace_rollback`; đã kiểm chứng tay 2026-11-16
+  (tạo file → rollback → file biến mất, 25 file về bản cũ).
 - **Extension mỏng cho VS Code** (chỉ là webview gọi lại Web adapter, không thêm trí tuệ): giá
   trị thấp so với M25, ưu tiên sau cùng nếu vẫn muốn có UI trong editor.
 
