@@ -88,9 +88,16 @@ impl Sandbox {
     #[must_use]
     pub fn new(cfg: SandboxConfig, workspace: PathBuf) -> Self {
         if cfg.mode == SandboxMode::Host {
-            tracing::warn!(
-                "sandbox mode = HOST: mọi lệnh run_shell là Dangerous và chạy trực tiếp trên máy host"
-            );
+            if cfg.host_allow_programs.is_empty() {
+                tracing::warn!(
+                    "sandbox mode = HOST: mọi lệnh run_shell là Dangerous và chạy trực tiếp trên máy host"
+                );
+            } else {
+                tracing::warn!(
+                    "sandbox mode = HOST: lệnh ngoài whitelist ({}) là Dangerous và chạy trực tiếp trên máy host (Q8)",
+                    cfg.host_allow_programs.join(", ")
+                );
+            }
         }
         Self { cfg, workspace }
     }
@@ -108,21 +115,30 @@ impl Sandbox {
         }
     }
 
-    /// Mức rủi ro **cơ bản** của `run_shell` theo chế độ (mục 15.2): docker ⇒ `Confirm`,
-    /// host ⇒ `Dangerous` (luôn hỏi, không có "cho phép trong phiên" — mục 7.2).
+    /// Mức rủi ro **cơ bản** của `run_shell` theo chế độ (mục 15.2, Q8): docker ⇒
+    /// `Safe` (sandbox cách ly); host ⇒ `Dangerous` — whitelist
+    /// `host_allow_programs` (tính theo **từng lệnh**, xem [`crate::shell`]) chỉ hạ
+    /// lệnh khớp xuống `Safe` nên mức cơ bản của host vẫn là `Dangerous`.
     #[must_use]
     pub const fn base_risk(&self) -> Risk {
         Self::base_risk_for(self.cfg.mode)
     }
 
     /// Bản đồ chế độ → rủi ro, dạng associated — [`crate::shell`] đọc từ watch cell
-    /// (D22.5b) nên không cần instance [`Sandbox`].
+    /// (D22.5b) nên không cần instance [`Sandbox`]. Whitelist host mode là lớp tinh
+    /// chỉnh theo lệnh phía trên mức cơ bản này.
     #[must_use]
     pub const fn base_risk_for(mode: SandboxMode) -> Risk {
         match mode {
-            SandboxMode::Docker => Risk::Confirm,
+            SandboxMode::Docker => Risk::Safe,
             SandboxMode::Host => Risk::Dangerous,
         }
+    }
+
+    /// Whitelist tên chương trình host mode (Q8) từ `[security.sandbox].host_allow_programs`.
+    #[must_use]
+    pub fn host_allow_programs(&self) -> &[String] {
+        &self.cfg.host_allow_programs
     }
 
     /// Timeout (giây) cho một lệnh shell theo cấu hình `[security.sandbox]`.
@@ -840,7 +856,9 @@ mod tests {
             },
             ws.path().to_path_buf(),
         );
-        assert_eq!(docker.base_risk(), Risk::Confirm);
+        // Q8: docker là Safe (sandbox cách ly); host giữ Dangerous làm mức cơ bản —
+        // whitelist `host_allow_programs` chỉ hạ lệnh khớp xuống Safe theo từng call.
+        assert_eq!(docker.base_risk(), Risk::Safe);
         assert_eq!(host.base_risk(), Risk::Dangerous);
     }
 

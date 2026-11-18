@@ -72,6 +72,14 @@
 
 **Chú thích:** “🟡” không có nghĩa code chưa tồn tại; đó là trường hợp logic đã triển khai và test xanh nhưng tiêu chí vận hành thực tế hoặc known issue liên quan chưa hoàn tất.
 
+**Đợt 2026-11-18 — chốt lộ trình (K30 full, Q8 run_shell, tag thật, M25 smoke):**
+
+- **K30 full (b64124a):** `LlmConfig.api_key`, `LlmProfile.api_key`, `VoiceConfig.api_key` → `Option<secrecy::SecretString>` qua module serde thủ công (serialize lộ plaintext — chỉ cho file 0600 do Bean quản; deserialize bọc `SecretString` ngay tại biên). Vá toàn bộ consumer (`llm_profiles.rs`, `rest_config.rs`, `config_cmd.rs`, `doctor.rs`, `products.rs`, `voice_state.rs`); test hồi quy `debug_config_khong_bao_gio_lo_api_key`. Known-issues K30 chuyển **đã đóng**.
+- **Q8 — chính sách xác nhận `run_shell` theo sandbox mode (chủ dự án chốt):** docker mode ⇒ `Safe` (sandbox cách ly là rào cản chính, deny-list vẫn ép hỏi mẫu nguy hiểm); host mode ⇒ whitelist `[security.sandbox].host_allow_programs` (chữ đầu khớp nguyên từ + không có ký tự nối shell ⇒ `Safe`, danh sách rỗng ⇒ hỏi mọi lệnh — fail-closed). Code tại `bean-security/src/shell.rs` (`host_allowlisted`) + `bean-types/src/config/tools.rs`; test mới trong `shell.rs`/`validate.rs`/`sandbox.rs`.
+- **Q9 — chốt phạm vi giai đoạn đóng lộ trình:** soak 24h bỏ (systemd `Restart=always` là soak tiếp diễn); S3/S4, sub-agent song song, LSP-bridge vào backlog; VS Code extension bỏ; Telegram một người dùng; streaming không cần Anthropic (openai_compat SSE đã nối agent loop).
+- **M30 phát hành thật:** bump `0.1.1` → `0.1.2`, push tag `v0.1.2` để chứng minh release workflow 5 target lần đầu (kết quả cập nhật ở row M30 sau khi CI xong).
+- **M25 smoke:** `bean mcp serve` (stdio) với client `@modelcontextprotocol/sdk` — list tools + gọi 1 tool read-only.
+
 ## 3. Năng lực đã triển khai
 
 ### Lõi agent

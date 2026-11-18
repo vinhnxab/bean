@@ -41,6 +41,14 @@ pub struct SandboxConfig {
     pub pids_limit: u32,
     /// Thời gian tối đa cho một lệnh shell (giây).
     pub timeout_seconds: u64,
+    /// Whitelist tên chương trình cho **host mode** (Q8): lệnh mà chữ đầu khớp
+    /// một tên trong danh sách và **không** chứa ký tự nối shell (`; & | > < \`
+    /// `$ ( )` xuống dòng, `\`) chạy thẳng không hỏi (`Safe`); lệnh còn lại giữ
+    /// `Dangerous` như cũ. Rỗng (mặc định) ⇒ whitelist tắt, host mode hỏi mọi lệnh
+    /// (fail-closed). **Không** đưa interpreter (`sh`, `bash`, `python`, `perl`…)
+    /// vào danh sách — cờ `-c`/`-e` của chúng chạy code bất kỳ mà không cần ký tự nối.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_allow_programs: Vec<String>,
 }
 
 impl Default for SandboxConfig {
@@ -53,6 +61,7 @@ impl Default for SandboxConfig {
             cpus: 1.0,
             pids_limit: 64,
             timeout_seconds: 60,
+            host_allow_programs: Vec::new(),
         }
     }
 }

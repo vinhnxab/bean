@@ -277,9 +277,9 @@ impl Config {
         if sandbox.timeout_seconds == 0 {
             return Err(invalid("security.sandbox.timeout_seconds phải > 0"));
         }
-        if sandbox.mode == SandboxMode::Host {
+        if sandbox.mode == SandboxMode::Host && sandbox.host_allow_programs.is_empty() {
             tracing::warn!(
-                "security.sandbox.mode = \"host\": mọi lệnh shell sẽ bị coi là Dangerous (agents.md mục 15.2)"
+                "security.sandbox.mode = \"host\": mọi lệnh shell sẽ bị coi là Dangerous (agents.md mục 15.2) — đặt host_allow_programs để whitelist các lệnh chạy thẳng (Q8)"
             );
         }
 

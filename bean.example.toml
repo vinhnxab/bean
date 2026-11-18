@@ -297,6 +297,12 @@ network = false
 memory = "512m"
 cpus = 1.0
 timeout_seconds = 60
+# Whitelist host mode (Q8): khi mode = "host", lệnh mà chữ đầu khớp một tên dưới
+# đây và KHÔNG chứa ký tự nối shell (`; & | > < ` $ ( )`, xuống dòng, `\`) chạy
+# thẳng không hỏi; lệnh còn lại là Dangerous (luôn hỏi). Rỗng = hỏi mọi lệnh
+# (fail-closed). ĐỪNG đưa interpreter (`sh`, `bash`, `python`, `perl`…) vào đây —
+# cờ `-c`/`-e` của chúng chạy code bất kỳ mà không cần ký tự nối.
+# host_allow_programs = ["cargo", "pnpm", "node", "npx", "make", "git", "ls", "cat", "grep", "rg", "find", "wc", "head", "tail", "diff"]
 
 # ---------------------------------------------------------------------------
 # Checkpoint/rollback workspace (D26 — lộ trình chất lượng mục 5c).

@@ -110,6 +110,8 @@ impl ScanSandboxConfig {
             cpus: self.cpus,
             pids_limit: self.pids_limit,
             timeout_seconds: self.timeout_seconds,
+            // Scanner không dùng whitelist host (Q8 chỉ áp run_shell chính).
+            host_allow_programs: Vec::new(),
         }
     }
 }
@@ -225,6 +227,8 @@ impl QaSandboxConfig {
             cpus: self.cpus,
             pids_limit: self.pids_limit,
             timeout_seconds: self.timeout_seconds,
+            // QA runner không dùng whitelist host (Q8 chỉ áp run_shell chính).
+            host_allow_programs: Vec::new(),
         }
     }
 }
