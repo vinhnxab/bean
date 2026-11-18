@@ -17,6 +17,12 @@
 
 [Unit]
 Description=Bean personal AI agent (user instance)
+# 5 lần khởi động thất bại liên tiếp trong 5 phút → dừng và giữ trạng thái failed
+# thay vì restart vô hạn mỗi 5s (config hỏng, port bị chiếm… sẽ nổi lên rõ ràng).
+# Restart tay (beanctl restart) không cộng vào giới hạn này. LƯU Ý: hai khoá này
+# thuộc [Unit], đặt trong [Service] sẽ bị systemd bỏ qua im lặng (đã dính thật).
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -26,7 +32,12 @@ ExecStart=/home/bean/dev/bean/scripts/beanctl run
 # QUAN TRỌNG: Bean nạp bundled skills theo CWD (`PathBuf::from("skills")`
 # trong crates/bean/src/mcp.rs), nên phải chạy đúng từ repo root.
 WorkingDirectory=/home/bean/dev/bean
-Restart=on-failure
+# Restart=always (không chỉ on-failure): SIGTERM từ tiến trình ngoài systemd
+# (pkill, script khác) làm Bean exit 0 SẠCH — on-failure sẽ không restart lại,
+# máy mất agent cho tới khi ai đó start tay. always che cả trường hợp này;
+# `systemctl --user stop` tường minh vẫn dừng hẳn (systemd không restart sau
+# lệnh stop của người vận hành). StartLimit chống crash-loop nằm ở [Unit].
+Restart=always
 RestartSec=5s
 KillSignal=SIGTERM
 TimeoutStopSec=20s
