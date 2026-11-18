@@ -566,7 +566,7 @@ fn key_dan_vao_ui_vao_secrets_env_khong_vao_toml() {
     let mut with_key = new_profile("paid", "anthropic/claude-opus-5");
     with_key.provider = LlmProviderKind::Anthropic;
     with_key.api_key_env = "BEAN_TEST_PAID_KEY_UNSET".to_string();
-    with_key.api_key = Some("sk-file-key-abcd".to_string());
+    with_key.api_key = Some(SecretString::from("sk-file-key-abcd"));
     setup.router.add_llm_provider(with_key).unwrap();
 
     // Danh sách profile: key_configured = true (secrets.env có giá trị), hint = 4

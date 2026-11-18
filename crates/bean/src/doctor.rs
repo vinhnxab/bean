@@ -20,6 +20,7 @@ use bean_settings::{ProbeLevel, ProbeOutcome, SecretSlotRegistry, SecretStore, e
 use bean_types::config::{
     Config, DEFAULT_CONFIG_FILE, SETTINGS_STATE_FILE, SettingsState, SpeechProviderKind,
 };
+use secrecy::ExposeSecret;
 
 use crate::chat::expand_tilde;
 
@@ -256,13 +257,13 @@ fn check_permissions(config_path: Option<&Path>, data_dir: &Path, findings: &mut
 // Key sai chỗ
 // ---------------------------------------------------------------------------
 
-fn non_empty(value: Option<&str>) -> bool {
-    value.is_some_and(|value| !value.trim().is_empty())
+fn non_empty_secret(value: Option<&secrecy::SecretString>) -> bool {
+    value.is_some_and(|key| !key.expose_secret().trim().is_empty())
 }
 
 fn check_misplaced_keys(config: &Config, _data_dir: &Path, findings: &mut Vec<Finding>) {
     const MIGRATE_HINT: &str = "bean config migrate-secrets --apply";
-    if non_empty(config.llm.api_key.as_deref()) {
+    if non_empty_secret(config.llm.api_key.as_ref()) {
         findings.push(
             Finding::warn(
                 "[llm].api_key còn plaintext trong bean.toml — deprecated (M29), key nên nằm trong secrets.env",
@@ -271,7 +272,7 @@ fn check_misplaced_keys(config: &Config, _data_dir: &Path, findings: &mut Vec<Fi
         );
     }
     for profile in &config.llm.providers {
-        if non_empty(profile.api_key.as_deref()) {
+        if non_empty_secret(profile.api_key.as_ref()) {
             findings.push(
                 Finding::warn(format!(
                     "[[llm.providers]] `{}` còn api_key plaintext trong bean.toml — deprecated (M29)",
@@ -838,6 +839,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use secrecy::SecretString;
 
     #[test]
     fn exit_code_reflects_worst_severity() {
@@ -850,7 +852,7 @@ mod tests {
     #[test]
     fn misplaced_keys_are_flagged() {
         let mut config = Config::default();
-        config.llm.api_key = Some("key".to_string());
+        config.llm.api_key = Some(SecretString::from("key"));
         let dir = tempfile::tempdir().unwrap();
 
         let mut findings = Vec::new();
@@ -876,7 +878,7 @@ mod tests {
             provider: bean_types::config::LlmProviderKind::OpenAiCompat,
             model: "test-model".to_string(),
             allowed_models: Vec::new(),
-            api_key: Some("key".to_string()),
+            api_key: Some(SecretString::from("key")),
             api_key_env: String::new(),
             base_url: None,
             max_tokens: 4096,

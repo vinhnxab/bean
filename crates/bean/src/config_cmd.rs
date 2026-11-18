@@ -16,7 +16,7 @@ use bean_settings::settings::{
 };
 use bean_settings::{SecretSlotRegistry, SecretStore};
 use bean_types::config::{Config, VoiceState};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::chat::expand_tilde;
 use crate::cli::ConfigCommandAction;
@@ -238,8 +238,8 @@ fn migrate_secrets(
     if let Some(key) = config
         .llm
         .api_key
-        .as_deref()
-        .map(str::trim)
+        .as_ref()
+        .map(|key| key.expose_secret().trim())
         .filter(|key| !key.is_empty())
     {
         migrations.push(Migration {
@@ -251,8 +251,8 @@ fn migrate_secrets(
     for profile in &config.llm.providers {
         if let Some(key) = profile
             .api_key
-            .as_deref()
-            .map(str::trim)
+            .as_ref()
+            .map(|key| key.expose_secret().trim())
             .filter(|key| !key.is_empty())
         {
             migrations.push(Migration {

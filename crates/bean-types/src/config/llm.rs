@@ -1,7 +1,9 @@
 //! Section `[llm]`, `[tools.web_search]`, `[learning]`.
 
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 
+use super::secret_serde;
 use super::*;
 
 /// `[llm]`.
@@ -18,8 +20,13 @@ pub struct LlmConfig {
     pub api_key_env: String,
     /// API key đặt trực tiếp qua UI (G3b), lưu trong `bean.toml` — file tự chmod
     /// 0600 khi có key. `None` ⇒ resolve từ `api_key_env`. Ưu tiên: `api_key` > env.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
+    /// Bọc [`SecretString`] (K30): `Debug` redact, serialize chỉ qua `secret_serde`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "secret_serde"
+    )]
+    pub api_key: Option<SecretString>,
     /// Ghi đè base URL (dùng cho endpoint không phải OpenAI chính thức / Ollama).
     pub base_url: Option<String>,
     /// Trần token cho mỗi lượt gọi.
@@ -61,7 +68,7 @@ pub fn default_max_tokens() -> u32 {
 /// Profile là "bản sao" của `[llm]` mang tên: switch profile = copy các trường vào
 /// `[llm]` và dựng lại provider runtime (hot-swap). `name = "default"` được dành
 /// riêng cho profile ngầm định, không dùng làm tên tường minh.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LlmProfile {
     /// Tên profile, tham chiếu khi switch (ví dụ `ollama`, `openrouter`).
@@ -78,8 +85,13 @@ pub struct LlmProfile {
     pub api_key_env: String,
     /// API key dán trực tiếp qua UI (G3b), lưu trong `bean.toml` — file tự chmod 0600
     /// khi có key. `None` ⇒ resolve từ `api_key_env`. Ưu tiên: `api_key` > env.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
+    /// Bọc [`SecretString`] (K30); router absorb vào `secrets.env` rồi xoá trường này.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "secret_serde"
+    )]
+    pub api_key: Option<SecretString>,
     /// Base URL ghi đè (endpoint tự host / gateway).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -94,6 +106,30 @@ pub struct LlmProfile {
 fn is_default_max_tokens(value: &u32) -> bool {
     *value == default_max_tokens()
 }
+
+// `SecretString` không impl `PartialEq` (chống lộ qua so sánh timing) nên derive
+// không dùng được — so sánh thủ công qua `expose_secret` (chỉ dùng trong test).
+impl PartialEq for LlmProfile {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.provider == other.provider
+            && self.model == other.model
+            && self.allowed_models == other.allowed_models
+            && self.api_key_env == other.api_key_env
+            && self
+                .api_key
+                .as_ref()
+                .map(secrecy::ExposeSecret::expose_secret)
+                == other
+                    .api_key
+                    .as_ref()
+                    .map(secrecy::ExposeSecret::expose_secret)
+            && self.base_url == other.base_url
+            && self.max_tokens == other.max_tokens
+    }
+}
+
+impl Eq for LlmProfile {}
 
 /// Lỗi validate một [`LlmProfile`] trước khi lưu vào `bean.toml` (CRUD từ UI).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -140,7 +176,7 @@ impl LlmProfile {
             ));
         }
         if let Some(key) = &self.api_key {
-            if key.trim().is_empty() {
+            if key.expose_secret().trim().is_empty() {
                 return Err(invalid(
                     "api_key",
                     "không được rỗng — muốn xoá key đã lưu thì bỏ hẳn trường này",
@@ -148,7 +184,7 @@ impl LlmProfile {
             }
             // Key chứa ký tự điều khiển/ẩn (thường do copy-paste lỗi) khiến provider
             // trả 401 "Malformed authentication credential" — chặn ngay ở biên.
-            if key.chars().any(char::is_control) {
+            if key.expose_secret().chars().any(char::is_control) {
                 return Err(invalid(
                     "api_key",
                     "chứa ký tự điều khiển/ẩn — dán lại key từ nguồn đáng tin cậy",

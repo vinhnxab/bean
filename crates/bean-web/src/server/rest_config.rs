@@ -13,6 +13,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum_extra::extract::cookie::CookieJar;
 use bean_types::config::{LlmProfile, LlmProviderKind};
+use secrecy::SecretString;
 
 use crate::api_types::{
     LlmConfigResponse, LlmModelUpdateRequest, LlmModelUpdateResponse, LlmProviderCreateRequest,
@@ -204,7 +205,7 @@ fn parse_create_profile(request: LlmProviderCreateRequest) -> Result<LlmProfile,
     profile.name = name;
     // Tạo profile: key truyền thẳng vào profile (router normalize + validate).
     if let bean_core::ApiKeyUpdate::Set(key) = key_update {
-        profile.api_key = Some(key);
+        profile.api_key = Some(SecretString::from(key));
     }
     Ok(profile)
 }

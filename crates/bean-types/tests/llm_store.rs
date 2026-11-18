@@ -6,6 +6,7 @@
 use bean_types::config::{
     LlmProfile, LlmProviderKind, default_max_tokens, validate_profile_name, write_llm_providers,
 };
+use secrecy::SecretString;
 
 fn profile(name: &str, model: &str) -> LlmProfile {
     LlmProfile {
@@ -234,18 +235,18 @@ fn validate_ten_profile() {
 fn validate_api_key_trong_luu_tru() {
     // Key hợp lệ.
     let mut valid = profile("ok", "m");
-    valid.api_key = Some("sk-or-v1-abc123".to_string());
+    valid.api_key = Some(SecretString::from("sk-or-v1-abc123"));
     assert!(valid.validate_for_storage().is_ok());
     // Key rỗng / chỉ khoảng trắng bị từ chối.
-    valid.api_key = Some(String::new());
+    valid.api_key = Some(SecretString::from(String::new()));
     assert_eq!(valid.validate_for_storage().unwrap_err().field, "api_key");
-    valid.api_key = Some("   ".to_string());
+    valid.api_key = Some(SecretString::from("   "));
     assert_eq!(valid.validate_for_storage().unwrap_err().field, "api_key");
     // Key chứa ký tự điều khiển (copy-paste lỗi) bị từ chối — nguyên nhân 401
     // "Malformed authentication credential" ngoài đời thật.
-    valid.api_key = Some("sk-key\n".to_string());
+    valid.api_key = Some(SecretString::from("sk-key\n"));
     assert_eq!(valid.validate_for_storage().unwrap_err().field, "api_key");
-    valid.api_key = Some("sk-ke\u{200b}y".to_string());
+    valid.api_key = Some(SecretString::from("sk-ke\u{200b}y"));
     assert!(
         valid.validate_for_storage().is_ok(),
         "zero-width space không phải control char"
@@ -253,6 +254,22 @@ fn validate_api_key_trong_luu_tru() {
     // None = resolve từ env, hợp lệ.
     valid.api_key = None;
     assert!(valid.validate_for_storage().is_ok());
+}
+
+#[test]
+fn debug_config_khong_bao_gio_lo_api_key() {
+    // K30: `Config`/`LlmProfile` derive `Debug` nhưng key bọc `SecretString` nên
+    // `{:?}`-log nguyên struct không bao giờ lộ giá trị key.
+    let mut paid = profile("paid", "m");
+    paid.api_key = Some(SecretString::from("sk-profile-secret-value"));
+    let mut config = bean_types::Config::default();
+    config.llm.api_key = Some(SecretString::from("sk-main-secret-value"));
+    config.llm.providers.push(paid);
+    config.voice.api_key = Some(SecretString::from("sk-voice-secret-value"));
+    let rendered = format!("{config:?}");
+    assert!(!rendered.contains("sk-profile-secret-value"), "{rendered}");
+    assert!(!rendered.contains("sk-main-secret-value"), "{rendered}");
+    assert!(!rendered.contains("sk-voice-secret-value"), "{rendered}");
 }
 
 #[test]
@@ -268,7 +285,7 @@ fn api_key_khong_bao_gio_ghi_vao_toml_m29() {
     let mut paid = profile("paid", "claude-opus-5");
     // M29: key dán trong profile không bao giờ được ghi vào `bean.toml` — nó sống
     // ở env hoặc `secrets.env` (0600), do Router/SettingsService chịu trách nhiệm.
-    paid.api_key = Some("sk-test-key-1234".to_string());
+    paid.api_key = Some(SecretString::from("sk-test-key-1234"));
     let providers = vec![profile("ollama", "qwen3:14b"), paid];
     write_llm_providers(&path, &providers).unwrap();
 

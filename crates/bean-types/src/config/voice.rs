@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::secret_serde;
 use super::*;
 
 /// `[voice]` — cấu hình push-to-talk (M27).
@@ -45,8 +46,14 @@ pub struct VoiceConfig {
     /// (quyền `0600`) rồi `apply_persisted_voice_state` gán vào đây lúc khởi động.
     /// Cùng quy ước `[llm] api_key` (M25); `bean.toml` cũng chấp nhận trường này
     /// nhưng `skip_serializing` để key không bao giờ được serialize ra ngoài.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
+    /// Bọc [`SecretString`] (K30): `Debug` redact, serialize chỉ qua `secret_serde`
+    /// (plaintext chỉ đích danh file `voice-state.json` 0600 — quyết định Q6).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "secret_serde"
+    )]
+    pub api_key: Option<SecretString>,
     /// Tên biến môi trường chứa API key ElevenLabs **riêng**.
     ///
     /// `validate()` từ chối nếu trùng credential của LLM/web search/Telegram/billing/

@@ -129,8 +129,8 @@ impl Router {
     fn legacy_stored_api_key(profile: &bean_types::config::LlmProfile) -> Option<String> {
         profile
             .api_key
-            .as_deref()
-            .map(str::trim)
+            .as_ref()
+            .map(|key| key.expose_secret().trim())
             .filter(|key| !key.is_empty())
             .map(str::to_string)
     }
@@ -150,7 +150,7 @@ impl Router {
         let pasted = profile
             .api_key
             .take()
-            .map(|key| key.trim().to_string())
+            .map(|key| key.expose_secret().trim().to_string())
             .filter(|key| !key.is_empty());
         let Some(key) = pasted else {
             return Ok(());
@@ -357,7 +357,7 @@ impl Router {
                         }
                     } else {
                         // Không có khoá (test/`chat`): giữ hành vi cũ trong RAM.
-                        profile.api_key = Some(legacy);
+                        profile.api_key = Some(SecretString::from(legacy));
                     }
                 }
             }

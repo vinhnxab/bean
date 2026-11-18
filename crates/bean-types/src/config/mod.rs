@@ -33,6 +33,35 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Serde cho trường `api_key: Option<SecretString>` trong cấu hình (K30).
+///
+/// * Deserialize: nhận chuỗi thô từ TOML/JSON rồi bọc [`SecretString`] ngay tại biên —
+///   sau khi nạp, không còn `String` plaintext nào trong `Config`.
+/// * Serialize: lộ plaintext — chỉ hợp lệ cho file 0600 do Bean tự quản
+///   (`voice-state.json`, luồng nhập key qua UI — quyết định Q6). `write_llm_providers`
+///   dùng `toml_edit` nên không bao giờ serialize key ra `bean.toml`.
+/// * `Debug` của `SecretString` luôn redact, nên `{:?}`-log `Config` không lộ key.
+pub(crate) mod secret_serde {
+    use secrecy::{ExposeSecret, SecretString};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(crate) fn serialize<S: Serializer>(
+        key: &Option<SecretString>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match key {
+            Some(key) => serializer.serialize_some(key.expose_secret()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<SecretString>, D::Error> {
+        Ok(Option::<String>::deserialize(deserializer)?.map(SecretString::from))
+    }
+}
+
 mod access;
 mod agent;
 mod channels;

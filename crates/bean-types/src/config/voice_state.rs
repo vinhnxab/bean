@@ -126,7 +126,7 @@ impl VoiceState {
             config.voice.language = language.clone();
         }
         if let Some(api_key) = &self.api_key {
-            config.voice.api_key = Some(api_key.clone());
+            config.voice.api_key = Some(SecretString::from(api_key.clone()));
         }
         if let Some(voice_id) = &self.tts_voice_id {
             config.voice.tts_voice_id = voice_id.clone();
@@ -328,7 +328,14 @@ mod tests {
         assert!(saved.apply_to_config(&mut config));
         assert_eq!(config.voice.provider, SpeechProviderKind::Api);
         assert_eq!(config.voice.language, "en");
-        assert_eq!(config.voice.api_key.as_deref(), Some("sk-from-ui"));
+        assert_eq!(
+            config
+                .voice
+                .api_key
+                .as_ref()
+                .map(secrecy::ExposeSecret::expose_secret),
+            Some("sk-from-ui")
+        );
         assert_eq!(config.voice.tts_voice_id, "jessica-voice");
         assert_eq!(config.voice.tts_voice_vi.as_deref(), Some("kim-voice"));
         // `enabled = false` áp bình thường.
