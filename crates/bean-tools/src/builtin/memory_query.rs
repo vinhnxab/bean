@@ -78,12 +78,17 @@ async fn read_memory_file(ws: Arc<dyn WorkspaceFs>, requested: &str) -> Result<S
         .ok_or_else(|| ToolError::InvalidArgs("`file` phải là `MEMORY` hoặc `USER`".into()))?;
     let ws2 = ws.clone();
     let name_for_closure = file.clone();
-    let text = tokio::task::spawn_blocking(move || ws2.read_text(&name_for_closure))
-        .await
-        .map_err(|e| ToolError::Internal(e.to_string()))??;
+    let text = match tokio::task::spawn_blocking(move || ws2.read_text(&name_for_closure)).await {
+        // File chưa được tạo là trạng thái bình thường của bộ nhớ dài hạn: agent (context.rs)
+        // cũng coi file thiếu là rỗng, nên client MCP phải thấy cùng một sự thật thay vì lỗi.
+        Ok(Err(ToolError::NotFound(_))) => String::new(),
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(ToolError::Internal(e.to_string())),
+        Ok(Ok(text)) => text,
+    };
     if text.trim().is_empty() {
         return Ok(format!(
-            "{file} hiện trống — người dùng chưa ghi gì vào đây."
+            "{file} hiện trống (hoặc chưa được tạo) — chưa có ghi chú nào."
         ));
     }
     Ok(
@@ -119,7 +124,8 @@ mod tests {
         fn read_text(&self, rel: &str) -> Result<String, ToolError> {
             match rel {
                 "MEMORY.md" => Ok("dự án Bean: chỉ đọc".to_string()),
-                "USER.md" => Ok(String::new()),
+                // `USER.md` chưa được tạo — chứng minh tool trả thông báo thay vì lỗi.
+                "USER.md" => Err(ToolError::NotFound("USER.md".to_string())),
                 _ => Err(ToolError::NotFound(rel.to_string())),
             }
         }
@@ -178,12 +184,14 @@ mod tests {
             .await
             .unwrap();
         assert!(out.contains("dự án Bean"));
-        // `USER.md` rỗng ⇒ trả thông báo rõ, không phải lỗi.
-        let empty = tool
+        // `USER.md` chưa được tạo (NotFound) ⇒ trả thông báo rõ, không phải lỗi —
+        // cùng hành vi với agent khi context đọc bộ nhớ (context.rs bỏ qua file thiếu).
+        let missing = tool
             .call(&ctx(), serde_json::json!({"file": "user"}))
             .await
             .unwrap();
-        assert!(empty.contains("trống"));
+        assert!(missing.contains("trống"));
+        assert!(missing.contains("chưa được tạo"));
         // Không có đường dẫn tùy ý: `MEMORY.md`/`USER.md` là toàn bộ bề mặt đọc.
         for bad in ["../etc/passwd", "MEMORY.md", "skills/x/SKILL.md", ""] {
             assert!(
