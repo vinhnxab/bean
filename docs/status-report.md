@@ -68,7 +68,7 @@
 | **M27 — Voice push-to-talk** | 🟡 Đã chạy thật | — | `bean-speech`: STT/TTS `local` (whisper.cpp + Piper) hoặc `api` (ElevenLabs `scribe_v2` / `eleven_multilingual_v2`); lượt voice chỉ chạy tool `Risk::Safe`; key nhập qua UI lưu `data.dir/voice-state.json` (0600) | STT thật OK 2026-11-02 (trước đó `502` do kế thừa proxy env — K29); TTS premade đã test 200 ngày 2026-10-28 |
 | **M28 — Đổi tên `BeanAgent` → `bean`** | ✅ Hoàn thành | — | Đổi tên crate/lệnh/đường dẫn toàn repo; không migration tự động: `mv ~/.BeanAgent ~/.bean`, `BEANAGENT_*` → `BEAN_*` (D18.x) | Tag `pre-rename-beanagent` giữ trạng thái gốc |
 | **M29 — Thiết lập & secrets thống nhất** | ✅ Hoàn thành | — | Kho secret duy nhất `data.dir/secrets.env` (0600), thứ tự env > secrets.env; `bean secret/config/migrate-secrets`; bảng thiết lập tầng A/B + step-up mật khẩu; `bean doctor` kiểm quyền file, slot bị che, proxy (K29), tiến trình/port (K27); LAN access + host mode toggle (D21/D22) | ~~`~/.config/bean/env`~~ — đã migrate và xoá trên máy chủ (doctor sạch) |
-| **M30 — Updater (D23)** | 🟡 Code + test xanh, chưa phát hành tag thật | (commit này) | Crate `bean-update`: hỏi GitHub Releases (chỉ stable, D23.7), tải + verify SHA256, giải nén chặn tar-slip, ghi đè binary atomic (Unix rename / Windows `.old`), `bean update [--check] [--no-restart]` tự restart qua `beanctl` (D23.5); `GET /api/update/check` admin-only; thẻ “Phiên bản & cập nhật” trong Cài đặt → Nâng cao; workflow `release.yml` build 5 target khi push tag `v*` | Chưa push tag `v*` thật nên chưa chứng minh end-to-end workflow release; D23.3 chưa có chữ ký GPG (đã chấp nhận rủi ro) |
+| **M30 — Updater (D23)** | ✅ Hoàn thành (2026-11-18) | `v0.1.2` | Crate `bean-update`: hỏi GitHub Releases (chỉ stable, D23.7), tải + verify SHA256, giải nén chặn tar-slip, ghi đè binary atomic (Unix rename / Windows `.old`), `bean update [--check] [--no-restart]` tự restart qua `beanctl` (D23.5); `GET /api/update/check` admin-only; thẻ “Phiên bản & cập nhật” trong Cài đặt → Nâng cao; workflow `release.yml` build 5 target khi push tag `v*` | **Tag `v0.1.2` đã push thật — release 5 target + `SHA256SUMS` xanh (2026-11-18)**; D23.3 chưa có chữ ký GPG (đã chấp nhận rủi ro) |
 
 **Chú thích:** “🟡” không có nghĩa code chưa tồn tại; đó là trường hợp logic đã triển khai và test xanh nhưng tiêu chí vận hành thực tế hoặc known issue liên quan chưa hoàn tất.
 
@@ -77,8 +77,8 @@
 - **K30 full (b64124a):** `LlmConfig.api_key`, `LlmProfile.api_key`, `VoiceConfig.api_key` → `Option<secrecy::SecretString>` qua module serde thủ công (serialize lộ plaintext — chỉ cho file 0600 do Bean quản; deserialize bọc `SecretString` ngay tại biên). Vá toàn bộ consumer (`llm_profiles.rs`, `rest_config.rs`, `config_cmd.rs`, `doctor.rs`, `products.rs`, `voice_state.rs`); test hồi quy `debug_config_khong_bao_gio_lo_api_key`. Known-issues K30 chuyển **đã đóng**.
 - **Q8 — chính sách xác nhận `run_shell` theo sandbox mode (chủ dự án chốt):** docker mode ⇒ `Safe` (sandbox cách ly là rào cản chính, deny-list vẫn ép hỏi mẫu nguy hiểm); host mode ⇒ whitelist `[security.sandbox].host_allow_programs` (chữ đầu khớp nguyên từ + không có ký tự nối shell ⇒ `Safe`, danh sách rỗng ⇒ hỏi mọi lệnh — fail-closed). Code tại `bean-security/src/shell.rs` (`host_allowlisted`) + `bean-types/src/config/tools.rs`; test mới trong `shell.rs`/`validate.rs`/`sandbox.rs`.
 - **Q9 — chốt phạm vi giai đoạn đóng lộ trình:** soak 24h bỏ (systemd `Restart=always` là soak tiếp diễn); S3/S4, sub-agent song song, LSP-bridge vào backlog; VS Code extension bỏ; Telegram một người dùng; streaming không cần Anthropic (openai_compat SSE đã nối agent loop).
-- **M30 phát hành thật:** bump `0.1.1` → `0.1.2`, push tag `v0.1.2` để chứng minh release workflow 5 target lần đầu (kết quả cập nhật ở row M30 sau khi CI xong).
-- **M25 smoke:** `bean mcp serve` (stdio) với client `@modelcontextprotocol/sdk` — list tools + gọi 1 tool read-only.
+- **M30 phát hành thật — ĐÃ XONG:** tag `v0.1.2` push, CI 4/4 xanh (`check-rust`, `check-web`, `audit`, `eval baseline`), release workflow build đủ **5 target + `SHA256SUMS`** thành công (lần đầu chứng minh end-to-end từ tag tới artifacts).
+- **M25 smoke — ĐÃ XONG:** `bean mcp serve` (stdio) với client `@modelcontextprotocol/sdk` 1.32.2: token auth OK (client `m25-test`, role monitor); cổng expose chặn đúng — 13 tool của server `everything` bị loại, chỉ `memory_query` (tag `memory-read`, Safe) được expose; output bọc `<untrusted_content>` đúng thiết kế; tham số thừa bị từ chối ở ranh giới sanitize với thông báo rõ. Phát hiện + vá luôn: `memory_query` trả lỗi khi `MEMORY.md` chưa tồn tại trong khi agent coi file thiếu là rỗng (context.rs) — hai đường đọc phải cho cùng một sự thật (bất biến của chính tool); đã sửa NotFound ⇒ thông báo "trống/chưa được tạo" kèm test (`f957641`).
 
 ## 3. Năng lực đã triển khai
 
@@ -286,7 +286,7 @@ cp bean.example.toml bean.toml
 ### Chưa đạt tiêu chí “vận hành thật”
 
 - Soak test 24 giờ đầy đủ (lần gần nhất 15h38p, dừng có chủ ý; từ 2026-11-17 Bean chạy dưới systemd `Restart=always` nên soak tiếp diễn tự nhiên — rà journal định kỳ).
-- ~~Deploy production~~ — systemd user service + linger + backup/restore đã diễn tập thật (2026-11-17); còn lại: push image production (không cấp thiết với máy cá nhân) và tag `v*` thật cho M30.
+- ~~Deploy production~~ — systemd user service + linger + backup/restore đã diễn tập thật (2026-11-17); tag `v0.1.2` release 5 target xanh (2026-11-18); còn lại: push image production (không cấp thiết với máy cá nhân).
 - ~~Playwright/browser E2E~~ — đã xong 2026-11-17 (`make e2e-ui`).
 - Biến thể provider còn lại: Anthropic thật, Ollama, streaming thật với model thật (thiếu key tương ứng — chủ dự án để sau cùng).
 
@@ -332,7 +332,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [x] S2 đã xử lý (2026-09-27) — lọc escape terminal cho output tool untrusted ở CLI.
 - [x] E2E memory và learning đầy đủ (K11, K18 — 2026-11-12).
 - [ ] Soak test 24 giờ (lần gần nhất 15h38p; từ 2026-11-17 instance chạy dưới systemd — coi như soak tiếp diễn, rà journal).
-- [x] CI và quy trình deploy/backup production (CI 4/4 từ 2026-11-09; `bean backup` + diễn tập restore thật, systemd user service + linger — 2026-11-17; còn lại: tag `v*` thật cho M30, push image — tuỳ chọn).
+- [x] CI và quy trình deploy/backup production (CI 4/4 từ 2026-11-09; `bean backup` + diễn tập restore thật, systemd user service + linger — 2026-11-17; tag `v0.1.2` + release workflow 5 target — 2026-11-18; push image — tuỳ chọn).
 
 ## 11. Kết luận
 
