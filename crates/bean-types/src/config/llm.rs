@@ -108,24 +108,43 @@ fn is_default_max_tokens(value: &u32) -> bool {
 }
 
 // `SecretString` không impl `PartialEq` (chống lộ qua so sánh timing) nên derive
-// không dùng được — so sánh thủ công qua `expose_secret` (chỉ dùng trong test).
+// không dùng được — so sánh thủ công qua `expose_secret`.
+//
+// Guard (review OCR 2026-11-19): eq **chỉ dùng trong test** và bắt buộc
+// destructure đầy đủ `self`/`other` — thêm trường mới vào `LlmProfile` sẽ lỗi
+// compile ngay tại đây, không cho phép so sánh "im lặng" bỏ sót trường làm
+// `assert_eq!` báo sai. Không bỏ destructure để về dạng `self.x == other.x`.
 impl PartialEq for LlmProfile {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.provider == other.provider
-            && self.model == other.model
-            && self.allowed_models == other.allowed_models
-            && self.api_key_env == other.api_key_env
-            && self
-                .api_key
-                .as_ref()
-                .map(secrecy::ExposeSecret::expose_secret)
-                == other
-                    .api_key
-                    .as_ref()
-                    .map(secrecy::ExposeSecret::expose_secret)
-            && self.base_url == other.base_url
-            && self.max_tokens == other.max_tokens
+        let Self {
+            name,
+            provider,
+            model,
+            allowed_models,
+            api_key_env,
+            api_key,
+            base_url,
+            max_tokens,
+        } = self;
+        let Self {
+            name: o_name,
+            provider: o_provider,
+            model: o_model,
+            allowed_models: o_allowed_models,
+            api_key_env: o_api_key_env,
+            api_key: o_api_key,
+            base_url: o_base_url,
+            max_tokens: o_max_tokens,
+        } = other;
+        name == o_name
+            && provider == o_provider
+            && model == o_model
+            && allowed_models == o_allowed_models
+            && api_key_env == o_api_key_env
+            && api_key.as_ref().map(ExposeSecret::expose_secret)
+                == o_api_key.as_ref().map(ExposeSecret::expose_secret)
+            && base_url == o_base_url
+            && max_tokens == o_max_tokens
     }
 }
 

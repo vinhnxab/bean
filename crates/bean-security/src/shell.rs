@@ -4,10 +4,12 @@
 //! từ watch cell [`SandboxMode`] mỗi lượt gọi (D22.5b — toggle host mode từ UI áp
 //! dụng lúc nóng, không restart), tính lại qua `with_risk_fn`:
 //!
-//! * **docker** — `Safe` (Q8): sandbox đã cách ly (chỉ mount workspace, `--network
-//!   none`, non-root, `--cap-drop ALL`, pids/memory limit) nên vòng lặp agent không
-//!   bị chặn xác nhận; deny-list mẫu (mục 15.3) vẫn ép hỏi lại các mẫu rõ ràng nguy
-//!   hiểm, checkpoint/rollback (D26) là đường lui cho workspace.
+//! * **docker** — `Safe` (Q8) khi `network = false`: sandbox đã cách ly (chỉ mount
+//!   workspace, `--network none`, non-root, `--cap-drop ALL`, pids/memory limit) nên
+//!   vòng lặp agent không bị chặn xác nhận; `network = true` là mất chân cách ly
+//!   mạng nên về `Confirm` (hỏi mỗi lượt, [`Sandbox::base_risk_for`]). Deny-list
+//!   mẫu (mục 15.3) vẫn ép hỏi lại các mẫu rõ ràng nguy hiểm, checkpoint/rollback
+//!   (D26) là đường lui cho workspace.
 //! * **host** — whitelist theo `[security.sandbox].host_allow_programs` (Q8): lệnh
 //!   khớp (chữ đầu + không có ký tự nối shell, xem [`host_allowlisted`]) ⇒ `Safe`;
 //!   lệnh còn lại ⇒ `Dangerous` như cũ. Whitelist rỗng ⇒ hỏi mọi lệnh (fail-closed).
@@ -91,7 +93,12 @@ pub fn run_shell_for_projects(
         TypedTool::with_risk_fn(
             "run_shell",
             move |args: &serde_json::Value| match *risk_mode.borrow() {
-                SandboxMode::Docker => Risk::Safe,
+                // Docker: `Safe` chỉ khi không có mạng — `network = true` mất chân
+                // cách ly `--network none` nên về `Confirm` (nguồn chung
+                // `base_risk_for`, network flag của sandbox cấu hình gốc).
+                SandboxMode::Docker => {
+                    Sandbox::base_risk_for(SandboxMode::Docker, risk_sandbox.network_enabled())
+                }
                 SandboxMode::Host => {
                     let command = args
                         .get("command")
@@ -267,6 +274,35 @@ mod tests {
             tool.risk(&serde_json::json!({"command": "curl http://example.com"})),
             Risk::Safe
         );
+    }
+
+    #[test]
+    fn docker_risk_respects_network_flag() {
+        let ws = tempfile::tempdir().unwrap();
+        // `network = true`: docker mất chân cách ly mạng ⇒ Confirm (không còn Safe).
+        let cfg = SandboxConfig {
+            mode: SandboxMode::Docker,
+            network: true,
+            ..SandboxConfig::default()
+        };
+        let (_tx, rx) = watch::channel(SandboxMode::Docker);
+        let tool = run_shell(
+            Arc::new(Sandbox::new(cfg.clone(), ws.path().to_path_buf())),
+            rx,
+        );
+        assert_eq!(
+            tool.risk(&serde_json::json!({"command": "ls"})),
+            Risk::Confirm
+        );
+        // Hot-swap sang host: risk theo whitelist như thường (network không ảnh hưởng
+        // host mode — lệnh ngoài whitelist vẫn Dangerous).
+        let (tx2, rx2) = watch::channel(SandboxMode::Host);
+        let host_tool = run_shell(Arc::new(Sandbox::new(cfg, ws.path().to_path_buf())), rx2);
+        assert_eq!(
+            host_tool.risk(&serde_json::json!({"command": "ls"})),
+            Risk::Dangerous
+        );
+        drop(tx2);
     }
 
     #[test]

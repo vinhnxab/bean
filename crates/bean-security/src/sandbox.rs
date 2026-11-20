@@ -115,21 +115,35 @@ impl Sandbox {
         }
     }
 
-    /// Mức rủi ro **cơ bản** của `run_shell` theo chế độ (mục 15.2, Q8): docker ⇒
-    /// `Safe` (sandbox cách ly); host ⇒ `Dangerous` — whitelist
-    /// `host_allow_programs` (tính theo **từng lệnh**, xem [`crate::shell`]) chỉ hạ
-    /// lệnh khớp xuống `Safe` nên mức cơ bản của host vẫn là `Dangerous`.
+    /// Cờ mạng hiện hành của cấu hình sandbox (Q8 review): docker `Safe` chỉ khi
+    /// `false` — xem [`Sandbox::base_risk_for`].
     #[must_use]
-    pub const fn base_risk(&self) -> Risk {
-        Self::base_risk_for(self.cfg.mode)
+    pub const fn network_enabled(&self) -> bool {
+        self.cfg.network
     }
 
-    /// Bản đồ chế độ → rủi ro, dạng associated — [`crate::shell`] đọc từ watch cell
-    /// (D22.5b) nên không cần instance [`Sandbox`]. Whitelist host mode là lớp tinh
-    /// chỉnh theo lệnh phía trên mức cơ bản này.
+    /// Mức rủi ro **cơ bản** của `run_shell` theo cấu hình (mục 15.2, Q8):
+    /// [`Sandbox::base_risk_for`] là nguồn chung; whitelist `host_allow_programs`
+    /// (tính theo **từng lệnh**, xem [`crate::shell`]) chỉ hạ lệnh khớp xuống `Safe`
+    /// phía trên mức cơ bản này.
     #[must_use]
-    pub const fn base_risk_for(mode: SandboxMode) -> Risk {
+    pub const fn base_risk(&self) -> Risk {
+        Self::base_risk_for(self.cfg.mode, self.cfg.network)
+    }
+
+    /// Bản đồ (chế độ, mạng) → rủi ro — nguồn duy nhất cho [`Sandbox::base_risk`] và
+    /// risk_fn của `run_shell` ([`crate::shell`], đọc mode từ watch cell D22.5b).
+    ///
+    /// * docker + `network = false` ⇒ `Safe`: sandbox cách ly trọn vẹn (chỉ mount
+    ///   workspace, `--network none`, non-root, `--cap-drop ALL`) — đây chính là các
+    ///   chân biện minh cho mức Safe.
+    /// * docker + `network = true` ⇒ `Confirm`: mất chân cách ly mạng — container có
+    ///   thể ra internet (tải payload, rò dữ liệu workspace) nên hỏi lại mỗi lượt.
+    /// * host ⇒ `Dangerous`: mức cơ bản; whitelist chỉ hạ lệnh khớp xuống `Safe`.
+    #[must_use]
+    pub const fn base_risk_for(mode: SandboxMode, network: bool) -> Risk {
         match mode {
+            SandboxMode::Docker if network => Risk::Confirm,
             SandboxMode::Docker => Risk::Safe,
             SandboxMode::Host => Risk::Dangerous,
         }
@@ -859,6 +873,26 @@ mod tests {
         // Q8: docker là Safe (sandbox cách ly); host giữ Dangerous làm mức cơ bản —
         // whitelist `host_allow_programs` chỉ hạ lệnh khớp xuống Safe theo từng call.
         assert_eq!(docker.base_risk(), Risk::Safe);
+        // Bật mạng là mất chân cách ly `--network none` — biện minh cho Safe không
+        // còn, docker về Confirm (hỏi mỗi lệnh, review OCR 2026-11-19).
+        let docker_network = Sandbox::new(
+            SandboxConfig {
+                mode: SandboxMode::Docker,
+                network: true,
+                ..SandboxConfig::default()
+            },
+            ws.path().to_path_buf(),
+        );
+        assert_eq!(docker_network.base_risk(), Risk::Confirm);
+        // Bản đồ associated phải khớp `base_risk` (nguồn chung với risk_fn).
+        assert_eq!(
+            Sandbox::base_risk_for(SandboxMode::Docker, true),
+            Risk::Confirm
+        );
+        assert_eq!(
+            Sandbox::base_risk_for(SandboxMode::Docker, false),
+            Risk::Safe
+        );
         assert_eq!(host.base_risk(), Risk::Dangerous);
     }
 
