@@ -293,7 +293,7 @@ daily_token_budget = 2000000
 [security.sandbox]
 mode = "docker"                      # docker | host
 image = "bean-sandbox:latest"
-network = false
+network = false                      # true ⇒ container có mạng ra ngoài: mọi lệnh docker về Confirm (hỏi mỗi lệnh)
 memory = "512m"
 cpus = 1.0
 timeout_seconds = 60

@@ -10,7 +10,7 @@ BIN := bean
 .DEFAULT_GOAL := help
 
 .PHONY: help types check-rust check-web check-brand check audit build build-headless e2e e2e-ui smoke-scheduler eval \
-        fmt lint test dev-web run-chat clean
+        fmt lint test dev-web run-chat clean clean-build-cache
 
 help: ## In danh sách target
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -68,11 +68,19 @@ audit: ## cargo audit (strict) + pnpm audit --prod
 	fi
 	cd $(WEB_DIR) && $(PNPM) audit --prod
 
-build: ## Build web -> build Rust release (UI embedded, locked)
+# Dọn build cache KHÔNG dùng cho production (pitfall 29 trong AGENTS.md):
+# `target/debug` là kẻ phình nhất (từng lên 130GB) và các target cross-compile
+# còn sót. KHÔNG BAO GIỜ xóa `target/release`: binary production đang chạy từ đó
+# + symlink `~/.local/bin/bean` trỏ vào; build mới đè binary in-place, tiến trình
+# cũ vẫn chạy inode cũ đến khi restart.
+clean-build-cache: ## Xóa target/debug + cross-compile cũ (giữ nguyên target/release)
+	rm -rf target/debug target/aarch64-apple-darwin target/x86_64-apple-darwin target/flycheck0 target/tmp
+
+build: clean-build-cache ## Build web -> build Rust release (UI embedded, locked)
 	cd $(WEB_DIR) && $(PNPM) build
 	$(CARGO) build --release --locked -p $(BIN) --features ui
 
-build-headless: ## Build Rust release without UI, no Node required
+build-headless: clean-build-cache ## Build Rust release without UI, no Node required
 	$(CARGO) build --release --locked --no-default-features
 
 e2e: ## Binary E2E: login -> chat -> confirm -> Stop -> reconnect Sync
