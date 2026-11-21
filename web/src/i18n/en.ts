@@ -204,6 +204,7 @@ export const en: Record<MessageKey, string> = {
   "tasks.chatId": "Chat ID",
   "tasks.allowedTools": "Automatically allowed tools",
   "tasks.allowedToolsHelp": "Comma-separated. Leave empty to allow no tools.",
+  "tasks.dangerousToolsWarning": "Dangerous tools will be granted permanently to unattended runs",
   "tasks.enabled": "Enable task",
   "tasks.validation": "Enter a valid cron, prompt, channel, and chat ID.",
   "tasks.create": "Create task",

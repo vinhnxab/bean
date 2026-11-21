@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { TasksPage } from "@/features/tasks/TasksPage";
 import { renderManagement } from "@/test/management";
-import { testServer } from "@/test/server";
+import { TOOLS_FIXTURE, testServer } from "@/test/server";
 
 const task = {
   id: 7,
@@ -75,5 +75,55 @@ describe("TasksPage", () => {
     );
     renderManagement(<TasksPage />);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
+  });
+
+  it("cảnh báo khi nhập tool Dangerous vào allowed_tools (S4)", async () => {
+    testServer.use(
+      http.get("/api/tools", () =>
+        HttpResponse.json({
+          tools: [{ ...TOOLS_FIXTURE.tools[0] }, { ...TOOLS_FIXTURE.tools[1], risk: "dangerous" }],
+          total: 2,
+          viewer_role: "admin",
+          rbac_enabled: false,
+        }),
+      ),
+    );
+    renderManagement(<TasksPage />);
+    // run_shell bị ghi đè thành Dangerous trong registry — cảnh báo phải nêu đúng
+    // tool đó; tên lạ ngoài registry (marketing_publish) không bị gán nhãn bừa.
+    fireEvent.change(screen.getByLabelText("Automatically allowed tools"), {
+      target: { value: "read_file, run_shell" },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Dangerous tools will be granted permanently to unattended runs: run_shell",
+    );
+    // Bỏ tool nguy hiểm → cảnh báo biến mất.
+    fireEvent.change(screen.getByLabelText("Automatically allowed tools"), {
+      target: { value: "read_file" },
+    });
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("tô sáng tool Dangerous trong danh sách task (S4)", async () => {
+    testServer.use(
+      http.get("/api/tools", () =>
+        HttpResponse.json({
+          tools: [{ ...TOOLS_FIXTURE.tools[0] }, { ...TOOLS_FIXTURE.tools[1], risk: "dangerous" }],
+          total: 2,
+          viewer_role: "admin",
+          rbac_enabled: false,
+        }),
+      ),
+      http.get("/api/tasks", () =>
+        HttpResponse.json({
+          tasks: [{ ...task, allowed_tools: ["read_file", "run_shell"] }],
+        }),
+      ),
+    );
+    renderManagement(<TasksPage />);
+    expect(await screen.findByText("Tóm tắt hôm nay")).toBeInTheDocument();
+    // Tools query chạy song song tasks query — chờ tới khi tô sáng xuất hiện.
+    await waitFor(() => expect(screen.getByText("run_shell")).toHaveClass("text-need"));
+    expect(screen.getByText("read_file")).not.toHaveClass("text-need");
   });
 });

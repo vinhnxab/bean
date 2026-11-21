@@ -297,7 +297,9 @@ make check xanh.
   cấp thiết cho quy mô hiện tại.
 - **LSP-bridge MCP server** (Bean làm MCP *client* nối vào Language Server để hiểu code sâu hơn,
   thu hẹp khoảng cách với OpenCode): rẻ hơn tự viết LSP integration, chỉ cần thêm một entry
-  `[[mcp_servers]]` — cân nhắc làm sau M25 nếu Developer role cần sửa codebase lớn/phức tạp hơn.
+  `[[mcp_servers]]` — **ĐÃ LÀM (2026-11-21)**: chọn `pharos-mcp` 0.3.5 (native ELF, Apache-2.0,
+  37 tool LSP qua rust-analyzer) — handshake + tools/list verified, đăng ký trên instance thật
+  (`tool_count: 37`, trust = false). Gọi tool thật qua chat chờ smoke của chủ dự án.
 - ~~**Checkpoint/rollback cho Developer role** (học từ Cline)~~ → **ĐÃ LÀM (D26)**: snapshot
   workspace trước khi ghi, rollback qua tool `workspace_rollback`; đã kiểm chứng tay 2026-11-16
   (tạo file → rollback → file biến mất, 25 file về bản cũ).

@@ -1,9 +1,10 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
 import type { TaskDto } from "@/api/bindings";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState, ErrorState, LoadingState, PageShell, Panel } from "@/components/ui/Page";
 import { useCreateTask, useDeleteTask, useTasks, useUpdateTask } from "@/features/tasks/queries";
+import { useTools } from "@/features/tools/queries";
 import { useI18n } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 
@@ -34,6 +35,25 @@ export function TasksPage() {
   const [form, setForm] = useState<TaskForm>(INITIAL_FORM);
   const [target, setTarget] = useState<TaskDto | null>(null);
   const [formError, setFormError] = useState(false);
+  const tools = useTools();
+
+  // S4: `allowed_tools` cấp quyền vĩnh viễn cho run định kỳ không có người duyệt —
+  // cảnh báo ngay khi người dùng nhập tên tool có mức rủi ro Dangerous.
+  const dangerousTools = useMemo(() => {
+    const registry = tools.data;
+    if (!registry) return [];
+    const riskOf = new Map(registry.tools.map((tool) => [tool.name, tool.risk]));
+    return form.allowedTools
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter((tool) => riskOf.get(tool) === "dangerous");
+  }, [tools.data, form.allowedTools]);
+
+  const dangerousToolNames = useMemo(() => {
+    const registry = tools.data;
+    if (!registry) return new Set<string>();
+    return new Set(registry.tools.filter((tool) => tool.risk === "dangerous").map((tool) => tool.name));
+  }, [tools.data]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -134,6 +154,11 @@ export function TasksPage() {
                 placeholder="run_shell, web_search"
               />
             </Field>
+            {dangerousTools.length > 0 ? (
+              <p className="text-sm text-need" role="alert">
+                {t("tasks.dangerousToolsWarning")}: {dangerousTools.join(", ")}
+              </p>
+            ) : null}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -196,7 +221,17 @@ export function TasksPage() {
                 </dl>
                 {task.allowed_tools.length > 0 ? (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {t("tasks.allowedTools")}: {task.allowed_tools.join(", ")}
+                    {t("tasks.allowedTools")}:{" "}
+                    {task.allowed_tools.map((tool, index) => (
+                      <span key={tool}>
+                        {index > 0 ? ", " : ""}
+                        <span
+                          className={dangerousToolNames.has(tool) ? "font-semibold text-need" : undefined}
+                        >
+                          {tool}
+                        </span>
+                      </span>
+                    ))}
                   </p>
                 ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">

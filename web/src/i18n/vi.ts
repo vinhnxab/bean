@@ -211,6 +211,7 @@ export const vi = {
   "tasks.chatId": "Chat ID",
   "tasks.allowedTools": "Tool được phép tự động",
   "tasks.allowedToolsHelp": "Cách nhau bằng dấu phẩy. Để trống nếu không cho phép tool.",
+  "tasks.dangerousToolsWarning": "Tool nguy hiểm sẽ được cấp tự động cho run định kỳ (không có người duyệt)",
   "tasks.enabled": "Bật tác vụ",
   "tasks.validation": "Vui lòng nhập cron, prompt, channel và chat ID hợp lệ.",
   "tasks.create": "Tạo tác vụ",

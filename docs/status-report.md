@@ -228,7 +228,8 @@ cp bean.example.toml bean.toml
 1. **Provider thật (K12/K17).** — **compaction và reflection đã kiểm chứng với model thật (2026-11-09)** qua khung eval opt-in `evals/tasks-real/`:
    - K12: `real_compaction_long_history` (OpenRouter, nemotron free) — hội thoại đủ dài kích hoạt compaction, summary lưu, run sạch; số đo tại `evals/out/metrics.jsonl`.
    - K17: `real_reflection_skill_draft` (GLM-5.3-flash) — 6 tool call thật, reflection JSON đúng schema, draft được tạo và pass assert; model free flaky (chi tiết trong `docs/known-issues.md` K17). Đã có phương án giảm flaky: `[llm].fallback_profiles` (2026-11-10) — khai báo profile dự phòng để run tự chuyển khi model free trả 503/401.
-   - Còn lại: streaming thật (M17) và biến thể Anthropic/Ollama — chưa có key tương ứng. Prompt caching Anthropic (2026-11-10) chỉ verify bằng wire test vì cùng lý do.
+   - **Streaming thật (M17) đã kiểm chứng 2026-11-21** với NVIDIA (`z-ai/glm-5.3-flash` qua `openai_compat`): 2 test `#[ignore]` mới — `bean-llm/tests/real_streaming.rs` (SSE thật: 3 text delta + `stream_options.include_usage` trả usage 44+131 + `finish_reason` đúng; tool call stream ghép `arguments_delta` thành JSON hợp lệ) và `bean/tests/m17_streaming_real.rs` (E2E binary serve + WS: 3 `text_delta` tới WebSocket trước `Final`, SIGTERM tắt êm). Chạy tay opt-in, không chạy trong `make check`.
+   - Còn lại: biến thể Anthropic/Ollama — chưa có key/cài đặt tương ứng. Prompt caching Anthropic (2026-11-10) chỉ verify bằng wire test vì cùng lý do.
 
 2. **Telegram bot thật (K15).** — **ĐÃ ĐÓNG (2026-11-10): smoke test tay trên bot thật pass trọn checklist tương tác.**
    - Chat thường end-to-end (session 19: "chào bean" → trả lời 4s); tool `Confirm`/`Dangerous` duyệt qua inline keyboard, audit ghi đúng actor `telegram:8845250886`; `/stop` huỷ run giữa chừng sạch; reconnect qua 2 lần restart; web + Telegram một instance.
@@ -258,7 +259,7 @@ cp bean.example.toml bean.toml
 | An toàn | S1 | đã đóng | `read_file`/`grep`/`glob`/`list_dir`/output `run_shell` đã bọc `<untrusted_content>` và bật `untrusted_seen`; thêm `Tool::marks_untrusted()` + test hồi quy toàn registry — xem `docs/known-issues.md` S1, `docs/decisions.md` D9.1 |
 | An toàn | K1 | **đã đóng** (2026-09-27) | `sessions.summary` đã bọc `<untrusted_content>` **và** bật `untrusted_seen` khi context có summary (`TurnContext::summary_present`). Đánh đổi đã được duyệt: phiên đã compact mất "cho phép trong phiên" cho `Confirm`/`Dangerous` tới hết phiên — xem `docs/decisions.md` D9.7 |
 | An toàn | S2 | **đã đóng** (2026-09-27) | Lọc trọn chuỗi ESC/OSC cho output của mọi tool `marks_untrusted()` trước khi in ở CLI; tool không untrusted giữ nguyên hành vi — xem `docs/decisions.md` D9.8 |
-| An toàn | S3, S4 | thông tin | `/api/audit` chưa lọc theo người dùng (chấp nhận được khi v1 một người dùng); `allowed_tools` cấp quyền vĩnh viễn — UI nên cảnh báo khi task có tool `Dangerous` |
+| An toàn | S3, S4 | thông tin | `/api/audit` chưa lọc theo người dùng (chấp nhận được khi v1 một người dùng); **S4 đã làm 2026-11-21** — màn Tác vụ cảnh báo khi `allowed_tools` chứa tool `Dangerous` (form + tô sáng trong danh sách, đối chiếu `GET /api/tools`, test 5/5) |
 | An toàn | K1-followup | thấp | Cân nhắc chỉ bật cờ khi summary thực sự tổng hợp từ nội dung untrusted; **chưa làm ngay**, cần dữ liệu dùng thật |
 | Độ bền DB | K2–K4 | **đã đóng** (2026-11-11/12) | `load_history_within_budget` đọc theo trang trong ngân sách; store có trần 10s; tách connection chỉ đọc — FTS nặng không còn chặn `append` |
 | Store semantics | K5–K7 | **đã đóng** (2026-11-11 → 15) | `memory_search` loại message của lượt đang chạy; `clear` xoá cả `summary` ở cả hai store; K7 đóng 2026-11-15: bộ test hành vi chung hai store (`src/store/tests/`) + vá drift `list_sessions` Unicode (`bean_lower`) |
@@ -285,10 +286,10 @@ cp bean.example.toml bean.toml
 
 ### Chưa đạt tiêu chí “vận hành thật”
 
-- Soak test 24 giờ đầy đủ (lần gần nhất 15h38p, dừng có chủ ý; từ 2026-11-17 Bean chạy dưới systemd `Restart=always` nên soak tiếp diễn tự nhiên — rà journal định kỳ).
+- ~~Soak test 24 giờ đầy đủ~~ — **đóng theo Q9 (2026-11-21)**: systemd `Restart=always` + linger là soak tiếp diễn; rà journal định kỳ.
 - ~~Deploy production~~ — systemd user service + linger + backup/restore đã diễn tập thật (2026-11-17); tag `v0.1.2` release 5 target xanh (2026-11-18); còn lại: push image production (không cấp thiết với máy cá nhân).
 - ~~Playwright/browser E2E~~ — đã xong 2026-11-17 (`make e2e-ui`).
-- Biến thể provider còn lại: Anthropic thật, Ollama, streaming thật với model thật (thiếu key tương ứng — chủ dự án để sau cùng).
+- Biến thể provider còn lại: Anthropic thật, Ollama (thiếu key/cài đặt — chủ dự án để sau cùng). Streaming thật đã kiểm chứng 2026-11-21 (NVIDIA qua `openai_compat`, xem mục 6.2.1).
 
 
 ## 8. Ngoài phạm vi v1
@@ -331,7 +332,7 @@ Các nhóm sau không phải milestone đang dang dở và không nên tính là
 - [x] K1 đã xử lý (2026-09-27) — bọc `<untrusted_content>` + bật `untrusted_seen` khi có summary.
 - [x] S2 đã xử lý (2026-09-27) — lọc escape terminal cho output tool untrusted ở CLI.
 - [x] E2E memory và learning đầy đủ (K11, K18 — 2026-11-12).
-- [ ] Soak test 24 giờ (lần gần nhất 15h38p; từ 2026-11-17 instance chạy dưới systemd — coi như soak tiếp diễn, rà journal).
+- [x] Soak test 24 giờ — **đóng theo Q9 (2026-11-21)**: từ 2026-11-17 Bean chạy dưới systemd `Restart=always` + linger nên soak là tiếp diễn tự nhiên (uptime liên tục qua nhiều lần deploy, journal rà định kỳ); lần chạy dài nhất có chủ ý 15h38p sạch (2026-11-14).
 - [x] CI và quy trình deploy/backup production (CI 4/4 từ 2026-11-09; `bean backup` + diễn tập restore thật, systemd user service + linger — 2026-11-17; tag `v0.1.2` + release workflow 5 target — 2026-11-18; push image — tuỳ chọn).
 
 ## 11. Kết luận
