@@ -299,7 +299,11 @@ make check xanh.
   thu hẹp khoảng cách với OpenCode): rẻ hơn tự viết LSP integration, chỉ cần thêm một entry
   `[[mcp_servers]]` — **ĐÃ LÀM (2026-11-21)**: chọn `pharos-mcp` 0.3.5 (native ELF, Apache-2.0,
   37 tool LSP qua rust-analyzer) — handshake + tools/list verified, đăng ký trên instance thật
-  (`tool_count: 37`, trust = false). Gọi tool thật qua chat chờ smoke của chủ dự án.
+  (`tool_count: 37`, trust = false). **Smoke Q9 ĐÃ XONG (2026-11-22)**: qua Telegram thật, chain
+  `workspace_symbols`/`find_symbol` → vị trí (93,17) → `find_references` trả đủ tham chiếu
+  `resolve_confirm` 6 file. Trên đường còn phát hiện và đã xử lý 4 lỗi (cold-start index, shape
+  tham số file:// URI + language id, timeout call 60s của Bean, đoán tọa độ) — chi tiết K36
+  trong `docs/known-issues.md`.
 - ~~**Checkpoint/rollback cho Developer role** (học từ Cline)~~ → **ĐÃ LÀM (D26)**: snapshot
   workspace trước khi ghi, rollback qua tool `workspace_rollback`; đã kiểm chứng tay 2026-11-16
   (tạo file → rollback → file biến mất, 25 file về bản cũ).
