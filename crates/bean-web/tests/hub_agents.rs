@@ -25,7 +25,9 @@ use bean_skills::SkillCatalog;
 use bean_tools::ToolRegistry;
 use bean_types::config::RoleConfig;
 use bean_types::{Config, LlmResponse};
-use bean_web::{AuthService, NoopRebind, WebState, WebStateDeps, build_router, set_password};
+use bean_web::{
+    AuthService, NoopRebind, NoopRestart, WebState, WebStateDeps, build_router, set_password,
+};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -116,6 +118,7 @@ fn build(config: Config) -> (tempfile::TempDir, AxumRouter) {
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        restart: Arc::new(NoopRestart),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
         sandbox_mode: sandbox_mode_cell(),
     })

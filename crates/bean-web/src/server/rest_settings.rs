@@ -87,7 +87,7 @@ pub(super) async fn settings_list(
 /// nóng (D21.7 — LAN toggle swap listener mà không đụng `state.config`), còn lại
 /// đọc snapshot cấu hình lúc khởi động. Định dạng phải khớp
 /// `bean_settings::value_from_config` để so sánh chuỗi đáng tin.
-fn running_value(state: &WebState, entry: &bean_settings::SettingEntry) -> String {
+pub(super) fn running_value(state: &WebState, entry: &bean_settings::SettingEntry) -> String {
     match entry.path {
         "web.bind" => state.web_bind().to_string(),
         "web.allow_remote" => state.web_listen.borrow().allow_remote.to_string(),

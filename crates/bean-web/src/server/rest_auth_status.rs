@@ -206,6 +206,7 @@ pub(super) async fn status(
         role,
         role_daily_token_budget,
         role_tokens_used,
+        restart: super::rest_restart::restart_status(&state),
     }))
 }
 

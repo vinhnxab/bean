@@ -29,6 +29,8 @@ export const testServer = setupServer(
       tokens_used: 0,
       uptime_seconds: 0,
       channels: ["web"],
+      // (M31) Mặc định không có gì chờ restart — banner ẩn. Test restart ghi đè.
+      restart: { required: false, reasons: [] },
     }),
   ),
   http.get("/api/memory/files/:name", ({ params }) =>

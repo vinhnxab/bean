@@ -19,6 +19,13 @@
 //!   (người dùng chủ chốt, 2026-11-08); không tìm thấy beanctl thì in hướng dẫn
 //!   tay — phần đó thuộc bin crate, crate này chỉ cung cấp các bước nguyên tử.
 
+mod pending;
+
+pub use pending::{
+    UPDATE_PENDING_FILE, UpdatePending, clear_pending_marker, pending_marker_path,
+    read_pending_marker, write_pending_marker,
+};
+
 use std::cmp::Ordering;
 use std::io::Read;
 use std::path::{Path, PathBuf};

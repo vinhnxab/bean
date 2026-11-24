@@ -72,6 +72,8 @@ reqwest.workspace = true
 rusqlite.workspace = true
 tar.workspace = true
 flate2.workspace = true
+# M31: `bean update` đọc `[data].dir` tối thiểu từ bean.toml cho marker update.
+toml.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

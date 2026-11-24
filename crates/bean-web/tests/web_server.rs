@@ -22,8 +22,8 @@ use bean_tools::{Tool, ToolAccess, ToolCtx, ToolError, ToolRegistry};
 use bean_types::config::{McpServerConfig, RoleConfig};
 use bean_types::{Config, LlmResponse, Message, Risk, ToolCall, ToolSpec, Usage};
 use bean_web::{
-    AuthService, NoopRebind, RebindHandle, WebListen, WebRebind, WebState, WebStateDeps,
-    build_router, run_web_supervisor, set_password, set_password_and_revoke_sessions,
+    AuthService, NoopRebind, NoopRestart, RebindHandle, WebListen, WebRebind, WebState,
+    WebStateDeps, build_router, run_web_supervisor, set_password, set_password_and_revoke_sessions,
 };
 use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
@@ -144,6 +144,7 @@ async fn make_state_with(
         workspace: Some(workspace),
         speech: None,
         rebind: Arc::new(NoopRebind),
+        restart: Arc::new(NoopRestart),
         os_auth: Arc::new(bean_security::FakeOsAuth::default()),
         sandbox_mode: sandbox_mode_cell(),
     })

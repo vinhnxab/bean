@@ -260,6 +260,15 @@ export const en: Record<MessageKey, string> = {
   "status.modelConnected": "Connected",
   "status.modelConnecting": "Connecting…",
   "status.modelDisconnected": "Disconnected",
+  // --- In-app restart (M31) --------------------------------------------------
+  "restart.title": "Bean needs a restart",
+  "restart.restartNow": "Restart now",
+  "restart.later": "Later",
+  "restart.restarting": "Restarting…",
+  "restart.runActive": "A run is active — stop it (or /stop) first, then retry.",
+  "restart.failed": "Could not send the restart request.",
+  "restart.reasonPrefix": "Reasons:",
+  "restart.aria": "Restart required notice",
   // --- Capability: Tools / MCP / Usage / System -----------------------------
   "nav.tools": "Tools",
   "nav.mcp": "MCP",

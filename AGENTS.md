@@ -467,7 +467,7 @@ Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thự
 |---|---|
 | `POST /api/auth/login` `{password}` | Đăng nhập, đặt cookie |
 | `POST /api/auth/logout` · `GET /api/auth/me` | Đăng xuất · kiểm tra phiên |
-| `GET /api/status` | Phiên bản, model hiện tại, mức dùng ngân sách token, uptime, kênh đang chạy |
+| `GET /api/status` | Phiên bản, model hiện tại, mức dùng ngân sách token, uptime, kênh đang chạy; kèm `restart: {required, reasons}` (M31) — tổng hợp khoá `apply = restart` lệch đĩa + marker `bean update` |
 | `GET /api/sessions?q=&archived=` · `POST /api/sessions` | Liệt kê/tìm (FTS) · tạo hội thoại web mới |
 | `PATCH /api/sessions/:id` `{title?,archived?}` · `DELETE /api/sessions/:id` | Đổi tên/lưu trữ · xoá |
 | `GET /api/sessions/:id/messages?before=&limit=` | Lịch sử (phân trang ngược) |
@@ -494,6 +494,7 @@ Do `bean-web` (axum) cung cấp. Mọi endpoint dưới `/api`, JSON, xác thự
 | `GET/POST /api/settings/lan-access` | Bật/tắt truy cập mạng LAN: tự dò IP LAN, ghi atomic 3 khoá tầng B `web.*` qua `set_many` — admin + step-up mật khẩu, hiệu lực sau restart (D21.x) |
 | `GET/POST /api/settings/host-mode` | Bật/tắt host mode (`security.sandbox.mode`): admin + step-up **mật khẩu tài khoản OS** (bỏ qua khi máy không đặt mật khẩu); no-op không hỏi mật khẩu; hot-swap cell nóng áp dụng NGAY (D22.5b), `restart_required = true` chỉ khi không còn receiver |
 | `POST /api/auth/change-password` | `{current, new}`; huỷ các phiên web khác (M29 Q1) |
+| `POST /api/system/restart` | Restart in-process kiểu Ubuntu (M31): admin-only; 409 `run_active` khi còn run, 409 `restart_pending` khi đã yêu cầu trước đó; 202 rồi tiến trình tắt êm + exec lại binary — UI hiện banner “Khởi động lại ngay / Để sau” |
 
 ### 11.2 WebSocket `/api/ws`
 
@@ -837,6 +838,7 @@ Workspace: {workspace}. Current time: {now} ({timezone}).
 | M28 | Đổi tên `BeanAgent` → `bean` | Không migration tự động: `mv ~/.BeanAgent ~/.bean` (`docs/decisions.md` D18.x) |
 | M29 | Thiết lập & secrets thống nhất (UI + terminal) | `secrets.env` duy nhất chứa key; `bean secret set`/`bean config set`; `bean doctor` sạch; `make check` xanh |
 | M30 | Updater: `bean update` + GitHub Releases (D23) | Crate `bean-update` (GitHub/tải/verify sha256/tar-slip/ghi đè atomic) có test; workflow `.github/workflows/release.yml` build 5 target khi push tag `v*` kèm `SHA256SUMS`; `GET /api/update/check` admin-only; thẻ “Phiên bản & cập nhật” trong Cài đặt; `make check` xanh |
+| M31 | Restart trong ứng dụng (D29): banner + `POST /api/system/restart` | `GET /api/status` có `restart.required/reasons`; endpoint admin-only, 409 khi còn run; `bean update` ghi marker, `serve` xoá lúc boot; banner UI với “Khởi động lại ngay / Để sau”; `make check` xanh |
 
 Trạng thái chi tiết, commit và phần còn thiếu của từng milestone: `docs/status-report.md` mục 2.
 

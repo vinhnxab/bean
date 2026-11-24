@@ -18,6 +18,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router";
 
 import { ModelStatusPill } from "@/components/ModelStatusPill";
+import { RestartBanner } from "@/components/RestartBanner";
 import { TopNav } from "@/components/TopNav";
 import { RouteFallback } from "@/components/ui/Page";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -261,6 +262,10 @@ export function ChatLayout() {
             onHistoryOpen={showSessions || isSettings ? () => setHistoryOpen(true) : undefined}
             rightDrawerLabel={isSettings ? t("settings.openInSidebar") : undefined}
           />
+          {/* M31: banner "Cần khởi động lại" kiểu Ubuntu — nằm ngay dưới TopNav
+              trên mọi màn, tự biến mất khi không còn gì chờ restart. `shrink-0`
+              để nội dung (main) co lại, không phá quy tắc một màn hình. */}
+          <RestartBanner />
           <main className="glass flex min-w-0 flex-1 flex-col overflow-y-auto rounded-2xl border border-border">
             {/* `Suspense` đặt quanh `Outlet` chứ không quanh cả `ChatLayout` (ở `App.tsx`):
               khi đang tải chunk của màn, chỉ vùng nội dung được thay bằng skeleton —

@@ -48,6 +48,8 @@ export type { PushSubscribeRequest } from "./generated/PushSubscribeRequest";
 export type { PushSubscriptionDto } from "./generated/PushSubscriptionDto";
 export type { PushTestResponse } from "./generated/PushTestResponse";
 export type { PushUnsubscribeRequest } from "./generated/PushUnsubscribeRequest";
+export type { RestartResponse } from "./generated/RestartResponse";
+export type { RestartStatusDto } from "./generated/RestartStatusDto";
 export type { RiskDto } from "./generated/RiskDto";
 export type { RoleDto } from "./generated/RoleDto";
 export type { SandboxDto } from "./generated/SandboxDto";

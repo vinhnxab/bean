@@ -98,6 +98,29 @@ pub struct StatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub role_tokens_used: Option<u64>,
+    /// Trạng thái chờ restart (M31): khoá cấu hình `apply = restart` đã ghi đĩa
+    /// chưa hiệu lực và/hoặc bản mới đã cài qua `bean update`. UI dùng để hiện
+    /// banner "Khởi động lại ngay / Để sau".
+    pub restart: RestartStatusDto,
+}
+
+/// Trạng thái "cần khởi động lại" (M31) trong `GET /api/status`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RestartStatusDto {
+    /// `true` khi có ít nhất một lý do chờ restart.
+    pub required: bool,
+    /// Lý do ở dạng đã định dạng sẵn để hiển thị (khoá chưa hiệu lực, bản mới
+    /// đã cài). Rỗng khi `required = false`.
+    pub reasons: Vec<String>,
+}
+
+/// Response của `POST /api/system/restart` (M31).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RestartResponse {
+    /// Luôn true — yêu cầu đã nhận, tiến trình sẽ tắt êm rồi chạy lại binary.
+    pub restarting: bool,
 }
 
 /// Cấu hình LLM runtime, đã khử secret (mục 15.6).

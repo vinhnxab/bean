@@ -27,8 +27,8 @@ use bean_tools::{ToolRegistry, builtin::files::tool::read_file};
 use bean_types::config::RoleConfig;
 use bean_types::{Config, LlmResponse};
 use bean_web::{
-    AuthService, NoopRebind, WebListen, WebRebind, WebState, WebStateDeps, build_router,
-    set_password,
+    AuthService, NoopRebind, NoopRestart, WebListen, WebRebind, WebState, WebStateDeps,
+    build_router, set_password,
 };
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -162,6 +162,7 @@ fn build_with_os_auth(
         workspace: Some(workspace),
         speech: None,
         rebind,
+        restart: Arc::new(NoopRestart),
         os_auth,
         sandbox_mode,
     })

@@ -27,6 +27,6 @@ pub use auth::{
 };
 pub use push::VapidKeys;
 pub use server::{
-    ApiFailure, NoopRebind, RebindHandle, WebBuildError, WebChannel, WebListen, WebRebind,
-    WebState, WebStateDeps, build_router, run_web_supervisor,
+    ApiFailure, NoopRebind, NoopRestart, ProcessRestart, RebindHandle, WebBuildError, WebChannel,
+    WebListen, WebRebind, WebState, WebStateDeps, build_router, run_web_supervisor,
 };

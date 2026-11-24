@@ -24,6 +24,7 @@ use super::rest_host_mode::{host_mode_status, host_mode_update};
 use super::rest_lan_access::{lan_access_status, lan_access_update};
 use super::rest_memories::{delete_memory, get_memory_file, list_memories, put_memory_file};
 use super::rest_push::{push_key, push_status, push_subscribe, push_test, push_unsubscribe};
+use super::rest_restart::system_restart;
 use super::rest_sessions::{
     create_session, delete_session, get_message, list_messages, list_sessions, update_session,
 };
@@ -49,6 +50,9 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/auth/change-password", post(change_password))
         .route("/status", get(status))
         .route("/system", get(system_info))
+        // M31: nút "Khởi động lại ngay" — tắt êm rồi exec lại binary. Admin-only
+        // (kiem tra trong handler), guard Origin/CSRF tầng /api áp sẵn.
+        .route("/system/restart", post(system_restart))
         .route("/config/llm", get(get_llm_config))
         .route("/config/llm/model", put(update_llm_model))
         .route("/config/llm/provider", put(update_llm_provider))

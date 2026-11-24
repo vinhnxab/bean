@@ -30,6 +30,7 @@ import type {
   PushSubscribeRequest,
   PushTestResponse,
   PushUnsubscribeRequest,
+  RestartResponse,
   SecretMutateResponse,
   SecretsListResponse,
   SessionDto,
@@ -355,6 +356,13 @@ export const api = {
     requestJson<AuditListResponse>(withQuery("/api/audit", { before, limit }), { signal }),
 
   status: (signal?: AbortSignal) => requestJson<StatusResponse>("/api/status", { signal }),
+
+  /**
+   * Yêu cầu restart in-process (M31): server trả 202 rồi tự tắt êm + exec lại
+   * binary. WS đứt và tự nối lại (cơ chế sẵn có); 409 khi còn run chạy hoặc
+   * restart trước đó chưa hoàn tất.
+   */
+  systemRestart: () => requestJson<RestartResponse>("/api/system/restart", { method: "POST", body: {} }),
 
   /**
    * Trạng thái voice (M27). UI gọi một lần để quyết định có hiện nút mic.

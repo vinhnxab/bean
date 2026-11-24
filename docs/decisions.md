@@ -950,3 +950,27 @@ Notification, run 2 Notification trước Final). `make check` xanh, CI 4/4 tạ
 song song với đầu lượt N+1 — nếu chưa kịp lưu thì candidate chỉ chờ sang lượt
 N+2, không mất. Test/eval chờ `wait_pending`/`wait_for_pending` trước khi gửi
 lượt kế tiếp.
+
+## 29. Restart trong ứng dụng — banner + `POST /api/system/restart` (D29.x — 2026-11-24, milestone M31)
+
+Mỗi khi thay đổi khoá tier B (`apply = restart`) hay cài bản mới qua `bean update
+--no-restart`, người dùng phải SSH gõ `scripts/beanctl restart` — chậm và dễ quên.
+M31 làm nút restart kiểu Ubuntu: UI hiện banner khi có thứ chờ restart, bấm
+"Khởi động lại ngay" là Bean tự tắt êm rồi chạy lại; "Để sau" chỉ ẩn banner.
+
+| # | Quyết định | Vì sao | Hệ quả đã chấp nhận |
+|---|-----------|--------|---------------------|
+| D29.1 | Restart in-process: handler gửi tín hiệu qua kênh `mpsc` tới select-loop của `serve` → graceful shutdown đầy đủ (router → web/telegram/scheduler/MCP/Chrome) → `exec` lại chính binary với argv gốc | Dùng lại đường tắt êm đã có của SIGTERM, không có đường tắt riêng để bảo trì; `exec` giữ PID nên chạy đúng cả dưới systemd user unit (journald viết tiếp, `StartLimit` không đếm) lẫn `nohup` trên box không supervisor | Windows không có `exec` — banner chỉ trả lỗi chung; restart Windows vẫn qua beanctl/tay |
+| D29.2 | 409 `run_active` khi còn run đang chạy; không tự chờ hay huỷ hộ | Restart giữa run để lại cặp tool_use/tool_result hỏng trong lịch sử (lỗi phổ biến mục 22.1); tự huỷ hộ là thay đổi ý định người dùng | Người dùng phải Dừng (hoặc `/stop`) trước — banner không tự bấm hộ |
+| D29.3 | Admin-only, **không** step-up mật khẩu | Restart ảnh hưởng khả dụng chứ không lộ secret, không đổi cấu hình; đồng bộ `set_tool_enabled` | Ai có cookie admin gây downtime — chấp nhận vì hệ thống một người dùng |
+| D29.4 | Banner tổng hợp từ **hai nguồn** trong `GET /api/status` (`restart.required/reasons`): khoá `apply = restart` lệch đĩa (so giá trị hiệu lực với giá trị đang chạy, D21.7) + marker `data.dir/update-pending.json` do `bean update` ghi khi restart không chắc thành công | Một điểm duy nhất để UI hỏi; marker giải khoảng lặng giữa "đã cài" và "đã restart" của M30 | Lý do là chuỗi định dạng sẵn — đổi wording server là UI đổi theo, không cần sửa client |
+| D29.5 | `serve` xoá marker lúc boot thành công | Boot xong = bản mới đang chạy, "chờ restart" hết nghĩa | Boot hỏng giữa chừng thì marker còn lại — banner vẫn hiện, đúng thực tế |
+| D29.6 | `ProcessRestart` là trait riêng (DIP, đối xứng `WebRebind`): `serve` cắm handle thật, test/môi trường nhúng dùng `NoopRestart` | Test web không được exec tiến trình; cùng hình dạng với các handle runtime khác | — |
+| D29.7 | "Để sau" chỉ ẩn banner phía client (`sessionStorage`), xoá cờ khi `required` về false | Trạng thái server là nguồn sự thật; người dùng chỉ trì hoãn, không "xác nhận đã đọc" phía server | Mở tab mới lại thấy banner — chấp nhận, đó là hành vi mong muốn |
+
+**Kiểm chứng:** `bean-web/tests/restart_rest.rs` 7 test (401/403/CSRF, 409
+`run_active` với run thật chờ confirm, 409 `restart_pending`, 202 + handle nhận
+đúng một lần gọi, status sạch/lý do marker+config); `bean-update` marker 6 test;
+UI `RestartBanner.test.tsx` 5 test (ẩn/hiện + lý do, "Later" ẩn + không gọi POST,
+202 → "Restarting…" khoá nút, 409 `run_active` hiện cảnh báo). `make types` sinh
+`RestartStatusDto`/`RestartResponse`, `make check` xanh.

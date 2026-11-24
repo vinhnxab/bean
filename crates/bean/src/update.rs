@@ -10,9 +10,13 @@
 //!    đi qua `bean.exe.old`).
 //! 5. restart — tự gọi `scripts/beanctl restart` (người dùng chủ chốt
 //!    2026-11-08); không tìm thấy beanctl (hoặc Windows) thì in hướng dẫn tay.
+//!    Khi restart **không chắc đã chạy** (bỏ qua, thiếu beanctl, thất bại) —
+//!    ghi marker `data.dir/update-pending.json` (M31) để banner UI nhắc
+//!    khởi động lại; `bean serve` xoá marker lúc boot thành công.
 //!
-//! Lệnh này KHÔNG đọc `bean.toml` — updater không phụ thuộc cấu hình; nguồn
-//! phát hành là hằng `bean_update::GITHUB_REPO` (D23.1).
+//! Lệnh này KHÔNG nạp `Config` đầy đủ — updater không phụ thuộc cấu hình để
+//! phát hành (nguồn là hằng `bean_update::GITHUB_REPO`, D23.1); với marker M31
+//! chỉ đọc tối thiểu `[data].dir` từ bean.toml và bỏ qua khi file hỏng.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -35,7 +39,7 @@ pub struct UpdateArgs {
 /// giữ biên 180s cho máy chậm.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(180);
 
-pub async fn run(args: &UpdateArgs) -> anyhow::Result<()> {
+pub async fn run(args: &UpdateArgs, config_path: Option<&Path>) -> anyhow::Result<()> {
     let current = env!("CARGO_PKG_VERSION");
     println!(
         "Bean {current} — nguồn cập nhật: GitHub `{}` (chỉ bản stable)",
@@ -101,13 +105,39 @@ pub async fn run(args: &UpdateArgs) -> anyhow::Result<()> {
     }
     println!("✓ Đã cài {} vào {}.", check.latest.tag, target.display());
 
+    let data_dir = marker_data_dir(config_path);
     if args.no_restart {
+        // Bản mới đã trên đĩa, tiến trình cũ vẫn chạy — marker để banner UI
+        // nhắc restart (M31); serve xoá marker khi boot thành công.
+        let _ = bean_update::write_pending_marker(&data_dir, &check.latest.tag);
         println!(
             "Bỏ qua restart (--no-restart). Chạy `scripts/beanctl restart` để áp dụng bản mới."
         );
         return Ok(());
     }
-    restart_after_install(&target).await
+    restart_after_install(&target, &data_dir, &check.latest.tag).await
+}
+
+/// `data.dir` cho marker update (M31): đọc tối thiểu `[data].dir` từ bean.toml
+/// khi đọc được — config hỏng/vắng không được cản việc cập nhật, khi đó rơi về
+/// `~/.bean` (mặc định của spec, mục 4/18).
+fn marker_data_dir(config_path: Option<&Path>) -> PathBuf {
+    let default = crate::chat::expand_tilde(Path::new("~/.bean"));
+    let Some(path) = config_path else {
+        return default;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return default;
+    };
+    let Ok(value) = text.parse::<toml::Table>() else {
+        return default;
+    };
+    let dir = value
+        .get("data")
+        .and_then(|data| data.get("dir"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("~/.bean");
+    crate::chat::expand_tilde(Path::new(dir))
 }
 
 /// Dòng đầu **có nội dung** của ghi chú release, hoặc `—` khi rỗng — ghi chú
@@ -124,16 +154,20 @@ fn first_line_or_dash(notes: &str) -> String {
 /// Tự restart sau khi cài (D23.5): tìm `scripts/beanctl` đi ngược từ thư mục
 /// binary (repo layout `target/release/bean` → `scripts/beanctl`), không thấy
 /// thì in hướng dẫn tay. Chỉ chạy trên Unix — `beanctl` là bash script.
-async fn restart_after_install(target: &Path) -> anyhow::Result<()> {
+/// Mọi nhánh **không chắc** đã có tiến trình mới chạy đều ghi marker M31 trước
+/// khi trả về, để banner UI nhắc khởi động lại.
+async fn restart_after_install(target: &Path, data_dir: &Path, tag: &str) -> anyhow::Result<()> {
     #[cfg(not(unix))]
     {
         let _ = target;
+        let _ = bean_update::write_pending_marker(data_dir, tag);
         println!("→ Windows chưa có beanctl: mở terminal mới và chạy lại Bean để dùng bản mới.");
         return Ok(());
     }
     #[cfg(unix)]
     {
         let Some(beanctl) = find_beanctl(target) else {
+            let _ = bean_update::write_pending_marker(data_dir, tag);
             println!(
                 "→ Không tìm thấy scripts/beanctl: khởi động lại Bean bằng cách bạn vẫn chạy để áp dụng bản mới."
             );
@@ -148,10 +182,10 @@ async fn restart_after_install(target: &Path) -> anyhow::Result<()> {
             .with_context(|| format!("không chạy được {}", beanctl.display()))?;
         if status.success() {
             println!("✓ Bean đã chạy lại với bản mới.");
-            Ok(())
-        } else {
-            bail!("beanctl restart thất bại ({status}) — xem log trong /tmp/bean-run/serve.log");
+            return Ok(());
         }
+        let _ = bean_update::write_pending_marker(data_dir, tag);
+        bail!("beanctl restart thất bại ({status}) — xem log trong /tmp/bean-run/serve.log");
     }
 }
 

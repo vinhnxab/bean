@@ -267,6 +267,15 @@ export const vi = {
   "status.modelConnected": "Đã kết nối",
   "status.modelConnecting": "Đang kết nối…",
   "status.modelDisconnected": "Mất kết nối",
+  // --- Restart in-app (M31) -------------------------------------------------
+  "restart.title": "Cần khởi động lại Bean",
+  "restart.restartNow": "Khởi động lại ngay",
+  "restart.later": "Để sau",
+  "restart.restarting": "Đang khởi động lại…",
+  "restart.runActive": "Đang có lượt chạy — hãy Dừng (hoặc /stop) rồi thử lại.",
+  "restart.failed": "Không gửi được yêu cầu khởi động lại.",
+  "restart.reasonPrefix": "Lý do:",
+  "restart.aria": "Thông báo cần khởi động lại",
   // --- Capability: Tools / MCP / Usage / System -----------------------------
   "nav.tools": "Tools",
   "nav.mcp": "MCP",

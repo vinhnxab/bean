@@ -86,6 +86,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         applySync(message, reason !== "initial");
         if (reason === "reconnect" || reason === "resync") {
           void queryClient.invalidateQueries({ queryKey: ["messages"] });
+          // M31: WS nối lại thành công nghĩa là tiến trình mới đã nghe port —
+          // bấm refetch `/api/status` NGAY để banner restart tắt realtime thay
+          // vì chờ chu kỳ refetch 30 giây.
+          void queryClient.invalidateQueries({ queryKey: queryKeys.status });
         }
       },
       onMessage: (message: ServerMsg) => {

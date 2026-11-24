@@ -10,13 +10,27 @@ use bean_core::{Channel, Router, RouterDeps, Scheduler};
 use bean_memory::{SqliteStore, Store};
 use bean_skills::SkillCatalog;
 use bean_types::Config;
-use bean_web::{AuthService, RebindHandle, WebChannel, WebState, WebStateDeps, run_web_supervisor};
+use bean_web::{
+    AuthService, ProcessRestart, RebindHandle, WebChannel, WebState, WebStateDeps,
+    run_web_supervisor,
+};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::chat;
 use crate::cli::{ChatArgs, ServeArgs};
+
+/// Handle restart in-process (M31): handler HTTP gửi tín hiệu qua kênh này,
+/// select-loop của [`run`] nhận rồi đi hết đường graceful shutdown trước khi
+/// [`exec_self`] thay tiến trình bằng bản binary mới.
+struct ServeRestart(mpsc::UnboundedSender<()>);
+
+impl ProcessRestart for ServeRestart {
+    fn request(&self) -> bool {
+        self.0.send(()).is_ok()
+    }
+}
 
 /// Chạy các kênh được bật trong cấu hình trên một Router/store chung.
 pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
@@ -28,6 +42,9 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     let data_dir = chat::expand_tilde(&config.data.dir);
     let _migrated = bean_types::config::SettingsState::migrate_from_legacy(&data_dir);
     let _voice_applied = bean_types::config::apply_persisted_settings_state(&mut config, &data_dir);
+    // M31: boot thành công nghĩa là bản vừa cài (nếu có) đã lên — marker
+    // "chờ restart để update" hết ý nghĩa, xoá để banner UI tự biến mất.
+    bean_update::clear_pending_marker(&data_dir);
     if !web_enabled && !telegram_enabled {
         bail!("không có kênh nào được bật: bật web.enabled hoặc telegram.enabled");
     }
@@ -174,6 +191,11 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         .context("không khởi tạo được scheduler")?,
     );
 
+    // M31: kênh restart in-process — handler `POST /api/system/restart` gửi vào
+    // đây, select-loop dưới nhận rồi đi đường graceful shutdown + exec lại.
+    let (restart_tx, mut restart_rx) = mpsc::unbounded_channel::<()>();
+    let restart_handle: Arc<dyn ProcessRestart> = Arc::new(ServeRestart(restart_tx));
+
     let mut web_parts = None;
     let mut push_state = None;
     if web_enabled {
@@ -190,6 +212,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             workspace: workspace.clone(),
             speech,
             rebind: Arc::new(RebindHandle::new(rebind_tx)),
+            restart: restart_handle.clone(),
             os_auth: Arc::new(bean_security::RealOsAuth),
             sandbox_mode: Arc::new(sandbox_mode_tx),
         })?;
@@ -261,6 +284,8 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         Signal,
         Web,
         Telegram,
+        /// M31: restart được yêu cầu từ UI (`POST /api/system/restart`).
+        Restart,
     }
     let (first_exit, result) = tokio::select! {
         signal = wait_for_shutdown_signal() => {
@@ -277,6 +302,12 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         }
         result = &mut web_future => (FirstExit::Web, result),
         result = &mut telegram_future => (FirstExit::Telegram, result),
+        // M31: restart từ UI — đợi một nhịp cho response 202 kịp nhả rồi mới
+        // tắt êm. `mpsc::recv` cancel-safe nên nhánh này không mất tín hiệu.
+        _ = restart_rx.recv() => {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            (FirstExit::Restart, Ok(()))
+        }
     };
     shutdown.cancel();
     router.shutdown();
@@ -319,7 +350,40 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     {
         tracing::warn!("Chrome chưa tắt trong 5s; sẽ được dọn ở lần khởi động kế tiếp");
     }
+    if matches!(first_exit, FirstExit::Restart) {
+        // M31: thay tiến trình bằng chính nó với argv gốc — chạy được cả dưới
+        // systemd lẫn nohup (xem `restart.rs`). exec thất bại → trả lỗi để thoát
+        // nonzero: systemd `Restart=always` sẽ nối lại, môi trường không
+        // supervisor thì người dùng start tay theo hướng dẫn in ra.
+        if let Err(error) = exec_self() {
+            tracing::error!(error = ?error, "exec lại binary thất bại sau restart");
+            return Err(error);
+        }
+    }
     result
+}
+
+/// Thay tiến trình hiện tại bằng chính nó với argv gốc (M31, chỉ Unix).
+///
+/// `CommandExt::exec` không bao giờ trả về khi thành công — hàm chỉ trả `Err`
+/// khi exec thất bại. CWD, environ và stdout/stderr được giữ nguyên, nên đường
+/// dẫn config tương đối và log (journald / `bean.log`) vẫn đúng như cũ.
+#[cfg(unix)]
+fn exec_self() -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let exe = std::env::current_exe().context("không đọc được đường dẫn binary đang chạy")?;
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    tracing::info!(exe = %exe.display(), "exec lại binary cho restart (M31)");
+    let error = std::process::Command::new(&exe).args(args).exec();
+    Err(error).with_context(|| format!("exec lại {} thất bại", exe.display()))
+}
+
+/// Thay tiến trình bằng chính nó — chưa hỗ trợ trên nền tảng này (M31).
+#[cfg(not(unix))]
+fn exec_self() -> anyhow::Result<()> {
+    bail!(
+        "restart tự động chưa hỗ trợ trên nền tảng này — hãy khởi động lại Bean theo cách bạn vẫn chạy"
+    )
 }
 
 async fn wait_for_shutdown_signal() -> Result<&'static str> {

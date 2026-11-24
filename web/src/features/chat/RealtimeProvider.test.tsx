@@ -66,6 +66,23 @@ function Probe() {
   return null;
 }
 
+/** Quan sát query `/api/status` — banner restart (M31) phụ thuộc nó để tắt. */
+function StatusProbe() {
+  useQuery({ queryKey: queryKeys.status, queryFn: ({ signal }) => api.status(signal) });
+  return null;
+}
+
+const STATUS_BODY = {
+  version: "test",
+  model: "fake-model",
+  max_steps: 25,
+  daily_token_budget: 1_000_000,
+  tokens_used: 0,
+  uptime_seconds: 1,
+  channels: ["web"],
+  restart: { required: false, reasons: [] },
+};
+
 describe("RealtimeProvider — notification (M13)", () => {
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -133,5 +150,48 @@ describe("RealtimeProvider — notification (M13)", () => {
     expect(sessions.calls()).toBe(before.s);
     expect(messages.calls()).toBe(before.m);
     expect(drafts.calls()).toBe(before.d);
+  });
+});
+
+describe("RealtimeProvider — banner restart realtime (M31)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    lastSocket = null;
+  });
+
+  it("WS nối lại xong bấm refetch /api/status NGAY, không chờ chu kỳ 30 giây", async () => {
+    // Backoff nối lại (500ms + jitter) vẫn chạy theo real time nhờ
+    // `shouldAdvanceTime` — MSW và `waitFor` không bị treo bởi fake timers.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const status = countingHandler("/api/status", STATUS_BODY);
+      testServer.use(status.handler);
+
+      renderManagement(
+        <RealtimeProvider>
+          <StatusProbe />
+        </RealtimeProvider>,
+      );
+      await waitFor(() => expect(lastSocket).not.toBeNull());
+      lastSocket?.onopen?.();
+      await waitFor(() => expect(status.calls()).toBeGreaterThan(0));
+      const first = lastSocket;
+      const before = status.calls();
+
+      // Đứt kết nối (tiến trình cũ tắt êm) → ChatSocket xếp lại lịch nối.
+      first?.close();
+      // Nối lại đi qua timer backoff — chờ socket MỚI được tạo; đẩy sự kiện
+      // lên socket cũ thì `awaitingSyncAfterReconnect` chưa set, reason sẽ
+      // không phải "reconnect" và kịch bản trở nên vô nghĩa.
+      await waitFor(() => expect(lastSocket).not.toBe(first));
+      lastSocket?.onopen?.();
+      lastSocket?.receive({ type: "sync", running: [], pending_confirms: [] });
+
+      // Sync trên socket mới ⇒ reason "reconnect" ⇒ invalidate `status` ⇒
+      // refetch ngay trong nhịp đó — tín hiệu để banner restart tắt realtime.
+      await waitFor(() => expect(status.calls()).toBeGreaterThan(before));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

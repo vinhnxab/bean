@@ -73,6 +73,7 @@ mod rest_host_mode;
 mod rest_lan_access;
 mod rest_memories;
 mod rest_push;
+mod rest_restart;
 mod rest_sessions;
 mod rest_settings;
 mod rest_skills;
@@ -80,6 +81,7 @@ mod rest_tasks;
 mod rest_update;
 mod rest_usage_system;
 mod rest_voice;
+mod restart;
 mod routes;
 mod ui_assets;
 mod ws;
@@ -91,6 +93,7 @@ mod ws;
 pub use guard::request_guard;
 pub use guard::security_headers;
 pub use rebind::{NoopRebind, RebindHandle, WebListen, WebRebind, run_web_supervisor};
+pub use restart::{NoopRestart, ProcessRestart};
 pub use routes::build_router;
 
 /// Xác thực cookie cho REST handler — mọi handler dùng chung một cách.
@@ -157,6 +160,9 @@ pub struct WebState {
     /// Điểm áp rebind lúc nóng (DIP): `bean serve` cắm [`RebindHandle`], test/
     /// nhúng không supervisor dùng [`NoopRebind`].
     pub rebind: Arc<dyn WebRebind>,
+    /// Điểm kích hoạt restart in-process (M31, DIP): `bean serve` cắm handle
+    /// nối sang select-loop của serve; test/nhúng dùng [`NoopRestart`].
+    pub restart: Arc<dyn ProcessRestart>,
     /// Giới hạn số WebSocket đồng thời; permit sống cùng connection.
     ws_connections: Arc<Semaphore>,
 }
@@ -195,6 +201,9 @@ pub struct WebStateDeps {
     /// Điểm áp rebind lúc nóng (D21.7); mặc định [`NoopRebind`] khi không có
     /// supervisor (test, nhúng khác).
     pub rebind: Arc<dyn WebRebind>,
+    /// Điểm kích hoạt restart in-process (M31); mặc định [`NoopRestart`] khi
+    /// không có serve loop (test, nhúng khác).
+    pub restart: Arc<dyn ProcessRestart>,
     /// Xác minh mật khẩu tài khoản OS cho step-up toggle host mode (D22.2).
     /// `bean serve` cắm [`bean_security::RealOsAuth`], test cắm giả (hermetic).
     pub os_auth: Arc<dyn OsAuth>,
@@ -218,6 +227,7 @@ impl WebState {
             workspace,
             speech,
             rebind,
+            restart,
             sandbox_mode,
             os_auth,
         } = deps;
@@ -236,6 +246,7 @@ impl WebState {
             started_at: Instant::now(),
             web_listen: Arc::new(web_listen),
             rebind,
+            restart,
             sandbox_mode,
             os_auth,
             ws_connections: Arc::new(Semaphore::new(MAX_WS_CONNECTIONS)),

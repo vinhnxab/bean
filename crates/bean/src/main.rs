@@ -50,10 +50,11 @@ async fn main() -> anyhow::Result<()> {
             &backup::BackupArgs { dest, no_secrets },
             config_path.as_deref(),
         ),
-        // M30: `bean update` không cần cấu hình — nguồn phát hành là hằng số
-        // (D23.1), chỉ dùng mạng + đường dẫn binary đang chạy.
+        // M30: `bean update` không nạp Config đầy đủ — nguồn phát hành là hằng
+        // số (D23.1); `config_path` chỉ dùng đọc tối thiểu `[data].dir` cho
+        // marker "chờ restart" (M31).
         Command::Update { check, no_restart } => {
-            update::run(&UpdateArgs { check, no_restart }).await
+            update::run(&UpdateArgs { check, no_restart }, config_path.as_deref()).await
         }
         // Eval: không cần `bean.toml` — runner tự dựng Config mặc định + ghi đè
         // theo task, mọi run nằm trong thư mục tạm (bean-eval).
