@@ -62,6 +62,7 @@
 mod budget;
 mod compaction;
 mod memory;
+mod memory_push;
 mod shared;
 mod sqlite;
 mod trait_def;
@@ -98,12 +99,12 @@ pub use memory::MemoryStore;
 pub use sqlite::SqliteStore;
 pub use trait_def::Store;
 pub use types::{
-    McpClientInfo, MemoryRecord, MemorySearchHit, MemorySource, MessageRecord, NewScheduledTask,
-    OutboxEntry, ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage,
-    WebSessionInfo,
+    McpClientInfo, MemoryRecord, MemorySearchHit, MemorySource, MessageRecord, NewPushSubscription,
+    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
+    StoreError, StoredMessage, WebSessionInfo,
 };
 
 pub use crate::traits::traits::{
-    McpClientStore, MemoryStore as MemoryOpsStore, MessageStore, OutboxStore, SessionStore,
-    TaskStore, ToolOverride, ToolOverrideStore, UsageStore, WebSessionStore,
+    McpClientStore, MemoryStore as MemoryOpsStore, MessageStore, OutboxStore, PushStore,
+    SessionStore, TaskStore, ToolOverride, ToolOverrideStore, UsageStore, WebSessionStore,
 };

@@ -27,8 +27,8 @@ use super::compaction::compact_via;
 use super::shared::{now_rfc3339, seq_to_index, slice_start, title_from, truncate_chars};
 use super::types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MemorySource, MessageRecord, NewScheduledTask,
-    OutboxEntry, ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage,
-    WebSessionInfo,
+    OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary, StoreError,
+    StoredMessage, WebSessionInfo,
 };
 use super::{MEMORY_HIT_PREVIEW_CHARS, MEMORY_SEARCH_LIMIT, Store};
 use crate::traits::traits::*;
@@ -79,6 +79,10 @@ pub struct MemoryStore {
     /// theo seed; khớp schema `tool_overrides` của SqliteStore — hai bản cài đặt
     /// không được lệch ngữ nghĩa (test dùng chung trong `tests.rs`).
     tool_overrides: RwLock<BTreeMap<String, bool>>,
+    /// Subscription Web Push (khớp schema `push_subscriptions` của SqliteStore).
+    /// `pub(super)` vì impl `PushStore` nằm ở `memory_push.rs` (tách ranh giới
+    /// nghiệp vụ, giữ trần số dòng của test kiến trúc).
+    pub(super) push_subscriptions: RwLock<Vec<PushSubscription>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
     next_task_id: RwLock<u64>,
@@ -98,6 +102,7 @@ impl Default for MemoryStore {
             web_sessions: RwLock::new(Vec::new()),
             mcp_clients: RwLock::new(Vec::new()),
             tool_overrides: RwLock::new(BTreeMap::new()),
+            push_subscriptions: RwLock::new(Vec::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
             next_task_id: RwLock::new(1),

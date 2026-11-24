@@ -1490,3 +1490,87 @@ pub struct UpdateCheckDto {
     /// build trong workflow — UI hiện cảnh báo phải tải tay.
     pub artifact: Option<String>,
 }
+
+// ───────────────── Web Push (VAPID) — thông báo khi tab đã đóng ─────────────
+
+/// `GET /api/push/key` — public key VAPID (base64url, 65 byte uncompressed) để
+/// trình duyệt gọi `pushManager.subscribe({ applicationServerKey })`. Đây là
+/// giá trị công khai, không phải secret.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PushKeyResponse {
+    /// Public key VAPID dạng base64url no-pad.
+    pub public_key: String,
+}
+
+/// Cặp khóa ECDH của subscription do trình duyệt sinh (`subscription.keys` theo
+/// chuẩn Push API).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct PushKeysDto {
+    /// Public key P-256 uncompressed của trình duyệt (base64url).
+    pub p256dh: String,
+    /// Auth secret 16 byte (base64url) cho HKDF của ECE.
+    pub auth: String,
+}
+
+/// `POST /api/push/subscribe` — đăng ký subscription; đăng ký lại cùng endpoint
+/// cập nhật key (UPSERT), số lỗi server-side được giữ nguyên.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct PushSubscribeRequest {
+    /// URL push service của trình duyệt (FCM/Mozilla autopush...). Chỉ nhận `https`.
+    pub endpoint: String,
+    /// Cặp khóa ECDH để mã hoá payload.
+    pub keys: PushKeysDto,
+}
+
+/// `POST /api/push/unsubscribe` — gỡ một subscription theo endpoint.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct PushUnsubscribeRequest {
+    /// Endpoint đã đăng ký.
+    pub endpoint: String,
+}
+
+/// Một subscription đã lưu (trạng thái runtime của server) cho UI hiển thị.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct PushSubscriptionDto {
+    /// Định danh ngắn ổn định (hash SHA-256 của endpoint) — an toàn để hiển thị,
+    /// không lộ URL subscription (chứa token định danh).
+    pub label: String,
+    /// User-Agent của trình duyệt lúc đăng ký (cắt ~200 ký tự).
+    pub user_agent: String,
+    /// Thời điểm đăng ký RFC3339 UTC.
+    pub created_at: String,
+    /// Số lần gửi lỗi liên tiếp; gửi thành công reset về 0.
+    pub failure_count: u32,
+}
+
+/// `GET /api/push` — trạng thái Web Push + danh sách subscription đã đăng ký.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct PushStatusResponse {
+    /// Khóa VAPID đã nạp/sinh được — `false` khi lỗi đĩa, UI sẽ tắt nút đăng ký.
+    pub configured: bool,
+    /// Public key VAPID (base64url); rỗng khi `configured = false`.
+    pub public_key: String,
+    /// Danh sách subscription, cũ nhất trước.
+    pub subscriptions: Vec<PushSubscriptionDto>,
+}
+
+/// `POST /api/push/test` — gửi một thông báo thử tới mọi subscription.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct PushTestResponse {
+    /// Số subscription nhận thành công.
+    pub delivered: u32,
+    /// Số subscription gửi lỗi (mạng/HTTP khác 2xx).
+    pub failed: u32,
+    /// Số subscription đã chết (404/410) và bị xoá khỏi store.
+    pub removed: u32,
+}

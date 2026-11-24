@@ -175,6 +175,7 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
     );
 
     let mut web_parts = None;
+    let mut push_state = None;
     if web_enabled {
         // D21.7: supervisor sở hữu listener web — LAN toggle từ UI áp dụng lúc nóng
         // qua `RebindHandle` mà không cần restart tiến trình.
@@ -196,6 +197,10 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         router
             .register_channel(channel)
             .context("đăng ký WebChannel thất bại")?;
+        // Web Push (VAPID): dispatcher push thông báo khi tab đã đóng — cần state
+        // (router events, store, ws_active_count) nên clone trước khi state vào
+        // `web_parts`; spawn sau khi `shutdown` được tạo (dưới đây).
+        push_state = Some(state.clone());
         let listener = TcpListener::bind(config.web.bind)
             .await
             .with_context(|| format!("không bind được {}", config.web.bind))?;
@@ -220,6 +225,12 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
         .context("không khởi động được worker outbox")?;
 
     let shutdown = CancellationToken::new();
+    if let Some(push_state) = push_state {
+        tokio::spawn(bean_web::push::run_push_dispatcher(
+            push_state,
+            shutdown.clone(),
+        ));
+    }
     let scheduler_shutdown = shutdown.clone();
     let mut scheduler_task = tokio::spawn(async move {
         scheduler.run(scheduler_shutdown).await;

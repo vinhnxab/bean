@@ -47,6 +47,8 @@ export const queryKeys = {
   hostMode: ["host-mode"] as const,
   /** Secret slot (M29) — chỉ cờ `set`/`source`, không giá trị nên cache được. */
   secrets: ["secrets"] as const,
+  /** Trạng thái Web Push + danh sách subscription đã đăng ký (admin). */
+  pushStatus: ["push-status"] as const,
 };
 
 export function useAuth() {

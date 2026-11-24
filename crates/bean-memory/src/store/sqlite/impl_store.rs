@@ -17,8 +17,9 @@ use super::inner::SqliteStore;
 use crate::store::Store;
 use crate::store::compaction::compact_via;
 use crate::store::types::{
-    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
-    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewPushSubscription,
+    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
+    StoreError, StoredMessage, WebSessionInfo,
 };
 use crate::traits::traits::*;
 #[async_trait::async_trait]
@@ -610,6 +611,36 @@ impl ToolOverrideStore for SqliteStore {
     async fn tool_overrides(&self) -> Result<Vec<ToolOverride>, StoreError> {
         self.request(move |reply| DbCommand::ToolOverrides { reply })
             .await
+    }
+}
+
+#[async_trait::async_trait]
+impl PushStore for SqliteStore {
+    async fn upsert_push_subscription(&self, sub: &NewPushSubscription) -> Result<(), StoreError> {
+        let sub = sub.clone();
+        self.request(move |reply| DbCommand::UpsertPushSubscription { sub, reply })
+            .await
+    }
+
+    async fn list_push_subscriptions(&self) -> Result<Vec<PushSubscription>, StoreError> {
+        self.request(move |reply| DbCommand::ListPushSubscriptions { reply })
+            .await
+    }
+
+    async fn delete_push_subscription(&self, endpoint: &str) -> Result<bool, StoreError> {
+        let endpoint = endpoint.to_string();
+        self.request(move |reply| DbCommand::DeletePushSubscription { endpoint, reply })
+            .await
+    }
+
+    async fn record_push_outcome(&self, endpoint: &str, ok: bool) -> Result<(), StoreError> {
+        let endpoint = endpoint.to_string();
+        self.request(move |reply| DbCommand::RecordPushOutcome {
+            endpoint,
+            ok,
+            reply,
+        })
+        .await
     }
 }
 

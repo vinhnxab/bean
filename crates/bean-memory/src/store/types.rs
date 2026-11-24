@@ -140,6 +140,45 @@ pub struct MemoryRecord {
     pub created_at: String,
 }
 
+/// Dữ liệu đầu vào khi đăng ký một subscription Web Push (trình duyệt gửi lên).
+///
+/// Tách khỏi [`PushSubscription`] (bản ghi đầy đủ) theo cùng mẫu
+/// `NewScheduledTask`/`ScheduledTask`: bản ghi input không mang dữ liệu server
+/// tự quản (số lần gửi lỗi) nên không thể nhầm lẫn ghi đè chúng từ ngoài.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPushSubscription {
+    /// URL push service riêng cho trình duyệt này (do push service cấp, bí mật
+    /// đối với bên thứ ba nhưng vẫn là dữ liệu không tin cậy từ client — không
+    /// bao giờ đưa vào log nguyên văn).
+    pub endpoint: String,
+    /// Public key ECDH P-256 của trình duyệt (base64url, payload mã hoá).
+    pub p256dh: String,
+    /// Auth secret 16 byte (base64url) cho HKDF của ECE.
+    pub auth: String,
+    /// User-Agent của trình duyệt đăng ký — chỉ để hiển thị trong UI.
+    pub user_agent: String,
+    /// Thời điểm đăng ký RFC3339 UTC.
+    pub created_at: String,
+}
+
+/// Một subscription Web Push đã lưu, kèm trạng thái runtime của server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PushSubscription {
+    /// URL push service (khoá chính).
+    pub endpoint: String,
+    /// Public key ECDH của trình duyệt.
+    pub p256dh: String,
+    /// Auth secret cho ECE.
+    pub auth: String,
+    /// User-Agent của trình duyệt đăng ký.
+    pub user_agent: String,
+    /// Thời điểm đăng ký RFC3339 UTC.
+    pub created_at: String,
+    /// Số lần gửi lỗi liên tiếp; gửi thành công reset về 0. Chỉ để chẩn đoán
+    /// "điện thoại còn nhận thông báo không" — không tự xoá tại store.
+    pub failure_count: u32,
+}
+
 /// Dữ liệu đầu vào khi tạo tác vụ định kỳ.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewScheduledTask {

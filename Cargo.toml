@@ -178,6 +178,17 @@ base64 = "0.22.1"
 cap-std = "4.0.3"
 # Property-based test cho path jail (mục 15.1/20) — chỉ dev-dependency.
 proptest = "1.11.0"
+# --- Web Push (VAPID ES256 + ECE RFC 8291) — RustCrypto thuần Rust ---
+# Tự cài thay vì dùng crate `web-push`: bản đó kéo `jwt-simple` → `rsa 0.7` dính
+# RUSTSEC-2023-0071 (Marvin Attack) làm `make audit` đỏ, cộng http 0.2/base64 0.13
+# legacy. Dùng cùng hệ RustCrypto với workspace (sha2 0.11/digest 0.11) và phần
+# gửi HTTP đi qua reqwest đã có.
+# `getrandom` để `Generate::try_generate()` (EphemeralSecret/SigningKey) khả dụng —
+# bản `generate()` của trait panic nên bị cấm theo lints workspace.
+p256 = { version = "0.14.0", features = ["ecdsa", "ecdh", "getrandom"] }
+aes-gcm = "0.11.1"
+hkdf = "0.13.0"
+
 # MCP client chính thức (M14) + MCP server read-only (M25). Chỉ bật stdio client và
 # streamable-HTTP server, không kéo OAuth/macros/reqwest.
 # API đã đối chiếu lại source 3.9.x sau nâng cấp vá RUSTSEC-2026-0457/0461/0462.

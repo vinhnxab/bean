@@ -200,6 +200,13 @@ export const testServer = setupServer(
       api_key_set: false,
     }),
   ),
+  // (Web Push) Panel Thông báo hỏi trạng thái khi mount. Mặc định: khóa OK,
+  // chưa có thiết bị. Test riêng của push ghi đè theo kịch bản; POST subscribe/
+  // unsubscribe/test cố ý KHÔNG có handler mặc định — gọi ngoài ý muốn phải lỗi
+  // to, không được im lặng thành công (cùng quy tắc với POST host-mode dưới đây).
+  http.get("/api/push", () =>
+    HttpResponse.json({ configured: true, public_key: "BTestKey", subscriptions: [] }),
+  ),
   // (D22.2) Card Host mode mount cạnh LAN access trong panel Advanced — mặc định
   // trả sandbox docker, chưa pending, máy có mật khẩu (fail-closed như thật).
   // Test riêng của card dùng `testServer.use(...)` ghi đè theo kịch bản; POST

@@ -29,6 +29,10 @@ use super::q_message::{
     append_message, archive_session, clear_messages, count_messages, create_session_row,
     ensure_session, load_summary, save_summary,
 };
+use super::q_push::{
+    delete_push_subscription, list_push_subscriptions, record_push_outcome,
+    upsert_push_subscription,
+};
 use super::q_session::{
     delete_memory, delete_session, find_active_session, list_memories, list_message_records,
     list_sessions, load_session_info, load_session_summary, message_by_id, update_session,
@@ -304,6 +308,22 @@ pub(super) fn dispatch(conn: &mut Connection, cmd: DbCommand) {
         }
         DbCommand::DeleteMcpClient { name, reply } => {
             let _ = reply.send(delete_mcp_client(conn, &name));
+        }
+        DbCommand::UpsertPushSubscription { sub, reply } => {
+            let _ = reply.send(upsert_push_subscription(conn, &sub));
+        }
+        DbCommand::ListPushSubscriptions { reply } => {
+            let _ = reply.send(list_push_subscriptions(conn));
+        }
+        DbCommand::DeletePushSubscription { endpoint, reply } => {
+            let _ = reply.send(delete_push_subscription(conn, &endpoint));
+        }
+        DbCommand::RecordPushOutcome {
+            endpoint,
+            ok,
+            reply,
+        } => {
+            let _ = reply.send(record_push_outcome(conn, &endpoint, ok));
         }
         DbCommand::SetToolEnabled {
             name,

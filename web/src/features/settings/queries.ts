@@ -152,6 +152,31 @@ export function useTestConnection() {
 }
 
 /**
+ * Trạng thái Web Push + thiết bị đã đăng ký (admin) — hàng "Web Push" của panel
+ * Thông báo. 403 với user thường là bình thường: panel chỉ ẩn nút quản lý,
+ * không hiện lỗi đỏ nên `retry: false`.
+ */
+export function usePushStatus() {
+  return useQuery({
+    queryKey: queryKeys.pushStatus,
+    queryFn: ({ signal }) => api.pushStatus(signal),
+    retry: false,
+  });
+}
+
+/** Gửi thông báo thử tới mọi thiết bị push — mutation vì người dùng bấm nút. */
+export function usePushTest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.pushTest(),
+    onSuccess: () => {
+      // Kết quả gửi có thể đã xoá subscription chết (404/410) — làm mới danh sách.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pushStatus });
+    },
+  });
+}
+
+/**
  * Đổi model runtime.
  *
  * Lưu thành công phải cập nhật cache **và** vô hiệu `status`/`system`: hai query

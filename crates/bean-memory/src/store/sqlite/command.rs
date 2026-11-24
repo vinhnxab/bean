@@ -18,8 +18,9 @@ use tokio::sync::oneshot;
 use bean_types::{Message, Outbound, SessionId, Usage};
 
 use crate::store::types::{
-    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
-    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewPushSubscription,
+    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
+    StoreError, StoredMessage, WebSessionInfo,
 };
 
 /// Kênh trả lời của một lệnh gửi cho worker.
@@ -62,6 +63,7 @@ impl DbCommand {
             | DbCommand::GetMcpClient { .. }
             | DbCommand::ListMcpClients { .. }
             | DbCommand::ToolOverrides { .. }
+            | DbCommand::ListPushSubscriptions { .. }
             | DbCommand::MemorySearch { .. }
             | DbCommand::DueOutbox { .. }
             | DbCommand::ListMessages { .. } => CmdKind::Read,
@@ -88,6 +90,9 @@ impl DbCommand {
             | DbCommand::DeleteAllWebSessions { .. }
             | DbCommand::CreateMcpClient { .. }
             | DbCommand::DeleteMcpClient { .. }
+            | DbCommand::UpsertPushSubscription { .. }
+            | DbCommand::DeletePushSubscription { .. }
+            | DbCommand::RecordPushOutcome { .. }
             | DbCommand::SetToolEnabled { .. }
             | DbCommand::MemorySave { .. }
             | DbCommand::Outbound { .. }
@@ -310,6 +315,23 @@ pub(super) enum DbCommand {
     DeleteMcpClient {
         name: String,
         reply: Reply<bool>,
+    },
+    // (Web Push) Subscription trình duyệt: endpoint là khoá chính, gửi 410 Gone thì xoá.
+    UpsertPushSubscription {
+        sub: NewPushSubscription,
+        reply: Reply<()>,
+    },
+    ListPushSubscriptions {
+        reply: Reply<Vec<PushSubscription>>,
+    },
+    DeletePushSubscription {
+        endpoint: String,
+        reply: Reply<bool>,
+    },
+    RecordPushOutcome {
+        endpoint: String,
+        ok: bool,
+        reply: Reply<()>,
     },
     // (Runtime toggle) Bật/tắt tool từ UI: hàng tồn tại = tool bị tắt.
     SetToolEnabled {

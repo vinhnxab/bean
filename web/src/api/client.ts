@@ -25,6 +25,11 @@ import type {
   MessageDto,
   MessageListResponse,
   OkResponse,
+  PushKeyResponse,
+  PushStatusResponse,
+  PushSubscribeRequest,
+  PushTestResponse,
+  PushUnsubscribeRequest,
   SecretMutateResponse,
   SecretsListResponse,
   SessionDto,
@@ -433,6 +438,28 @@ export const api = {
    * `update_platform_unsupported`, 404 `no_stable_release`.
    */
   checkUpdate: (signal?: AbortSignal) => requestJson<UpdateCheckDto>("/api/update/check", { signal }),
+
+  // --- Web Push (VAPID) -----------------------------------------------------
+
+  /**
+   * Trạng thái Web Push + danh sách thiết bị đã đăng ký (chỉ admin). Lỗi khóa
+   * VAPID không chết endpoint: `configured = false` để UI tắt nút đăng ký.
+   */
+  pushStatus: (signal?: AbortSignal) => requestJson<PushStatusResponse>("/api/push", { signal }),
+
+  /** Public key VAPID (base64url) cho `pushManager.subscribe` — giá trị công khai, không phải secret. */
+  pushKey: (signal?: AbortSignal) => requestJson<PushKeyResponse>("/api/push/key", { signal }),
+
+  /** Đăng ký thiết bị nhận push (chỉ admin); trả 204 khi xong. */
+  pushSubscribe: (request: PushSubscribeRequest) =>
+    requestJson<void>("/api/push/subscribe", { method: "POST", body: request }),
+
+  /** Gỡ subscription theo endpoint (chỉ admin); 404 khi server chưa có — coi như đã gỡ xong. */
+  pushUnsubscribe: (request: PushUnsubscribeRequest) =>
+    requestJson<void>("/api/push/unsubscribe", { method: "POST", body: request }),
+
+  /** Gửi thông báo thử tới mọi thiết bị — xác nhận ngay điện thoại có nhận không. */
+  pushTest: () => requestJson<PushTestResponse>("/api/push/test", { method: "POST", body: {} }),
 
   /**
    * Secret slot: **không bao giờ** có giá trị — chỉ `set`/`source` và cờ bị env che.

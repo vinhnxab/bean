@@ -11,10 +11,13 @@
 //!   `send()` = broadcast `Notification` tới mọi tab — `docs/decisions.md` D1.5).
 //! * Phục vụ asset: `rust-embed` sau feature `ui`, `#[allow_missing]` để build không cần
 //!   `web/dist`; SPA fallback **không** được che lỗi 404 của `/api/*`.
+//! * Web Push (VAPID): dispatcher + REST `/api/push/*` — thông báo tới trình duyệt
+//!   khi tab đã đóng; mã hoá tự impl RFC 8291 bằng RustCrypto (xem `push/`).
 #![forbid(unsafe_code)]
 
 pub mod api_types;
 pub mod auth;
+pub mod push;
 pub mod server;
 
 pub use api_types::*;
@@ -22,6 +25,7 @@ pub use auth::{
     AuthError, AuthService, LoginSession, auth_file_path, set_password,
     set_password_and_revoke_sessions,
 };
+pub use push::VapidKeys;
 pub use server::{
     ApiFailure, NoopRebind, RebindHandle, WebBuildError, WebChannel, WebListen, WebRebind,
     WebState, WebStateDeps, build_router, run_web_supervisor,

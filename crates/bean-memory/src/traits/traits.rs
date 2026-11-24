@@ -22,10 +22,14 @@
 //! (Runtime tool toggle) `ToolOverrideStore` ghi đè bật/tắt tool từ UI: hàng tồn
 //! tại trong `tool_overrides` nghĩa là tool **bị tắt**, vắng mặt là bật — schema
 //! đồng bộ với registry (xem `bean-tools/src/registry.rs`).
+//!
+//! (Web Push) `PushStore` quản subscription trình duyệt đăng ký nhận thông báo
+//! khi tab đã đóng (Android/PWA): endpoint là khoá chính, gửi 410 Gone thì xoá.
 
 use crate::store::{
-    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewScheduledTask, OutboxEntry,
-    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewPushSubscription,
+    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
+    StoreError, StoredMessage, WebSessionInfo,
 };
 use bean_types::{Message, Outbound, SessionId, Usage};
 
@@ -357,6 +361,27 @@ pub trait ToolOverrideStore: Send + Sync {
 
     /// Mọi override đã lưu (sort theo tên) — nạp lúc khởi động vào registry.
     async fn tool_overrides(&self) -> Result<Vec<ToolOverride>, StoreError>;
+}
+
+// ============================================================================ //
+// PUSH STORE - Single Responsibility: Web Push subscriptions
+// ============================================================================ //
+
+#[async_trait::async_trait]
+pub trait PushStore: Send + Sync {
+    /// Lưu subscription trình duyệt; đăng ký lại cùng endpoint cập nhật key
+    /// (trình duyệt sinh key mới khi subscribe lại) nhưng **giữ nguyên** số lỗi
+    /// đã đếm — đó là trạng thái server, không phải của client.
+    async fn upsert_push_subscription(&self, sub: &NewPushSubscription) -> Result<(), StoreError>;
+
+    /// Mọi subscription đã lưu (cũ nhất trước) — push dispatcher duyệt từng cái.
+    async fn list_push_subscriptions(&self) -> Result<Vec<PushSubscription>, StoreError>;
+
+    /// Xoá subscription; `false` khi endpoint không tồn tại.
+    async fn delete_push_subscription(&self, endpoint: &str) -> Result<bool, StoreError>;
+
+    /// Ghi kết quả lần gửi gần nhất: thành công reset số lỗi, thất bại cộng dồn.
+    async fn record_push_outcome(&self, endpoint: &str, ok: bool) -> Result<(), StoreError>;
 }
 
 // ============================================================================ //

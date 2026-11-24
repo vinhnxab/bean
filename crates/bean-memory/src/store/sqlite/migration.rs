@@ -222,6 +222,27 @@ pub(super) fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         )?;
         conn.pragma_update(None, "user_version", 8)
             .map_err(internal)?;
+        version = 8;
+    }
+    if version < 9 {
+        // Web Push (VAPID): subscription trình duyệt đăng ký nhận thông báo khi
+        // tab đã đóng. `IF NOT EXISTS` ⇒ chạy lại vô hại. Không index thêm —
+        // số subscription là hàng chục, full scan rẻ hơn cả index.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS push_subscriptions (
+               endpoint TEXT PRIMARY KEY,
+               p256dh TEXT NOT NULL,
+               auth TEXT NOT NULL,
+               user_agent TEXT NOT NULL DEFAULT '',
+               created_at TEXT NOT NULL,
+               failure_count INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .map_err(|err| {
+            StoreError::Internal(format!("migration v9 push_subscriptions thất bại: {err}"))
+        })?;
+        conn.pragma_update(None, "user_version", 9)
+            .map_err(internal)?;
     }
     Ok(())
 }

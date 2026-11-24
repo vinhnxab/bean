@@ -71,3 +71,50 @@ self.addEventListener("fetch", (event) => {
     })(),
   );
 });
+
+// --- Web Push (VAPID) -------------------------------------------------------
+// Server mã hoá payload theo RFC 8291 và push service (FCM/Mozilla autopush)
+// giải hộ; tới đây trình duyệt nhận JSON {title, body, url}. JSON hỏng hoặc
+// rỗng vẫn phải hiện thông báo chung: Chrome CHẾT subscription nếu một push
+// không hiện gì (userVisibleOnly), nên tuyệt đối không bỏ qua sự kiện này.
+
+self.addEventListener("push", (event) => {
+  let title = "Bean";
+  let body = "";
+  let url = "/";
+  try {
+    const payload = JSON.parse(event.data ? event.data.text() : "{}");
+    if (typeof payload.title === "string" && payload.title) title = payload.title.slice(0, 100);
+    if (typeof payload.body === "string") body = payload.body.slice(0, 300);
+    if (typeof payload.url === "string" && payload.url) url = payload.url;
+  } catch {
+    // Payload hỏng: giữ tiêu đề mặc định — thông báo vẫn phải hiện.
+  }
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/pwa-192.png",
+      badge: "/pwa-192.png",
+      tag: "bean",
+      data: { url },
+    }),
+  );
+});
+
+// Nhấp thông báo: tập trung cửa sổ Bean đang mở, không có thì mở theo url đính
+// kèm. Không navigate: chạy vào SPA đủ tốt vì url luôn là đường dẫn trong app.
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data && event.notification.data.url ? event.notification.data.url : "/";
+  event.waitUntil(
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of clientList) {
+        await client.focus();
+        return;
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(url);
+    })(),
+  );
+});

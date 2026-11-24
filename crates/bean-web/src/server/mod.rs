@@ -72,6 +72,7 @@ mod rest_config;
 mod rest_host_mode;
 mod rest_lan_access;
 mod rest_memories;
+mod rest_push;
 mod rest_sessions;
 mod rest_settings;
 mod rest_skills;
@@ -260,6 +261,12 @@ impl WebState {
     /// `true` khi provider STT/TTS đã dựng — voice "configured" cho UI.
     pub async fn speech_configured(&self) -> bool {
         self.speech.read().await.is_some()
+    }
+
+    /// Số kết nối WebSocket đang sống — push dispatcher dùng để bỏ qua push khi
+    /// tab đang mở (in-page notification đã đủ, push trùng là nhiễu).
+    pub fn ws_active_count(&self) -> usize {
+        MAX_WS_CONNECTIONS - self.ws_connections.available_permits()
     }
 
     /// Swap provider sau khi `PATCH /api/voice` dựng thành công cấu hình mới.

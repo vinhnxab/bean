@@ -53,6 +53,12 @@ tracing.workspace = true
 croner.workspace = true
 
 getrandom.workspace = true
+# Web Push: VAPID ES256 + mã hoá payload aes128gcm (RFC 8291) — xem Cargo.toml workspace.
+p256.workspace = true
+aes-gcm.workspace = true
+hkdf.workspace = true
+# Gửi request tới push service (POST endpoint của trình duyệt).
+reqwest.workspace = true
 mime_guess.workspace = true
 url.workspace = true
 rust-embed = { workspace = true, optional = true }

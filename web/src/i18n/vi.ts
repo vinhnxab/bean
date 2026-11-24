@@ -133,6 +133,17 @@ export const vi = {
     "Bean đọc tên khi phát âm thanh, ví dụ “Vinh Mr ơi, Bean trả lời xong rồi.”. Để trống thì chỉ phát chime.",
   "notify.panel.nameSaved": "Đã lưu tên gọi",
   "notify.panel.test": "Thử âm thanh",
+  // --- Web Push (khi tab đã đóng, Android/PWA) ------------------------------
+  "notify.panel.push": "Web Push (khi tab đã đóng)",
+  "notify.panel.pushHint":
+    "Đẩy qua hệ điều hành — nhận được cả khi trình duyệt đã tắt (Android/PWA). Cần truy cập qua HTTPS hoặc localhost.",
+  "notify.panel.pushUnsupported": "Trình duyệt không hỗ trợ",
+  "notify.panel.pushChecking": "Đang kiểm tra…",
+  "notify.panel.pushError": "Đăng ký push chưa thành công — thử lại hoặc xem log server.",
+  "notify.panel.pushTest": "Gửi thử push",
+  "notify.panel.pushTestResult": "Đã nhận: {delivered} · Lỗi: {failed} · Đã gỡ: {removed}",
+  "notify.panel.pushDevices": "Thiết bị đã đăng ký",
+  "notify.panel.pushFailures": "gửi lỗi ×{count}",
   // --- Âm thanh gọi tên (nút loa trên TopNav) --------------------------------
   "sound.enable": "Bật âm thanh gọi tên",
   "sound.disable": "Tắt âm thanh gọi tên",

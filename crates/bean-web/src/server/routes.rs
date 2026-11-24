@@ -23,6 +23,7 @@ use super::rest_config::{
 use super::rest_host_mode::{host_mode_status, host_mode_update};
 use super::rest_lan_access::{lan_access_status, lan_access_update};
 use super::rest_memories::{delete_memory, get_memory_file, list_memories, put_memory_file};
+use super::rest_push::{push_key, push_status, push_subscribe, push_test, push_unsubscribe};
 use super::rest_sessions::{
     create_session, delete_session, get_message, list_messages, list_sessions, update_session,
 };
@@ -71,6 +72,13 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/secrets", get(secrets_list))
         .route("/secrets/{name}", put(secret_put).delete(secret_delete))
         .route("/mcp", get(list_mcp_servers))
+        // Web Push (VAPID): trạng thái/đăng ký/gỡ/gửi thử — guard Origin/CSRF áp
+        // sẵn ở tầng `/api`; subscribe/test cần admin (rest_push.rs).
+        .route("/push", get(push_status))
+        .route("/push/key", get(push_key))
+        .route("/push/subscribe", post(push_subscribe))
+        .route("/push/unsubscribe", post(push_unsubscribe))
+        .route("/push/test", post(push_test))
         .route("/usage", get(usage_history))
         .route("/voice", get(voice_status).patch(voice_update))
         // WAV 16 kHz nặng ~32 KB/giây (base64 ~43 KB/s) — nới riêng trần body cho

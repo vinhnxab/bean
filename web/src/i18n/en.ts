@@ -129,6 +129,17 @@ export const en: Record<MessageKey, string> = {
     "Bean speaks your name with the chime, e.g. “Hey Vinh Mr, Bean finished replying.”. Leave empty for a chime only.",
   "notify.panel.nameSaved": "Name saved",
   "notify.panel.test": "Test sound",
+  // --- Web Push (when the tab is closed, Android/PWA) ------------------------
+  "notify.panel.push": "Web Push (when tab is closed)",
+  "notify.panel.pushHint":
+    "Delivered through the OS — arrives even with the browser closed (Android/PWA). Requires HTTPS or localhost access.",
+  "notify.panel.pushUnsupported": "Not supported by this browser",
+  "notify.panel.pushChecking": "Checking…",
+  "notify.panel.pushError": "Push subscription did not complete — try again or check server logs.",
+  "notify.panel.pushTest": "Send test push",
+  "notify.panel.pushTestResult": "Delivered: {delivered} · Failed: {failed} · Removed: {removed}",
+  "notify.panel.pushDevices": "Registered devices",
+  "notify.panel.pushFailures": "{count} failed sends",
   // --- Called-by-name sound (speaker button on TopNav) ------------------------
   "sound.enable": "Enable called-by-name sound",
   "sound.disable": "Disable called-by-name sound",

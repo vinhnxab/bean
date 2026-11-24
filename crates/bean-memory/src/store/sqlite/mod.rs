@@ -35,6 +35,7 @@ mod q_history_search;
 mod q_mcp;
 mod q_memory_outbox;
 mod q_message;
+mod q_push;
 mod q_session;
 mod q_task;
 mod q_tool;

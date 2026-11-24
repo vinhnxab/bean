@@ -23,8 +23,36 @@ const fakeSelf = {
     handlers[name] = list;
   },
   skipWaiting: vi.fn(async () => undefined),
-  clients: { claim: vi.fn(async () => []) },
+  clients: {
+    claim: vi.fn(async () => []),
+    matchAll: vi.fn(async (): Promise<Array<{ focus: () => Promise<void> }>> => []),
+    openWindow: vi.fn(async () => undefined),
+  },
+  // Kiểu tham số tường minh để `mock.calls[0]` đọc được [title, options] trong test.
+  registration: {
+    showNotification: vi.fn(
+      async (_title: string, _options?: { body?: string; data?: { url: string } }) => undefined,
+    ),
+  },
 };
+
+/** PushEvent tối thiểu: `data.text()` trả payload, `waitUntil` gom promise. */
+function pushEvent(payload: string | null) {
+  const { event, done } = lifecycleEvent();
+  return {
+    event: { ...event, data: payload === null ? null : { text: () => payload } },
+    done,
+  };
+}
+
+/** NotificationEvent tối thiểu: notification có `close` và `data`. */
+function notificationEvent(data: { url?: string } | null) {
+  const { event, done } = lifecycleEvent();
+  return {
+    event: { ...event, notification: { close: vi.fn(), data } },
+    done,
+  };
+}
 
 /** CacheStorage giả: `open` trả Cache trên Map, `keys`/`delete` theo tên cache. */
 function makeFakeCaches() {
@@ -103,6 +131,9 @@ describe("service worker (public/sw.js)", () => {
     for (const key of Object.keys(handlers)) delete handlers[key];
     fakeSelf.skipWaiting.mockClear();
     fakeSelf.clients.claim.mockClear();
+    fakeSelf.clients.matchAll.mockClear();
+    fakeSelf.clients.openWindow.mockClear();
+    fakeSelf.registration.showNotification.mockClear();
     cachesMock = makeFakeCaches();
     fetchMock = vi.fn();
     vi.stubGlobal("self", fakeSelf);
@@ -223,5 +254,76 @@ describe("service worker (public/sw.js)", () => {
     fire("fetch", event);
 
     await expect(event.calls.respondedWith).rejects.toThrow("network down");
+  });
+
+  // --- Web Push -------------------------------------------------------------
+
+  it("push: JSON hợp lệ thì hiện notification đúng title/body và giữ url để nhấp", async () => {
+    const { event, done } = pushEvent(
+      JSON.stringify({ title: "Bean đã trả lời xong", body: "Có câu trả lời mới.", url: "/" }),
+    );
+
+    fire("push", event);
+    await done();
+
+    expect(fakeSelf.registration.showNotification).toHaveBeenCalledOnce();
+    const [title, options] = fakeSelf.registration.showNotification.mock.calls[0];
+    expect(title).toBe("Bean đã trả lời xong");
+    expect(options).toMatchObject({ body: "Có câu trả lời mới.", data: { url: "/" } });
+  });
+
+  it("push: JSON hỏng vẫn hiện notification với tiêu đề mặc định — không chết im", async () => {
+    const { event, done } = pushEvent("không phải json");
+
+    fire("push", event);
+    await done();
+
+    expect(fakeSelf.registration.showNotification).toHaveBeenCalledOnce();
+    const [title, options] = fakeSelf.registration.showNotification.mock.calls[0];
+    expect(title).toBe("Bean");
+    expect(options?.data).toEqual({ url: "/" });
+  });
+
+  it("push: không có dữ liệu (event.data null) vẫn hiện notification", async () => {
+    const { event, done } = pushEvent(null);
+
+    fire("push", event);
+    await done();
+
+    expect(fakeSelf.registration.showNotification).toHaveBeenCalledOnce();
+    expect(fakeSelf.registration.showNotification.mock.calls[0][0]).toBe("Bean");
+  });
+
+  it("notificationclick: có cửa sổ mở thì focus, không mở tab mới", async () => {
+    const win = { focus: vi.fn() };
+    fakeSelf.clients.matchAll.mockResolvedValueOnce([win]);
+    const { event, done } = notificationEvent({ url: "/" });
+
+    fire("notificationclick", event);
+    await done();
+
+    expect(event.notification.close).toHaveBeenCalledOnce();
+    expect(win.focus).toHaveBeenCalledOnce();
+    expect(fakeSelf.clients.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("notificationclick: không có cửa sổ thì mở url đính kèm trong thông báo", async () => {
+    fakeSelf.clients.matchAll.mockResolvedValueOnce([]);
+    const { event, done } = notificationEvent({ url: "/?session=1" });
+
+    fire("notificationclick", event);
+    await done();
+
+    expect(fakeSelf.clients.openWindow).toHaveBeenCalledWith("/?session=1");
+  });
+
+  it("notificationclick: thiếu data thì mở trang gốc", async () => {
+    fakeSelf.clients.matchAll.mockResolvedValueOnce([]);
+    const { event, done } = notificationEvent(null);
+
+    fire("notificationclick", event);
+    await done();
+
+    expect(fakeSelf.clients.openWindow).toHaveBeenCalledWith("/");
   });
 });
