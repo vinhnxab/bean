@@ -1010,11 +1010,13 @@ impl SettingsService {
     /// Nạp seed từ `bean.toml`; file hỏng/thiếu ⇒ mặc định. Set/unset vẫn từ chối ghi
     /// khi file hỏng vì đi qua `toml_edit` parse.
     fn load_seed(&self) -> Config {
-        let raw = match std::fs::read_to_string(&self.config_path) {
-            Ok(raw) => raw,
-            Err(_) => return Config::default(),
-        };
-        toml::from_str(&raw).unwrap_or_default()
+        // Đi qua `Config::load` (parse + validate) chứ không parse TOML thẳng: lúc
+        // boot tiến trình chạy `Config::load` trong đó `validate_paths` expand `~`,
+        // nên seed phải cùng phép chuẩn hoá thì phép so "giá trị đĩa vs đang chạy"
+        // của khoá `apply = restart` mới đúng — nếu không `data.dir = "~/.bean"`
+        // được coi là chờ restart vĩnh viễn và banner không bao giờ tắt dù restart
+        // đã chạy xong (lỗi thật 2026-11-24).
+        Config::load(&self.config_path).unwrap_or_default()
     }
 
     /// Seed + state runtime — "giá trị hiệu lực" mà tiến trình sẽ thấy lúc khởi động.
@@ -1608,6 +1610,22 @@ mod tests {
         let seed = Config::load(config_path).unwrap();
         // `data.dir` trong file trỏ vào tempdir — service tự đọc đúng chỗ đó.
         SettingsService::new(&seed, Some(config_path))
+    }
+
+    #[test]
+    fn seed_get_matches_boot_config_for_tilde_paths() {
+        // `data.dir = "~/…"` trên đĩa: `get()` phải trả giá trị đã chuẩn hoá y như
+        // config lúc boot (Config::load expand `~`) — nếu không, phép so "đĩa vs
+        // đang chạy" của khoá `apply = restart` lệch vĩnh viễn và banner restart
+        // không bao giờ tắt dù restart đã chạy xong (lỗi thật 2026-11-24).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bean.toml");
+        std::fs::write(&path, "[data]\ndir = \"~/bean-seed-expand\"\n").unwrap();
+        let service = SettingsService::new(&Config::load(&path).unwrap(), Some(&path));
+        let boot = Config::load(&path).unwrap();
+        let value = service.get(lookup("data.dir").unwrap()).value;
+        assert_eq!(value, boot.data.dir.display().to_string());
+        assert!(!value.starts_with('~'), "seed phải expand `~` như lúc boot");
     }
 
     #[test]
