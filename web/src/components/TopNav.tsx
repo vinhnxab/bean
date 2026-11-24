@@ -61,21 +61,20 @@ function LanguageSelect() {
 }
 
 /**
- * Thanh điều hướng trên cùng — lớp kính **nổi** trên cột giữa: desktop nav nằm
- * gọn giữa hai sidebar (kiểu iPadOS), mobile trọn bề ngang. Nội dung cột giữa
- * cuộn chui xuống phía dưới và bị backdrop-blur làm mờ (chất kính chỉ hiện ra
- * khi có gì đó trôi phía sau — đây là lý do nav là overlay).
+ * Thanh điều hướng trên cùng — một "hòn đảo" kính độc lập ở đầu cột giữa
+ * (bố cục đảo kiểu Telegram Web: mỗi khối chính nổi trên nền chung, cách mép
+ * cửa sổ và cách hai sidebar bởi khe hở mà `ChatLayout` cấp). Trước đây nav là
+ * overlay absolute phải tự trượt mép trái/phải theo hai sidebar; giờ nav nằm
+ * trong luồng flex của cột giữa nên tự co giãn đúng — không còn cần đồng bộ
+ * `md:left-*`/`md:right-*`, và cũng không còn nội dung cuộn chui dưới nav.
  *
- * `md:z-40` thắng `z-20`/`z-30` của hai sidebar: chúng là flex item nên
- * z-index vẫn có tác dụng kể cả khi `md:static`. Dưới `md` giữ `z-10` để ngăn
- * kéo trượt ĐÈ lên nav (hành vi sheet iOS).
+ * Dưới `md` nav vẫn là đảo thường (ngăn kéo z-20/z-30 trượt ĐÈ lên — hành vi
+ * sheet iOS giữ nguyên vì nav không còn z-index riêng).
  */
 export function TopNav({
   onMenuOpen,
   onHistoryOpen,
   rightDrawerLabel,
-  sidebarCollapsed,
-  hasRightColumn,
 }: {
   /** Mở ngăn kéo điều hướng (bên trái) — chỉ có trên mobile. */
   onMenuOpen: () => void;
@@ -83,11 +82,6 @@ export function TopNav({
   onHistoryOpen?: () => void;
   /** Nhãn nút mở ngăn kéo cột phải, đổi theo ngữ cảnh trang hiện tại. */
   rightDrawerLabel?: string;
-  /** Rail trái đang thu gọn — nav co mép trái theo. Giá trị `md:left-20`/
-      `md:left-72` phải khớp đúng `md:w-20`/`md:w-72` của aside trong ChatLayout. */
-  sidebarCollapsed: boolean;
-  /** Cột phải có tồn tại không (mọi trang trừ HUB) — nav co mép phải lại. */
-  hasRightColumn: boolean;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -100,16 +94,11 @@ export function TopNav({
 
   return (
     <header
-      className={[
-        // Mobile: trọn bề ngang (hai sidebar là ngăn kéo trượt đè lên).
-        // Desktop: nằm gọn trong cột giữa, hai sidebar trải hết chiều cao
-        // hai bên. `inset-x-0` bị `md:left-*/md:right-*` ghi đè ở ≥ md.
-        "glass absolute inset-x-0 top-0 z-10 md:z-40 flex h-14 items-center justify-between gap-2 border-b border-border px-3",
-        // Mép nav trượt mượt cùng nhịp `duration-200` của aside khi gập/mở rail.
-        "transition-[left,right] duration-200",
-        sidebarCollapsed ? "md:left-20" : "md:left-72",
-        hasRightColumn ? "md:right-72" : "md:right-0",
-      ].join(" ")}
+      className={
+        // Đảo kính bo góc riêng: viền bao quanh định nghĩa mép trên nền tối,
+        // `shrink-0` giữ nguyên 56px khi cột giữa co giãn.
+        "glass flex h-14 shrink-0 items-center justify-between gap-2 rounded-2xl border border-border px-3"
+      }
     >
       <div className="flex min-w-0 items-center gap-1">
         <button

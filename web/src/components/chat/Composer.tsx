@@ -98,9 +98,12 @@ export function Composer({
   const canSend = !disabled && value.trim().length > 0;
 
   return (
-    // `py-2` (8px dọc): cả cụm soạn mỏng theo thanh tìm kiếm iOS — cao tổng
-    // cộng chỉ ~68px kể cả dòng gợi ý phím. Ngang giữ 12px để nút không dính mép.
-    <div className="bg-gradient-to-t from-surface via-surface to-transparent px-3 py-2">
+    // `pt-2 pb-3` (dọc): cụm soạn mỏng theo thanh tìm kiếm iOS; đáy 12px để
+    // viên thuốc kính không chạm bo góc dưới của đảo nội dung. Trước đây wrapper
+    // phủ gradient từ `--surface` lên vì khung soạn từng chồng lên vùng cuộn;
+    // giờ nó nằm dưới vùng cuộn và trên kính của đảo — gradient nền đen sẽ hở
+    // thành một vệt tối trên kính nên đã bỏ.
+    <div className="px-3 pb-3 pt-2">
       <form
         className="mx-auto max-w-3xl"
         onSubmit={(event) => {

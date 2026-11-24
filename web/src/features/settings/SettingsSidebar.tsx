@@ -110,9 +110,11 @@ export function SettingsSidebar({
         data-testid="settings-sidebar"
         data-open={open || undefined}
         aria-label={t("settings.title")}
-        className={`glass fixed inset-y-0 right-0 z-30 flex w-72 flex-col border-l border-border transition-transform duration-200 md:static md:translate-x-0 ${open ? "translate-x-0" : "translate-x-full"}`}
+        // Cùng pattern đảo kính với `RightSidebar`: mobile là ngăn kéo ép mép,
+        // desktop là đảo bo góc riêng viền bao quanh.
+        className={`glass fixed inset-y-0 right-0 z-30 flex w-72 flex-col border-l border-border transition-transform duration-200 md:static md:translate-x-0 md:rounded-2xl md:border ${open ? "translate-x-0" : "translate-x-full"}`}
       >
-        {/* `h-14`: cùng chiều cao TopNav nên kẻ ngang header thẳng hàng kẻ ngang nav. */}
+        {/* `h-14`: cùng chiều cao đảo TopNav nên kẻ ngang đầu ba đảo thẳng hàng qua khe hở. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border p-3">
           <h2 className="text-base font-bold">{t("settings.title")}</h2>
           <button

@@ -238,15 +238,14 @@ function ChatSession({ sessionId }: { sessionId: number }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Vùng cuộn được kéo lên trượt qua pt-14 của <main> cho mép trên chạm
-          mép trên cửa sổ: tin nhắn cuộn sẽ chui DƯỚI TopNav kính (kính iOS).
-          `pt-14` bên trong bù lại vị trí ban đầu — đệm cuộn theo nội dung,
-          khác đệm ở ngoài (nội dung sẽ không bao giờ trượt tới nav). */}
-      <div className="relative -mt-14 min-h-0 flex-1">
+      {/* Vùng cuộn nằm gọn trong đảo nội dung: nav đã là đảo riêng phía trên
+          nên không còn mẹo kéo vùng cuộn chui dưới nav — tin nhắn bị bo góc
+          của đảo cắt tại mép trên, đúng như Telegram Web cắt danh sách tin. */}
+      <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="h-full overflow-y-auto px-2 pb-4 pt-14 md:px-4"
+          className="h-full overflow-y-auto px-2 pb-4 pt-4 md:px-4"
           aria-live="polite"
           aria-relevant="additions text"
         >

@@ -123,25 +123,25 @@ export function ChatLayout() {
   }
 
   return (
-    // Khung ba lớp: quầng môi trường dưới cùng, TopNav kính nổi trên cột giữa
-    // (hai sidebar trải hết chiều cao hai bên), bên dưới là hàng ba cột
-    // (điều hướng | nội dung | hội thoại). `h-svh overflow-hidden` giữ khung
-    // cao đúng một màn hình; nội dung cột giữa cuộn chui dưới TopNav.
-    // `isolate` gói `-z-10` của lớp quầng trong khung này — thiếu nó, quầng
-    // trôi sau `bg-background` và biến mất.
-    <div className="relative isolate flex h-svh flex-col overflow-hidden bg-background text-foreground">
+    // Khung "hòn đảo" (kiểu Telegram Web): mọi khối chính — sidebar trái, TopNav,
+    // nội dung, sidebar phải — là một tấm kính bo góc riêng, nổi trên nền chung.
+    // Đệm `p-*` của khung và `gap-*` giữa các đảo chính là khoảng hở để nền đen
+    // + quầng môi trường lộ ra; nhờ vậy backdrop-blur của từng tấm kính có "đồ
+    // để làm mờ" và mắt đọc được ranh giới giữa các khối. `h-svh overflow-hidden`
+    // giữ khung cao đúng một màn hình. `isolate` gói `-z-10` của lớp quầng trong
+    // khung này — thiếu nó, quầng trôi sau `bg-background` và biến mất.
+    <div className="relative isolate flex h-svh flex-col overflow-hidden bg-background p-2 text-foreground md:p-3">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="orb -left-32 -top-24 size-[26rem]" />
+        {/* Quầng bên phải: tấm kính của sidebar phải cần thứ gì đó phía sau để
+            blur hiện ra — trước đây cột phải nằm sát mép, giờ là đảo riêng nên
+            được cấp quầng riêng theo. */}
+        <div className="orb -right-24 top-1/3 size-[22rem]" />
         <div className="orb -bottom-40 left-1/3 size-[30rem]" />
       </div>
-      <TopNav
-        onMenuOpen={() => setMobileOpen(true)}
-        onHistoryOpen={showSessions || isSettings ? () => setHistoryOpen(true) : undefined}
-        rightDrawerLabel={isSettings ? t("settings.openInSidebar") : undefined}
-        sidebarCollapsed={collapsed}
-        hasRightColumn={isSettings || showSessions}
-      />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Hàng ba đảo: điều hướng | (nav + nội dung) | hội thoại/cài đặt.
+          Hai sidebar là `fixed` trên mobile (ngăn kéo, không tham gia flex). */}
+      <div className="flex min-h-0 flex-1 gap-2 overflow-hidden md:gap-3">
         {mobileOpen ? (
           <button
             type="button"
@@ -155,14 +155,17 @@ export function ChatLayout() {
           ngăn kéo trên điện thoại không bao giờ thành rail icon (xem `lib/sidebar.ts`).
         */}
         <aside
-          className={`glass fixed inset-y-0 left-0 z-20 flex w-72 -translate-x-full flex-col border-r border-border transition-[width,transform] duration-200 md:static md:translate-x-0 ${collapsed ? "md:w-20" : "md:w-72"} ${mobileOpen ? "translate-x-0" : ""}`}
+          // Mobile: ngăn kéo trượt ép mép (viền phải là mép thị giác duy nhất).
+          // Desktop: đảo kính bo góc riêng, viền bao quanh định nghĩa mép trên
+          // nền tối (bóng `.glass` gần như vô hình trên nền đen).
+          className={`glass fixed inset-y-0 left-0 z-20 flex w-72 -translate-x-full flex-col border-r border-border transition-[width,transform] duration-200 md:static md:translate-x-0 md:rounded-2xl md:border ${collapsed ? "md:w-20" : "md:w-72"} ${mobileOpen ? "translate-x-0" : ""}`}
           aria-label={t("app.title")}
           data-testid="sidebar-shell"
         >
           {/* Nút đóng ngăn kéo ở đầu sidebar: chỉ có ở `< md`. Brand đã nằm ở
               TopNav nên đầu ngăn kéo chỉ còn nút đóng, căn phải. */}
-          {/* `h-14`: cùng chiều cao TopNav (56px, border-box gồm cả border-b)
-              nên kẻ ngang của ngăn kéo nằm đúng đường kẻ của nav kính.
+          {/* `h-14`: cùng chiều cao đảo TopNav (56px) nên kẻ ngang đầu đảo này
+              thẳng hàng kẻ ngang của hai đảo còn lại qua khe hở.
               Mobile không có trạng thái thu gọn nên luôn hiện chấm kết nối. */}
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-border p-3 md:hidden">
             <ModelStatusPill />
@@ -249,22 +252,30 @@ export function ChatLayout() {
             </div>
           </TooltipProvider>
         </aside>
-        {/* `pt-14` chừa chỗ cho TopNav nổi; đệm nằm TRONG vùng cuộn nên nội
-            dung trượt lên sẽ chui thẳng dưới nav kính. */}
-        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto pt-14">
-          {/* `Suspense` đặt quanh `Outlet` chứ không quanh cả `ChatLayout` (ở `App.tsx`):
+        {/* Cột giữa: đảo nav phía trên, đảo nội dung phía dưới, cách nhau một
+            khe hở — nav không còn là overlay nên nội dung KHÔNG chui dưới nav
+            nữa, tin nhắn bị bo góc của đảo nội dung cắt tại mép trên. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2 md:gap-3">
+          <TopNav
+            onMenuOpen={() => setMobileOpen(true)}
+            onHistoryOpen={showSessions || isSettings ? () => setHistoryOpen(true) : undefined}
+            rightDrawerLabel={isSettings ? t("settings.openInSidebar") : undefined}
+          />
+          <main className="glass flex min-w-0 flex-1 flex-col overflow-y-auto rounded-2xl border border-border">
+            {/* `Suspense` đặt quanh `Outlet` chứ không quanh cả `ChatLayout` (ở `App.tsx`):
               khi đang tải chunk của màn, chỉ vùng nội dung được thay bằng skeleton —
               sidebar vẫn đứng yên. Bọc ở ngoài sẽ làm cả khung giao diện biến mất rồi
               nhảy lại, nhấp nháy rõ rệt khi bấm chuyển màn trên mạng chậm. */}
-          <Suspense fallback={<RouteFallback />}>
-            {/* Chuyển màn: nội dung mới trượt nhẹ lên để mắt theo được quãng đường
+            <Suspense fallback={<RouteFallback />}>
+              {/* Chuyển màn: nội dung mới trượt nhẹ lên để mắt theo được quãng đường
                 điều hướng — còn đổi phiên trong cùng `/sessions/:id` thì không
                 (cùng `routeBase`, không remount): khung chat đã có nhịp riêng. */}
-            <Enter key={routeBase} kind="rise" className="flex min-h-0 flex-1 flex-col">
-              <Outlet />
-            </Enter>
-          </Suspense>
-        </main>
+              <Enter key={routeBase} kind="rise" className="flex min-h-0 flex-1 flex-col">
+                <Outlet />
+              </Enter>
+            </Suspense>
+          </main>
+        </div>
         {isSettings ? (
           <SettingsSidebar
             open={historyOpen}

@@ -11,8 +11,8 @@ import { useI18n } from "@/i18n";
  *
  * # Hai trạng thái, một component
  *
- * - Desktop (`md:` trở lên): cột thường trú bên phải, **luôn mở** — không có
- *   nút đóng. `open` không có tác dụng vì `md:static md:translate-x-0` thắng.
+ * - Desktop (`md:` trở lên): đảo kính thường trú bên phải, **luôn mở** — không
+ *   có nút đóng. `open` không có tác dụng vì `md:static md:translate-x-0` thắng.
  * - Mobile (`< md`): ngăn kéo trượt từ mép phải, phủ overlay mờ; điều khiển
  *   bằng `open`/`onClose`, nút mở là icon `PanelRight` trên `TopNav`. Cùng một
  *   pattern với ngăn kéo điều hướng bên trái.
@@ -60,9 +60,11 @@ export function RightSidebar({
         data-testid="chat-sidebar"
         data-open={open || undefined}
         aria-label={t("chat.sessions")}
-        className={`glass fixed inset-y-0 right-0 z-30 flex w-72 flex-col border-l border-border transition-transform duration-200 md:static md:translate-x-0 ${open ? "translate-x-0" : "translate-x-full"}`}
+        // Mobile: ngăn kéo ép mép phải. Desktop: đảo kính bo góc riêng, viền
+        // bao quanh — cùng chất liệu với sidebar trái và đảo nội dung.
+        className={`glass fixed inset-y-0 right-0 z-30 flex w-72 flex-col border-l border-border transition-transform duration-200 md:static md:translate-x-0 md:rounded-2xl md:border ${open ? "translate-x-0" : "translate-x-full"}`}
       >
-        {/* `h-14`: cùng chiều cao TopNav nên kẻ ngang header thẳng hàng kẻ ngang nav. */}
+        {/* `h-14`: cùng chiều cao đảo TopNav nên kẻ ngang đầu ba đảo thẳng hàng qua khe hở. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border p-3">
           {/* Tiêu đề đổi theo chế độ đang xem: "Hội thoại" ↔ "Đã lưu trữ". */}
           <h2 className="text-base font-bold">
