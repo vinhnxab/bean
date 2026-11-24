@@ -396,7 +396,8 @@ public_origin = "http://127.0.0.1:7878"
 allow_remote = false
 session_ttl_hours = 168
 # trust_proxy = false                # bật CHỈ khi chạy sau reverse proxy tin cậy:
-                                     # khi đó giới hạn tần suất đăng nhập dùng X-Forwarded-For
+                                     # khi đó giới hạn tần suất đăng nhập đọc X-Forwarded-For,
+                                     # và guard CSRF đọc Host gốc từ X-Forwarded-Host/Port
 # ui_dir = "~/bean/ui"               # phục vụ UI từ thư mục đĩa thay bản nhúng trong
                                      # binary — nâng cấp UI chỉ cần `pnpm build` rồi chép
                                      # `web/dist` sang đây, không phải build lại Rust
