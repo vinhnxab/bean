@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { LanAccessDto } from "@/api/bindings";
 import { ApiRequestError } from "@/api/client";
+import { HelpHint } from "@/components/HelpHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -27,9 +28,9 @@ export function LanAccessCard() {
   return (
     <div className="mt-4 border border-border rounded-lg p-4">
       <div className="flex items-center justify-between gap-4">
-        <div>
+        <div className="flex items-center gap-1.5">
           <h3 className="text-sm font-medium">{t("settings.lanAccess.title")}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{t("settings.lanAccess.description")}</p>
+          <HelpHint title={t("settings.lanAccess.title")} text={t("settings.lanAccess.description")} />
         </div>
         {data ? <LanAccessToggle data={data} /> : null}
       </div>

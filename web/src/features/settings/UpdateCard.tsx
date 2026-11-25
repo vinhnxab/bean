@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { ApiRequestError } from "@/api/client";
+import { HelpHint } from "@/components/HelpHint";
 import { Button } from "@/components/ui/button";
 import { useCheckUpdate } from "@/features/settings/queries";
 import { useI18n } from "@/i18n";
@@ -44,8 +45,10 @@ export function UpdateCard() {
 
   return (
     <div className="mt-4 border border-border rounded-lg p-4">
-      <h3 className="text-sm font-medium">{t("settings.update.title")}</h3>
-      <p className="mt-1 text-xs text-muted-foreground">{t("settings.update.description")}</p>
+      <div className="flex items-center gap-1.5">
+        <h3 className="text-sm font-medium">{t("settings.update.title")}</h3>
+        <HelpHint title={t("settings.update.title")} text={t("settings.update.description")} />
+      </div>
 
       <div className="mt-3">
         <Button type="button" size="sm" disabled={check.isPending} onClick={() => check.mutate({})}>

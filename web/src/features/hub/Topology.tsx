@@ -1,5 +1,6 @@
 import type { AgentReportDto } from "@/api/bindings";
 import { BeanAvatar } from "@/components/brand/BeanAvatar";
+import { HelpHint } from "@/components/HelpHint";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { statusTone } from "@/features/hub/queries";
 import { useI18n } from "@/i18n";
@@ -10,6 +11,12 @@ import { cn } from "@/lib/utils";
  *
  * Trạng thái nằm **trong chính node** (chấm + nhãn), không phải badge nhỏ ở góc:
  * "agent nào đang chờ bạn" là thông tin cần thấy ngay nhất màn hình.
+ *
+ * `summary` (đang làm gì) không chiếm một dòng riêng nữa — nó nằm sau dấu hỏi
+ * cạnh tên role, cùng pattern HelpHint của các trang management. Node chỉ còn
+ * tên + badge nên bớt ~1/3 chiều cao, và mobile không phải cắt chữ `truncate`
+ * giữa chừng nữa. Trạng thái (`data-status`) vẫn ở ngay trên node vì đó là thứ
+ * cần thấy tức thì; tóm tắt công việc là ngữ cảnh, đọc khi cần.
  */
 function AgentNode({ report, highlighted }: { report: AgentReportDto; highlighted: boolean }) {
   const { t } = useI18n();
@@ -27,8 +34,15 @@ function AgentNode({ report, highlighted }: { report: AgentReportDto; highlighte
       <div className="flex items-center gap-2">
         <StatusDot tone={tone} />
         <span className="truncate text-sm font-medium">{report.role}</span>
+        {report.summary ? (
+          <HelpHint
+            title={report.role}
+            text={report.summary}
+            label={t("hub.agent.helpAria", { role: report.role })}
+            testId={`help-hint-${report.role}`}
+          />
+        ) : null}
       </div>
-      <p className="truncate text-xs text-ink-muted">{report.summary}</p>
       <Badge tone={tone} className="self-start">
         {t(`hub.status.${report.status}`)}
       </Badge>
@@ -86,7 +100,7 @@ export function Topology({ agents }: { agents: AgentReportDto[] }) {
     <section
       aria-labelledby="hub-topology-title"
       data-testid="hub-topology"
-      className="rounded-md border border-rule bg-surface-raised p-4 sm:p-5"
+      className="holo-panel rounded-md p-4 sm:p-5"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="hub-topology-title" className="text-sm font-semibold">
@@ -128,8 +142,9 @@ function ManagedGroup({ agents }: { agents: AgentReportDto[] }) {
  * Lưới là `grid-cols` **theo bề rộng**, còn bus thì vẽ số nhánh bằng **số agent**.
  * Hai thứ lệch nhau: ở mobile lưới xuống 1 cột nhưng bus vẫn vẽ 4 nhánh ngang, khiến
  * các nhánh chỉ vào không khí. Trả về cả `cols` lẫn `frame` từ cùng một hàm để bus
- * và lưới luôn dùng **cùng số cột và cùng khung bề rộng** — bus nằm trong `frame`
- * y hệt lưới nên nhánh thứ i rơi đúng giữa cột thứ i.
+ * và lưới luôn dùng **cùng số cột và cùng khung bề rộng** — nhánh thứ i rơi trong
+ * cột thứ i (gap của lưới làm tâm cột lệch khỏi midpoint vài px, nhưng node trải
+ * hết bề rộng cột nên nhánh vẫn chạm đỉnh node).
  *
  * Ngưỡng chuyển cột là `min-[900px]`: dưới ngưỡng này mọi nhóm là 1 cột nên bus
  * chỉ cần một nhánh dọc giữa. **Một** ngưỡng cho mọi nhóm là cố ý — nhiều ngưỡng
@@ -165,8 +180,10 @@ function nodeLayout(count: number): { cols: string; frame: string } {
 
 function NodeGrid({ agents }: { agents: AgentReportDto[] }) {
   const { cols, frame } = nodeLayout(agents.length);
+  // `gap-3` khi xếp dọc (< 900px), `gap-6` khi node nằm cạnh nhau trên desktop —
+  // 8px cũ khiến các node dán vào nhau, đọc không ra ranh giới giữa hai agent.
   return (
-    <div className={`grid w-full gap-2 ${cols} ${frame}`}>
+    <div className={`grid w-full gap-3 min-[900px]:gap-6 ${cols} ${frame}`}>
       {agents.map((agent) => (
         <AgentNode key={agent.role} report={agent} highlighted={agent.status === "awaiting_you"} />
       ))}
@@ -194,7 +211,7 @@ function Connector({ columns, dashed = false }: { columns: number; dashed?: bool
       <div aria-hidden className={`flex justify-center ${multi ? "min-[900px]:hidden" : ""}`}>
         <span className="flex w-px flex-col items-center">
           <span
-            className={`h-6 w-px ${dashed ? "" : "bg-live"}`}
+            className={`h-8 w-px ${dashed ? "" : "bg-live"}`}
             style={
               dashed
                 ? {
@@ -210,7 +227,7 @@ function Connector({ columns, dashed = false }: { columns: number; dashed?: bool
         </span>
       </div>
       {multi ? (
-        <div aria-hidden className={`hidden w-full min-[900px]:block ${frame}`}>
+        <div aria-hidden className={`mt-2 hidden w-full min-[900px]:block ${frame}`}>
           <Bus columns={columns} dashed={dashed} />
         </div>
       ) : null}
@@ -265,7 +282,7 @@ function Bus({ columns, dashed = false }: { columns: number; dashed?: boolean })
 function ReviewGroup({ agents }: { agents: AgentReportDto[] }) {
   const { t } = useI18n();
   return (
-    <div data-testid="hub-edge-reviews" className="mt-6">
+    <div data-testid="hub-edge-reviews" className="mt-8">
       {/*
         Review là quan hệ **giữa hai hàng**, không phải giữa hai node cụ thể: mỗi
         bên review việc của bên kia. Bản đầu tôi vẽ móc ngoặc trải hết chiều rộng
@@ -288,7 +305,7 @@ function ReviewGroup({ agents }: { agents: AgentReportDto[] }) {
         </span>
         <p className="text-xs font-medium text-ink-muted">{t("hub.reviews.note")}</p>
       </div>
-      <div className="mt-2">
+      <div className="mt-3">
         <NodeGrid agents={agents} />
       </div>
     </div>
@@ -308,7 +325,7 @@ function AlertGroup({ agents }: { agents: AgentReportDto[] }) {
   return (
     <div
       data-testid="hub-edge-alerts"
-      className="mt-6 flex flex-col items-center border-t border-dashed border-alert pt-4"
+      className="mt-8 flex flex-col items-center border-t border-dashed border-alert pt-4"
     >
       <NodeGrid agents={agents} />
       {/* Đường cảnh báo: cùng bộ nối với nhóm điều phối nhưng nét đứt + màu

@@ -24,6 +24,7 @@ import { RouteFallback } from "@/components/ui/Page";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { RightSidebar } from "@/features/chat/RightSidebar";
 import { groupSessions } from "@/features/chat/sessionGroups";
+import { DashboardSidebar } from "@/features/hub/DashboardSidebar";
 import { useCreateSession, useSessions } from "@/features/sessions/queries";
 import { SettingsSidebar } from "@/features/settings/SettingsSidebar";
 import { useI18n } from "@/i18n";
@@ -62,8 +63,8 @@ const NAV_ITEMS: { to: string; labelKey: MessageKey; icon: LucideIcon; end?: boo
  * Khung ứng dụng: TopNav (ngôn ngữ, chủ đề, tài khoản) + sidebar trái (điều
  * hướng chính) + nội dung + sidebar phải (hội thoại).
  *
- * Sidebar phải chỉ tồn tại ở các trang **có ngữ cảnh hội thoại** — trang chủ
- * HUB không có, để sơ đồ hệ thống chiếm trọn chỗ.
+ * Sidebar phải đổi nội dung theo trang: hội thoại ở các trang chat, nav cài đặt
+ * ở màn Cài đặt, bảng tổng quan ở trang chủ Dashboard.
  */
 export function ChatLayout() {
   const { t } = useI18n();
@@ -78,12 +79,13 @@ export function ChatLayout() {
   const [search, setSearch] = useState("");
   const [archived, setArchived] = useState(false);
   const sessions = useSessions({ q: search, archived });
-  // Trang chủ (HUB) không cần danh sách hội thoại: hội thoại là ngữ cảnh của
-  // trang chat, đặt cạnh sơ đồ hệ thống chỉ làm loãng và tốn nửa màn hình.
-  // Màn Cài đặt thì ngược lại: cột phải là **nav cài đặt** (SettingsSidebar),
-  // hai ngăn kéo không cùng tồn tại.
+  // Màn Cài đặt: cột phải là **nav cài đặt** (SettingsSidebar). Trang chủ
+  // (Dashboard): cột phải là **bảng tổng quan** (DashboardSidebar) — token,
+  // audit, registry. Các trang còn lại: danh sách hội thoại (RightSidebar).
+  // Hai ngăn kéo không cùng tồn tại trên cùng một màn.
   const isSettings = location.pathname.startsWith("/settings");
-  const showSessions = !isSettings && location.pathname !== "/";
+  const isDashboard = location.pathname === "/";
+  const showSessions = !isSettings && !isDashboard;
   // Cơ sở route cho hoạt ảnh chuyển màn: đổi `/sessions/1 → /sessions/2` KHÔNG
   // phải là "chuyển trang" (cùng khung chat, chỉ đổi ngữ cảnh) — remount cả khung
   // sẽ phá cuộn và trạng thái phiên đang chạy, nên gộp hai pathname về một khoá.
@@ -259,8 +261,10 @@ export function ChatLayout() {
         <div className="flex min-w-0 flex-1 flex-col gap-2 md:gap-3">
           <TopNav
             onMenuOpen={() => setMobileOpen(true)}
-            onHistoryOpen={showSessions || isSettings ? () => setHistoryOpen(true) : undefined}
-            rightDrawerLabel={isSettings ? t("settings.openInSidebar") : undefined}
+            onHistoryOpen={showSessions || isSettings || isDashboard ? () => setHistoryOpen(true) : undefined}
+            rightDrawerLabel={
+              isSettings ? t("settings.openInSidebar") : isDashboard ? t("hub.sidebar.open") : undefined
+            }
           />
           {/* M31: banner "Cần khởi động lại" kiểu Ubuntu — nằm ngay dưới TopNav
               trên mọi màn, tự biến mất khi không còn gì chờ restart. `shrink-0`
@@ -287,6 +291,8 @@ export function ChatLayout() {
             onClose={() => setHistoryOpen(false)}
             onNavigate={() => setMobileOpen(false)}
           />
+        ) : isDashboard ? (
+          <DashboardSidebar open={historyOpen} onClose={() => setHistoryOpen(false)} />
         ) : showSessions ? (
           <RightSidebar
             open={historyOpen}

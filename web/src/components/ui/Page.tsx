@@ -2,6 +2,7 @@ import gsap from "gsap";
 import type { ReactNode } from "react";
 import { useRef } from "react";
 
+import { HelpHint } from "@/components/HelpHint";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n";
 import { useGsapAnimate } from "@/lib/anim";
@@ -41,10 +42,14 @@ export function PageShell({
       aria-labelledby="page-title"
     >
       <header className="mb-6">
-        <h1 id="page-title" className="text-2xl font-bold tracking-tight sm:text-3xl">
-          {title}
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+        <div className="flex items-center gap-2">
+          <h1 id="page-title" className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {title}
+          </h1>
+          {/* Description không nằm dưới tiêu đề nữa: dấu hỏi mở popover giải thích
+              kế bên nó — trang management gọn, nội dung dài không chiếm chỗ. */}
+          <HelpHint title={title} text={description} />
+        </div>
       </header>
       {children}
     </section>

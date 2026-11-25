@@ -84,6 +84,18 @@
      trên mọi nền; đậm hơn khi hover để dễ nhắm. */
   --scroll-thumb: rgb(255 255 255 / 20%);
   --scroll-thumb-hover: rgb(255 255 255 / 34%);
+
+  /* --- token HOLOGRAM — chất liệu HUD riêng cho Dashboard ----------------
+     Cyan kiểu systemCyan của iOS, TÁCH KHỎI accent thương hiệu và khỏi ba
+     màu trạng thái: hologram là "màn hiển thị" của dashboard, không phải
+     màu hành động. Bốn mức alpha (dim/faint/grid/scan) để vẽ viền, glow,
+     lưới và vạch quét mà không cần thêm màu mới. */
+  --holo: #64d2ff; /* systemCyan dark */
+  --holo-dim: rgb(100 210 255 / 40%); /* viền panel */
+  --holo-faint: rgb(100 210 255 / 10%); /* glow nội thất + rãnh gauge */
+  --holo-grid: rgb(100 210 255 / 5%); /* lưới nền */
+  --holo-panel: rgb(16 20 24 / 72%); /* nền panel bán trong suốt — lưới lộ mờ qua */
+  --holo-scan: rgb(100 210 255 / 28%); /* quầng vạch quét */
 }
 
 /* --- SÁNG: chỉ bật khi `<html class="light">` --- */
@@ -130,6 +142,16 @@
   /* Trắng alpha ở tối tương ứng đen alpha ở sáng. */
   --scroll-thumb: rgb(0 0 0 / 20%);
   --scroll-thumb-hover: rgb(0 0 0 / 34%);
+
+  /* Hologram ở nền sáng: cyan nhạt trên trắng không đọc được, phải đậm xuống
+     (giống cách --brand đậm hơn ở light). Độ đậm đạt ~6:1 trên trắng để dùng
+     được cả làm chữ nhãn. */
+  --holo: #0b69a3;
+  --holo-dim: rgb(11 105 163 / 45%);
+  --holo-faint: rgb(11 105 163 / 9%);
+  --holo-grid: rgb(11 105 163 / 7%);
+  --holo-panel: rgb(255 255 255 / 82%);
+  --holo-scan: rgb(11 105 163 / 22%);
 }
 
 /* ==========================================================================
@@ -184,6 +206,11 @@
   --color-live-ink: var(--live-ink);
   --color-need-ink: var(--need-ink);
   --color-alert-ink: var(--alert-ink);
+
+  /* token HOLOGRAM → utility `text-holo`, `border-holo-dim`, `bg-holo-faint`… */
+  --color-holo: var(--holo);
+  --color-holo-dim: var(--holo-dim);
+  --color-holo-faint: var(--holo-faint);
 
   /* Bo góc 8px — đủ mềm để đọc là shadcn, không tròn kiểu "thẻ SaaS". */
   --radius: 8px;
@@ -330,6 +357,77 @@
     position: absolute;
     border-radius: 9999px;
     background: radial-gradient(circle at center, var(--orb) 0%, transparent 65%);
+  }
+
+  /* ----------------------------------------------------------------------
+     HOLOGRAM — chất liệu HUD riêng cho trang Dashboard.
+     Cùng họ vật liệu với `.glass` nhưng nói ngôn ngữ khác: kính iOS là mặt
+     phẳng mờ, hologram là ánh sáng nổi trên không — viền cyan phát sáng,
+     lưới loang phía sau và một vạch quét đi qua theo nhịp chậm. Mọi màu đến
+     từ token `--holo*` nên đổi chủ đề là cả chất liệu đổi theo.
+     ---------------------------------------------------------------------- */
+  /* Lưới nền, mờ dần xuống chân trời: đậm ở đỉnh trang, tan trước khi chạm
+     dữ liệu — trang trí không được cạnh tranh với nội dung. */
+  .holo-grid-bg {
+    background-image:
+      linear-gradient(var(--holo-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--holo-grid) 1px, transparent 1px);
+    background-size: 26px 26px;
+    mask-image: linear-gradient(to bottom, black 0%, transparent 100%);
+  }
+
+  /* Panel hologram: nền bán trong suốt (lưới lộ mờ qua panel), viền cyan
+     và glow nội thất. Không móng góc — panel nhỏ xếp dọc thì móng góc thành
+     nhiễu thị giác thay vì nhịp thiết kế. */
+  .holo-panel {
+    position: relative;
+    border: 1px solid var(--holo-dim);
+    background: linear-gradient(180deg, var(--holo-faint) 0%, transparent 45%), var(--holo-panel);
+    box-shadow:
+      inset 0 0 28px var(--holo-faint),
+      inset 0 1px 0 0 var(--glass-sheen);
+  }
+
+  /* Nhãn HUD: nhỏ, dãn chữ, màu holo. KHÔNG viết IN HOA (quy ước i18n). */
+  .holo-label {
+    color: var(--holo);
+    letter-spacing: 0.14em;
+  }
+
+  /* Số liệu chính phát sáng nhẹ — chỉ dành cho 1–2 số lớn nhất trang. */
+  .holo-glow {
+    text-shadow: 0 0 16px var(--holo-dim);
+  }
+
+  /* Cột biểu đồ hologram: thân cyan + quầng quanh cột. */
+  .holo-bar {
+    background-color: var(--holo);
+    box-shadow: 0 0 8px var(--holo-dim);
+  }
+
+  /* Vạch quét đi từ đỉnh xuống đáy panel — trang trí thuần, KHÔNG mang nghĩa:
+     trạng thái vẫn đọc được bằng chữ khi tắt chuyển động, và khối
+     reduced-motion toàn cục cuối file ép duration về 0.01ms nên vạch đứng yên. */
+  .holo-scan {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 2px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--holo) 30%, var(--holo) 70%, transparent);
+    box-shadow: 0 0 12px var(--holo-scan);
+    opacity: 0.4;
+    animation: holo-sweep 9s linear infinite;
+  }
+
+  @keyframes holo-sweep {
+    from {
+      top: 0;
+    }
+    to {
+      top: 100%;
+    }
   }
 }
 

@@ -124,10 +124,14 @@ describe("ChatLayout sidebar", () => {
     );
     await screen.findByText("hub");
     expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
-    // HUB không có ngữ cảnh hội thoại: sidebar phải không render, và TopNav
+    // HUB không có ngữ cảnh hội thoại: sidebar chat phải không render, và TopNav
     // không có nút mở ngăn kéo hội thoại.
     expect(screen.queryByTestId("chat-sidebar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open conversation list" })).not.toBeInTheDocument();
+    // Thay vào đó, cột phải là bảng tổng quan của Dashboard (đảo kính riêng) —
+    // nút mở ngăn kéo mobile đổi nhãn theo ngữ cảnh trang.
+    expect(screen.getByTestId("dashboard-sidebar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open overview sidebar" })).toBeInTheDocument();
   }, 15000);
 
   // Mở bằng **bàn phím** chứ không bằng `user.click`: Radix bọc nội dung trong
@@ -386,6 +390,6 @@ describe("ChatLayout sidebar", () => {
 
     await user.click(await screen.findByRole("button", { name: "Collapse sidebar" }));
     expect(screen.getByRole("link", { name: "Status" }).className).toContain("bg-accent");
-    expect(screen.getByRole("link", { name: "Hub" }).className).not.toContain("bg-accent");
+    expect(screen.getByRole("link", { name: "Dashboard" }).className).not.toContain("bg-accent");
   }, 15000);
 });

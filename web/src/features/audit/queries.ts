@@ -14,7 +14,7 @@ export function useAuditLog() {
   });
 }
 
-/** Số dòng widget HUB hiện — khớp `slice` trong `ActivityFeed`. */
+/** Số dòng widget HUB hiện — khớp `slice` trong `DashboardSidebar`. */
 export const AUDIT_FEED_SIZE = 5;
 
 /**

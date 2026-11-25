@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ApiRequestError } from "@/api/client";
 import type { HostModeDto } from "@/api/generated/HostModeDto";
+import { HelpHint } from "@/components/HelpHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -31,9 +32,9 @@ export function HostModeCard() {
   return (
     <div className="mt-4 border border-border rounded-lg p-4">
       <div className="flex items-center justify-between gap-4">
-        <div>
+        <div className="flex items-center gap-1.5">
           <h3 className="text-sm font-medium">{t("settings.hostMode.title")}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{t("settings.hostMode.description")}</p>
+          <HelpHint title={t("settings.hostMode.title")} text={t("settings.hostMode.description")} />
         </div>
         {data ? <HostModeToggle data={data} /> : null}
       </div>

@@ -282,9 +282,9 @@ async function shotSidebar(
     const url = new URL(request.url());
     if (url.pathname.startsWith("/api/")) {
       // Dùng CHUNG `mockFor` với `shot()`: payload phải khớp đúng hợp đồng
-      // `ts-rs`. Trả `{}` rỗng như thử đầu làm `ActivityFeed` đọc
-      // `.length` của `undefined` và React gỡ cả cây — trang trắng mà không có
-      // lỗi nào được báo ra ngoài console.
+      // `ts-rs`. Trả `{}` rỗng như thử đầu làm widget đọc `.length` của
+      // `undefined` và React gỡ cả cây — trang trắng mà không có lỗi nào được
+      // báo ra ngoài console.
       request.respond({
         contentType: "application/json",
         body: JSON.stringify(mockFor(url.pathname)),
