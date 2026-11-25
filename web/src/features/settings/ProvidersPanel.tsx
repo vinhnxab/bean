@@ -2,6 +2,7 @@ import { CheckCircle2Icon, CircleAlertIcon, PencilIcon, PlusIcon, Trash2Icon } f
 import { useState } from "react";
 import type { LlmProviderInfo, LlmProviderUpdateRequest } from "@/api/bindings";
 import { ApiRequestError } from "@/api/client";
+import { HelpHint } from "@/components/HelpHint";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -110,9 +111,9 @@ export function ProvidersPanel() {
       <Panel>
         <form onSubmit={save}>
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-1.5">
               <h2 className="font-semibold">{t("providers.sectionTitle")}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{t("providers.profilesHint")}</p>
+              <HelpHint title={t("providers.sectionTitle")} text={t("providers.profilesHint")} />
             </div>
             <Button
               type="button"

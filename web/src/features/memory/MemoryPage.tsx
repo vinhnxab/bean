@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { MemoryDto } from "@/api/bindings";
+import { HelpHint } from "@/components/HelpHint";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState, ErrorState, LoadingState, PageShell, Panel } from "@/components/ui/Page";
 import {
@@ -149,9 +150,9 @@ function MemoryList() {
     // hở giữa card và scrollbar (kiểu pill macOS) để nội dung không dính sát.
     <Panel className="flex max-h-[calc(100svh_-_16rem)] flex-col xl:sticky xl:top-8">
       <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="flex items-center gap-1.5">
           <h2 className="font-semibold">{t("memory.listTitle")}</h2>
-          <p className="text-xs text-muted-foreground">{t("memory.listDescription")}</p>
+          <HelpHint title={t("memory.listTitle")} text={t("memory.listDescription")} />
         </div>
       </div>
       <label className="sr-only" htmlFor="memory-search">

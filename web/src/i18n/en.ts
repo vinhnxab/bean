@@ -426,13 +426,9 @@ export const en: Record<MessageKey, string> = {
   "settings.openInSidebar": "Open settings",
   "settings.closeSidebar": "Close settings",
   "settings.section.providers": "Providers",
-  "settings.section.providersDescription": "The model and API Bean reasons with.",
   "settings.section.voice": "Voice",
-  "settings.section.voiceDescription": "Configure voice: toggle the mic button, pick the provider.",
   "settings.section.password": "Change password",
-  "settings.section.passwordDescription": "Update your Bean login password.",
   "settings.section.notifications": "Notifications",
-  "settings.section.notificationsDescription": "Background alerts and called-by-name sound.",
   // --- Change password (/settings/password) --------------------------------
   "password.panelTitle": "Change password",
   "password.panelHint":

@@ -1,6 +1,7 @@
 import { type FormEvent, useMemo, useState } from "react";
 
 import type { TaskDto } from "@/api/bindings";
+import { HelpHint } from "@/components/HelpHint";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState, ErrorState, LoadingState, PageShell, Panel } from "@/components/ui/Page";
 import { useCreateTask, useDeleteTask, useTasks, useUpdateTask } from "@/features/tasks/queries";
@@ -103,8 +104,10 @@ export function TasksPage() {
     <PageShell title={t("tasks.title")} description={t("tasks.description")}>
       <div className="grid gap-6 xl:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
         <Panel>
-          <h2 className="text-lg font-semibold">{t("tasks.createTitle")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t("tasks.createDescription")}</p>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-lg font-semibold">{t("tasks.createTitle")}</h2>
+            <HelpHint title={t("tasks.createTitle")} text={t("tasks.createDescription")} />
+          </div>
           <form className="mt-5 space-y-4" onSubmit={submit}>
             <Field label={t("tasks.cron")} id="task-cron" help={t("tasks.cronHelp")}>
               <input
@@ -183,9 +186,9 @@ export function TasksPage() {
         </Panel>
         <Panel>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <div>
+            <div className="flex items-center gap-1.5">
               <h2 className="text-lg font-semibold">{t("tasks.listTitle")}</h2>
-              <p className="text-sm text-muted-foreground">{t("tasks.runtimeNote")}</p>
+              <HelpHint title={t("tasks.listTitle")} text={t("tasks.runtimeNote")} />
             </div>
           </div>
           {tasks.isPending ? <LoadingState label={t("common.loading")} /> : null}
@@ -284,11 +287,16 @@ function Field({
 }) {
   return (
     <div>
-      <label htmlFor={id} className="mb-1 block text-sm font-medium">
-        {label}
-      </label>
+      {/* Help text thành dấu hỏi cạnh label thay vì dòng chữ dưới ô nhập — form
+          gọn một dòng mỗi field. Hint là SIBLING của label (không lồng vào):
+          bấm vào label phải focus input, bấm vào dấu hỏi phải mở popover. */}
+      <div className="mb-1 flex items-center gap-1.5">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        {help ? <HelpHint title={label} text={help} /> : null}
+      </div>
       {children}
-      {help ? <p className="mt-1 text-xs text-muted-foreground">{help}</p> : null}
     </div>
   );
 }

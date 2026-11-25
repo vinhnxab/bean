@@ -1,5 +1,6 @@
 "use client";
 
+import { HelpHint } from "@/components/HelpHint";
 import { Panel } from "@/components/ui/Page";
 import { useSecrets } from "@/features/settings/queries";
 import { SecretField } from "@/features/settings/SecretField";
@@ -18,8 +19,13 @@ export function IntegrationsPanel() {
 
   return (
     <Panel>
-      <h2 className="font-semibold">{t("settings.section.integrations")}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.integrationsDescription")}</p>
+      <div className="flex items-center gap-1.5">
+        <h2 className="font-semibold">{t("settings.section.integrations")}</h2>
+        <HelpHint
+          title={t("settings.section.integrations")}
+          text={t("settings.section.integrationsDescription")}
+        />
+      </div>
       <p className="mt-3 text-sm text-muted-foreground">{t("integrations.intro")}</p>
 
       {billingSlot ? (

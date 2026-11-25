@@ -1,5 +1,6 @@
 "use client";
 
+import { HelpHint } from "@/components/HelpHint";
 import { Panel } from "@/components/ui/Page";
 import { HostModeCard } from "@/features/settings/HostModeCard";
 import { LanAccessCard } from "@/features/settings/LanAccessCard";
@@ -20,8 +21,10 @@ export function AdvancedPanel() {
 
   return (
     <Panel>
-      <h2 className="font-semibold">{t("settings.section.advanced")}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.advancedDescription")}</p>
+      <div className="flex items-center gap-1.5">
+        <h2 className="font-semibold">{t("settings.section.advanced")}</h2>
+        <HelpHint title={t("settings.section.advanced")} text={t("settings.section.advancedDescription")} />
+      </div>
 
       <LanAccessCard />
 

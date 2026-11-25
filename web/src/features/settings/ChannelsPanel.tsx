@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { HelpHint } from "@/components/HelpHint";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/Page";
 import { Switch } from "@/components/ui/switch";
@@ -47,8 +48,10 @@ export function ChannelsPanel() {
   return (
     <>
       <Panel>
-        <h2 className="font-semibold">{t("settings.section.channels")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.channelsDescription")}</p>
+        <div className="flex items-center gap-1.5">
+          <h2 className="font-semibold">{t("settings.section.channels")}</h2>
+          <HelpHint title={t("settings.section.channels")} text={t("settings.section.channelsDescription")} />
+        </div>
 
         <form className="mt-4 grid gap-4 border-t border-border pt-4">
           <div className="grid items-center gap-3">

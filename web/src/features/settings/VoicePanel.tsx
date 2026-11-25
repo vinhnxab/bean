@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import type { VoiceStatusResponse, VoiceUpdateRequest } from "@/api/bindings";
 import { ApiRequestError } from "@/api/client";
+import { HelpHint } from "@/components/HelpHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ErrorState, LoadingState, Panel } from "@/components/ui/Page";
@@ -32,8 +33,10 @@ export function VoicePanel() {
 
   return (
     <Panel>
-      <h2 className="font-semibold">{t("voice.panelTitle")}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{t("voice.panelHint")}</p>
+      <div className="flex items-center gap-1.5">
+        <h2 className="font-semibold">{t("voice.panelTitle")}</h2>
+        <HelpHint title={t("voice.panelTitle")} text={t("voice.panelHint")} />
+      </div>
       <VoiceForm
         // Mount lại (reset bản nháp về snapshot) mỗi khi cấu hình hiệu lực trên
         // server đổi — sau PATCH thành công. KHÔNG gồm `enabled`: toggle không

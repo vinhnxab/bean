@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from "react-router";
 
+import { HelpHint } from "@/components/HelpHint";
 import { EmptyState, ErrorState, LoadingState, PageShell, Panel } from "@/components/ui/Page";
 import {
   useApproveSkillDraft,
@@ -28,15 +29,26 @@ export function SkillsPage() {
           ) : null}
           <ul className="space-y-1">
             {skills.data?.skills.map((skill) => (
-              <li key={skill.name}>
+              // Dấu hỏi là SIBLING của nút, không lồng vào: nút con trong nút là
+              // HTML không hợp lệ và bấm dấu hỏi sẽ vừa mở popover vừa đổi skill.
+              <li
+                key={skill.name}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-2 transition ${name === skill.name ? "brand-wash" : "hover:bg-accent"}`}
+              >
                 <button
                   type="button"
                   onClick={() => navigate(`/skills/${encodeURIComponent(skill.name)}`)}
-                  className={`w-full rounded-lg px-3 py-2 text-left transition ${name === skill.name ? "brand-wash font-semibold text-brand" : "hover:bg-accent"}`}
+                  className={`min-w-0 flex-1 truncate text-left font-mono text-sm ${name === skill.name ? "font-semibold text-brand" : ""}`}
                 >
-                  <span className="block font-mono text-sm">{skill.name}</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">{skill.description}</span>
+                  {skill.name}
                 </button>
+                {skill.description ? (
+                  <HelpHint
+                    title={skill.name}
+                    text={skill.description}
+                    testId={`help-hint-skill-${skill.name}`}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -134,8 +146,14 @@ function SkillDetail({ name }: { name: string }) {
       {skill.data ? (
         <>
           <div className="mb-4">
-            <h2 className="font-mono text-lg font-bold">{skill.data.name}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{skill.data.description}</p>
+            <div className="flex items-center gap-1.5">
+              <h2 className="font-mono text-lg font-bold">{skill.data.name}</h2>
+              <HelpHint
+                title={skill.data.name}
+                text={skill.data.description}
+                testId="help-hint-skill-detail"
+              />
+            </div>
             <p className="mt-2 break-all text-xs text-muted-foreground">{skill.data.directory}</p>
           </div>
           <h3 className="mb-2 text-sm font-semibold">{t("skills.content")}</h3>

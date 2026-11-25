@@ -20,59 +20,54 @@ import type { MessageKey } from "@/i18n/vi";
 /**
  * Các mục cài đặt. Thêm/bớt mục là thêm/bớt một dòng — sau đó khai báo route
  * tại `SettingsPage`.
+ *
+ * Chỉ còn label: description của từng section nằm sau dấu hỏi ở **đầu panel**
+ * tương ứng (HelpHint) — nav một dòng mỗi mục, và mô tả đọc đúng ngữ cảnh khi
+ * đang ở trong section.
  */
 const SETTINGS_SECTIONS: {
   to: string;
   labelKey: MessageKey;
-  descKey: MessageKey;
   icon: LucideIcon;
 }[] = [
   {
     to: "/settings/providers",
     labelKey: "settings.section.providers",
-    descKey: "settings.section.providersDescription",
     icon: CpuIcon,
   },
   {
     to: "/settings/voice",
     labelKey: "settings.section.voice",
-    descKey: "settings.section.voiceDescription",
     icon: MicIcon,
   },
   {
     to: "/settings/password",
     labelKey: "settings.section.password",
-    descKey: "settings.section.passwordDescription",
     icon: KeyRoundIcon,
   },
   {
     to: "/settings/notifications",
     labelKey: "settings.section.notifications",
-    descKey: "settings.section.notificationsDescription",
     icon: BellRingIcon,
   },
   {
     to: "/settings/channels",
     labelKey: "settings.section.channels",
-    descKey: "settings.section.channelsDescription",
     icon: MessageCircleIcon,
   },
   {
     to: "/settings/search",
     labelKey: "settings.section.search",
-    descKey: "settings.section.searchDescription",
     icon: SearchIcon,
   },
   {
     to: "/settings/integrations",
     labelKey: "settings.section.integrations",
-    descKey: "settings.section.integrationsDescription",
     icon: Building2Icon,
   },
   {
     to: "/settings/advanced",
     labelKey: "settings.section.advanced",
-    descKey: "settings.section.advancedDescription",
     icon: SlidersIcon,
   },
 ];
@@ -145,10 +140,7 @@ export function SettingsSidebar({
               }
             >
               <section.icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0">
-                <span className="block truncate">{t(section.labelKey)}</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{t(section.descKey)}</span>
-              </span>
+              <span className="block min-w-0 truncate">{t(section.labelKey)}</span>
             </NavLink>
           ))}
         </nav>

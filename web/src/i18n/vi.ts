@@ -431,13 +431,9 @@ export const vi = {
   "settings.openInSidebar": "Mở cài đặt",
   "settings.closeSidebar": "Đóng cài đặt",
   "settings.section.providers": "Nhà cung cấp",
-  "settings.section.providersDescription": "Model và API mà Bean dùng để suy luận.",
   "settings.section.voice": "Giọng nói",
-  "settings.section.voiceDescription": "Cấu hình giọng nói: bật/tắt nút mic, chọn nhà cung cấp.",
   "settings.section.password": "Đổi mật khẩu",
-  "settings.section.passwordDescription": "Cập nhật mật khẩu đăng nhập vào Bean.",
   "settings.section.notifications": "Thông báo",
-  "settings.section.notificationsDescription": "Chuông nền và âm thanh gọi tên khi rời tab.",
   // --- Đổi mật khẩu (/settings/password) -----------------------------------
   "password.panelTitle": "Đổi mật khẩu",
   "password.panelHint":

@@ -2,6 +2,7 @@ import { CircleAlertIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ApiRequestError } from "@/api/client";
+import { HelpHint } from "@/components/HelpHint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/Page";
@@ -101,8 +102,10 @@ export function PasswordPanel() {
 
   return (
     <Panel>
-      <h2 className="font-semibold">{t("password.panelTitle")}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{t("password.panelHint")}</p>
+      <div className="flex items-center gap-1.5">
+        <h2 className="font-semibold">{t("password.panelTitle")}</h2>
+        <HelpHint title={t("password.panelTitle")} text={t("password.panelHint")} />
+      </div>
 
       <form className="mt-5 grid gap-4 border-t border-border pt-4" onSubmit={handleSubmit}>
         {/* Mật khẩu hiện tại */}

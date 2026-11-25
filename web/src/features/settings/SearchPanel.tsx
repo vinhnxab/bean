@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { HelpHint } from "@/components/HelpHint";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/Page";
 import { ConnectionTestButton } from "@/features/settings/ConnectionTestButton";
@@ -45,8 +46,10 @@ export function SearchPanel() {
   return (
     <>
       <Panel>
-        <h2 className="font-semibold">{t("settings.section.search")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("settings.section.searchDescription")}</p>
+        <div className="flex items-center gap-1.5">
+          <h2 className="font-semibold">{t("settings.section.search")}</h2>
+          <HelpHint title={t("settings.section.search")} text={t("settings.section.searchDescription")} />
+        </div>
 
         <form className="mt-5 grid gap-4 border-t border-border pt-4">
           <div className="grid gap-1.5">
