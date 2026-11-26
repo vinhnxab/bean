@@ -42,6 +42,7 @@ const AuditPage = lazy(() => import("@/features/audit/AuditPage").then((m) => ({
 const StatusPage = lazy(() =>
   import("@/features/status/StatusPage").then((m) => ({ default: m.StatusPage })),
 );
+const DocsPage = lazy(() => import("@/features/docs/DocsPage").then((m) => ({ default: m.DocsPage })));
 const SettingsPage = lazy(() =>
   import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="mcp" element={<McpPage />} />
             <Route path="audit" element={<AuditPage />} />
             <Route path="status" element={<StatusPage />} />
+            <Route path="docs" element={<DocsPage />} />
             {/* Cài đặt: `/settings` rơi về section đầu; nav các section nằm ở
                 sidebar phải (SettingsSidebar), không phải nav dọc trong trang. */}
             <Route path="settings" element={<Navigate to="/settings/providers" replace />} />

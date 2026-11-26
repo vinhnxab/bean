@@ -3,7 +3,6 @@ import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import type { DecisionDto, MessageDto } from "@/api/bindings";
-import { BeanMark } from "@/components/brand/BeanMark";
 import { Composer } from "@/components/chat/Composer";
 import { ConfirmCard } from "@/components/chat/ConfirmCard";
 import { MessageRow } from "@/components/chat/MessageRow";
@@ -20,6 +19,7 @@ import {
 import { useSessionMessages, useVoiceStatus } from "@/features/chat/queries";
 import { useRealtime } from "@/features/chat/RealtimeProvider";
 import { useI18n } from "@/i18n";
+import type { MessageKey } from "@/i18n/vi";
 import { Enter, type ScrollTween, tweenToBottom, useGsapAnimate } from "@/lib/anim";
 import { useChatStore } from "@/store/chat";
 
@@ -368,6 +368,72 @@ function ChatSession({ sessionId }: { sessionId: number }) {
  * soạn** chứ không gửi thẳng — người dùng luôn có quyền sửa trước khi gửi,
  * và hành vi đó nhất quán với việc ô soạn luôn rỗng sau khi gửi.
  */
+/**
+ * Lệnh slash có sẵn của lõi — lõi xử lý ngay, không tốn một lượt LLM. Bấm một
+ * lệnh bơm thẳng vào ô soạn: người dùng Enter là gửi. `descKey` làm nhãn trợ
+ * năng (ticker chỉ hiện lệnh, mô tả không kèm để giữ nhịp chạy).
+ */
+const COMMANDS: { cmd: string; descKey: MessageKey }[] = [
+  { cmd: "/new", descKey: "chat.cmd.new" },
+  { cmd: "/memory", descKey: "chat.cmd.memory" },
+  { cmd: "/skills", descKey: "chat.cmd.skills" },
+  { cmd: "/tasks", descKey: "chat.cmd.tasks" },
+  { cmd: "/model", descKey: "chat.cmd.model" },
+  { cmd: "/stop", descKey: "chat.cmd.stop" },
+];
+
+/**
+ * Dải lệnh chạy ngang vô hạn kiểu “logo wall” (hàng thương hiệu đối tác):
+ * track chứa HAI bản copy giống hệt nhau, CSS animation `translateX(-50%)`
+ * (class `.cmd-ticker-*` ở index.css) cho vòng lặp liền mạch — không dùng thẻ
+ * `<marquee>` gốc vì nó chờ toàn bộ nội dung đi hết mới quay lại, tạo khoảng
+ * trống thấy rõ. Bản copy thứ hai `aria-hidden` + `tabIndex={-1}`: chỉ bản
+ * đầu vào được cây trợ năng và tab. Rê chuột dừng để đọc (CSS hover).
+ */
+function CommandTicker({ onPick }: { onPick: (cmd: string) => void }) {
+  const { t } = useI18n();
+
+  function row(copy: number) {
+    const hidden = copy > 0;
+    return (
+      <ul
+        className="cmd-ticker-row"
+        aria-hidden={hidden || undefined}
+        aria-label={copy === 0 ? t("chat.suggestionsLabel") : undefined}
+      >
+        {COMMANDS.map(({ cmd, descKey }) => (
+          <li key={cmd}>
+            <button
+              type="button"
+              onClick={() => onPick(cmd)}
+              tabIndex={hidden ? -1 : undefined}
+              aria-label={t(descKey)}
+              className="cmd-item"
+            >
+              <span className="cmd-prompt" aria-hidden="true">
+                $
+              </span>
+              <span className="cmd-text">{cmd}</span>
+            </button>
+          </li>
+        ))}
+        <li aria-hidden="true" className="cmd-cursor">
+          ▍
+        </li>
+      </ul>
+    );
+  }
+
+  return (
+    <div className="cmd-ticker mt-8 w-full max-w-2xl">
+      <div className="cmd-ticker-track">
+        {row(0)}
+        {row(1)}
+      </div>
+    </div>
+  );
+}
+
 function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -396,32 +462,24 @@ function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
     });
   }, []);
 
-  const suggestions = [
-    t("chat.suggestion.plan"),
-    t("chat.suggestion.explore"),
-    t("chat.suggestion.memory"),
-    t("chat.suggestion.summarize"),
-  ];
   return (
     <div ref={rootRef} className="flex flex-col items-center px-2 py-16 text-center">
-      <BeanMark size={56} className="mb-4 text-brand" title={t("app.title")} />
+      {/* Hình mascot thật (`public/bean-ico.png`) thay cho mascot vector: giữ
+          `h-16 w-auto` vì ảnh gốc 352×192 là khung ngang, `rounded-xl` hoà với
+          bo góc kính của các thẻ bên dưới. */}
+      <img
+        src="/bean-ico.png"
+        alt={t("app.title")}
+        width={352}
+        height={192}
+        decoding="async"
+        className="mb-4 h-16 w-auto rounded-xl"
+      />
       <h2 className="text-2xl font-semibold tracking-tight">
         {t("chat.greeting")} <span className="text-brand">Bean</span>
       </h2>
       <p className="mt-2 text-sm text-muted-foreground">{t("chat.emptyHint")}</p>
-      <ul className="mt-8 grid w-full max-w-2xl gap-2 sm:grid-cols-2" aria-label={t("chat.suggestionsLabel")}>
-        {suggestions.map((prompt) => (
-          <li key={prompt}>
-            <button
-              type="button"
-              onClick={() => onPick(prompt)}
-              className="w-full rounded-lg border border-rule bg-surface-raised px-4 py-3 text-left text-sm text-ink transition-colors hover:border-brand hover:bg-surface-hover"
-            >
-              {prompt}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <CommandTicker onPick={onPick} />
     </div>
   );
 }

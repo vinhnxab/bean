@@ -1,5 +1,6 @@
 import {
   ActivityIcon,
+  BookOpenIcon,
   BrainIcon,
   CalendarClockIcon,
   GaugeIcon,
@@ -57,6 +58,7 @@ const NAV_ITEMS: { to: string; labelKey: MessageKey; icon: LucideIcon; end?: boo
   { to: "/mcp", labelKey: "nav.mcp", icon: PlugIcon },
   { to: "/audit", labelKey: "nav.audit", icon: ScrollTextIcon },
   { to: "/status", labelKey: "nav.status", icon: ActivityIcon },
+  { to: "/docs", labelKey: "nav.docs", icon: BookOpenIcon },
 ];
 
 /**

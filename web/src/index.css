@@ -429,6 +429,106 @@
       top: 100%;
     }
   }
+
+  /* ----------------------------------------------------------------------
+     COMMAND TICKER — dải lệnh slash chạy ngang vô hạn kiểu “logo wall”
+     (hàng thương hiệu đối tác). Track chứa HAI bản copy giống hệt nhau rồi
+     translateX(-50%): vòng lặp liền mạch, không hụt khoảng trống như thẻ
+     <marquee> gốc (nó chờ toàn bộ nội dung đi hết mới quay lại).
+     Chữ terminal: font từ token --font-mono (JetBrains Mono), xanh phosphor
+     neon từ token --live — đổi chủ đề là cả dải đổi theo.
+     ---------------------------------------------------------------------- */
+  .cmd-ticker {
+    overflow: hidden;
+    /* Hai mép mờ dần — lệnh “tan” vào nền thay vì bị cắt cụt ở rìa. */
+    mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+  }
+
+  .cmd-ticker-track {
+    display: flex;
+    width: max-content;
+    animation: cmd-ticker-scroll 26s linear infinite;
+  }
+
+  /* Rê chuột thì dừng để đọc/bấm — đúng hành vi của các logo wall. */
+  .cmd-ticker:hover .cmd-ticker-track {
+    animation-play-state: paused;
+  }
+
+  .cmd-ticker-row {
+    display: flex;
+    align-items: center;
+    /* padding-right = gap: khoảng nối giữa hai bản copy phải đều như khoảng
+       giữa các lệnh, nếu không vòng lặp sẽ nhịp nhàng lệch một nhịp. */
+    gap: 2.75rem;
+    padding-right: 2.75rem;
+  }
+
+  @keyframes cmd-ticker-scroll {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  .cmd-item {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  /* Prompt “$” mờ — chỉ làm bối cảnh, không cạnh tranh với lệnh. */
+  .cmd-prompt {
+    color: color-mix(in srgb, var(--live) 50%, transparent);
+  }
+
+  /* Lệnh phát sáng xanh phosphor: hai lớp text-shadow gần + xa tạo quầng neon
+     (cùng họ với .holo-glow, nhưng theo màu terminal). */
+  .cmd-text {
+    color: var(--live);
+    text-shadow:
+      0 0 6px color-mix(in srgb, var(--live) 70%, transparent),
+      0 0 20px color-mix(in srgb, var(--live) 40%, transparent);
+  }
+
+  .cmd-item:hover .cmd-text,
+  .cmd-item:focus-visible .cmd-text {
+    text-shadow:
+      0 0 8px color-mix(in srgb, var(--live) 90%, transparent),
+      0 0 26px color-mix(in srgb, var(--live) 55%, transparent);
+  }
+
+  /* Con trỏ khối nhấp nháy cuối hàng — nhịp terminal, aria-hidden ở nơi dùng. */
+  .cmd-cursor {
+    color: var(--live);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--live) 70%, transparent);
+    animation: cmd-cursor-blink 1.1s steps(1) infinite;
+  }
+
+  @keyframes cmd-cursor-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cmd-ticker {
+      overflow-x: auto;
+    }
+    .cmd-ticker-track {
+      animation: none;
+    }
+    .cmd-cursor {
+      animation: none;
+    }
+  }
 }
 
 /* ==========================================================================
