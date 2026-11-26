@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ToolDto, ToolListResponse } from "@/api/bindings";
+import { HelpHint } from "@/components/HelpHint";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState, PageShell, Panel } from "@/components/ui/Page";
 import { Switch } from "@/components/ui/switch";
@@ -14,6 +15,11 @@ import { type Translate, useI18n } from "@/i18n";
  * Trước khi có `GET /api/tools`, câu trả lời duy nhất nằm trong `bean.toml`. Đây là
  * màn duy nhất cho thấy **description mà model đang đọc** — thứ quyết định nó chọn
  * tool nào, và là thứ dễ sai nhất khi thêm tool.
+ *
+ * Description nằm sau dấu hỏi cạnh tên tool: độ dài các description chênh nhau
+ * rất xa (một dòng so với cả đoạn) nên để dòng riêng khiến lưới card lệch hàng
+ * mất thẩm mỹ. Tìm kiếm vẫn bao trùm cả description ẩn (`matches()` bên dưới) —
+ * thu gọn hiển thị không làm mất dữ liệu tìm.
  *
  * # Vì sao có bộ lọc
  *
@@ -140,6 +146,14 @@ function ToolCard({ tool, isAdmin, t }: { tool: ToolDto; isAdmin: boolean; t: Tr
     <Panel className={`flex flex-col gap-2 ${tool.enabled ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-mono text-sm font-semibold break-all">{tool.name}</h2>
+        {tool.description ? (
+          <HelpHint
+            title={tool.name}
+            text={tool.description}
+            label={t("tools.helpAria", { name: tool.name })}
+            testId={`help-hint-tool-${tool.name}`}
+          />
+        ) : null}
         <Badge tone={tone}>
           <StatusDot tone={tone} />
           {t(`confirm.risk.${tool.risk}`)}
@@ -162,7 +176,6 @@ function ToolCard({ tool, isAdmin, t }: { tool: ToolDto; isAdmin: boolean; t: Tr
           />
         </span>
       </div>
-      <p className="text-sm text-muted-foreground">{tool.description}</p>
       {toggle.isError ? <p className="text-xs text-alert">{t("tools.toggleFailed")}</p> : null}
       <div className="flex flex-wrap items-center gap-1.5">
         {tool.untrusted ? (

@@ -10,13 +10,18 @@ import { TOOLS_FIXTURE, testServer } from "@/test/server";
 const SEARCH_PLACEHOLDER = "Search by name, description or tag";
 
 describe("ToolsPage", () => {
-  it("hiển thị tool, mô tả model đang đọc, tag và nguồn MCP", async () => {
+  it("hiển thị tool, mô tả model đang đọc nằm sau dấu hỏi, tag và nguồn MCP", async () => {
     testServer.use(http.get("/api/tools", () => HttpResponse.json(TOOLS_FIXTURE)));
+    const user = userEvent.setup();
     renderManagement(<ToolsPage />);
 
     expect(await screen.findByText("read_file")).toBeInTheDocument();
     expect(screen.getByText("run_shell")).toBeInTheDocument();
-    expect(screen.getByText("Đọc một file trong workspace.")).toBeInTheDocument();
+    // Description không chiếm dòng riêng trong card (độ dài chênh nhau làm lưới
+    // lệch hàng) — nằm sau dấu hỏi cạnh tên tool.
+    expect(screen.queryByText("Đọc một file trong workspace.")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("help-hint-tool-read_file"));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Đọc một file trong workspace.");
     expect(screen.getByText("MCP · siem")).toBeInTheDocument();
     expect(screen.getByText("dev-write")).toBeInTheDocument();
     // Mọi tool đọc nội dung ngoài đều phải gắn nhãn "không tin cậy": UI phải escape

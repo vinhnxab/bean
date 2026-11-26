@@ -291,6 +291,7 @@ export const en: Record<MessageKey, string> = {
   "tools.state.on": "Enabled",
   "tools.state.off": "Disabled",
   "tools.toggleAria": "Enable/disable tool {name}",
+  "tools.helpAria": "More info about tool {name}",
   "tools.adminOnly": "Only an admin can enable or disable tools",
   "tools.toggleFailed": "Could not change the tool state — try again.",
   "mcp.title": "MCP servers",

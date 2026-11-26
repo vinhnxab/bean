@@ -298,6 +298,7 @@ export const vi = {
   "tools.state.on": "Đang bật",
   "tools.state.off": "Đang tắt",
   "tools.toggleAria": "Bật/tắt tool {name}",
+  "tools.helpAria": "Giải thích thêm về tool {name}",
   "tools.adminOnly": "Chỉ admin mới bật/tắt được tool",
   "tools.toggleFailed": "Không đổi được trạng thái tool — thử lại.",
   "mcp.title": "MCP server",
