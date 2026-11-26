@@ -17,9 +17,16 @@ export function ChatIndexPage() {
   return (
     <section className="flex flex-1 items-center justify-center p-6" aria-labelledby="empty-chat-title">
       <div className="max-w-md text-center">
-        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-lg brand-wash text-2xl font-bold text-brand">
-          B
-        </div>
+        {/* Mascot thật (`/bean-mascot.png`, nền trong suốt) thay cho chữ B:
+            không khung — hình nằm trần trên nền trang, không bị nổi khối. */}
+        <img
+          src="/bean-mascot.png"
+          alt={t("app.title")}
+          width={224}
+          height={224}
+          decoding="async"
+          className="mx-auto mb-5 h-14 w-14"
+        />
         <h1 id="empty-chat-title" className="text-2xl font-semibold">
           {t("chat.emptyTitle")}
         </h1>

@@ -464,16 +464,16 @@ function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
 
   return (
     <div ref={rootRef} className="flex flex-col items-center px-2 py-16 text-center">
-      {/* Hình mascot thật (`public/bean-ico.png`) thay cho mascot vector: giữ
-          `h-16 w-auto` vì ảnh gốc 352×192 là khung ngang, `rounded-xl` hoà với
-          bo góc kính của các thẻ bên dưới. */}
+      {/* Mascot thật (`web/brand/bean.png`, nền trong suốt) thay cho mascot
+          vector: ảnh vuông 224×224 nên đặt vuông `h-20 w-20`, `rounded-xl` hoà
+          với bo góc kính của các thẻ bên dưới. */}
       <img
-        src="/bean-ico.png"
+        src="/bean-mascot.png"
         alt={t("app.title")}
-        width={352}
-        height={192}
+        width={224}
+        height={224}
         decoding="async"
-        className="mb-4 h-16 w-auto rounded-xl"
+        className="mb-4 h-20 w-20 rounded-xl"
       />
       <h2 className="text-2xl font-semibold tracking-tight">
         {t("chat.greeting")} <span className="text-brand">Bean</span>
