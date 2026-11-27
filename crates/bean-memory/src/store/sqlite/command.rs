@@ -19,8 +19,9 @@ use bean_types::{Message, Outbound, SessionId, Usage};
 
 use crate::store::types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewPushSubscription,
-    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
-    StoreError, StoredMessage, WebSessionInfo,
+    NewScheduledTask, NewWorkNote, NewWorkProject, NewWorkTask, OutboxEntry, PushSubscription,
+    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    WorkNote, WorkProject, WorkTask, WorkTaskFilter, WorkTaskUpdate,
 };
 
 /// Kênh trả lời của một lệnh gửi cho worker.
@@ -66,7 +67,11 @@ impl DbCommand {
             | DbCommand::ListPushSubscriptions { .. }
             | DbCommand::MemorySearch { .. }
             | DbCommand::DueOutbox { .. }
-            | DbCommand::ListMessages { .. } => CmdKind::Read,
+            | DbCommand::ListMessages { .. }
+            | DbCommand::ListWorkProjects { .. }
+            | DbCommand::ListWorkTasks { .. }
+            | DbCommand::ListWorkNotes { .. }
+            | DbCommand::OpenWorkTasks { .. } => CmdKind::Read,
             DbCommand::EnsureSession { .. }
             | DbCommand::CreateSession { .. }
             | DbCommand::ArchiveSession { .. }
@@ -98,7 +103,13 @@ impl DbCommand {
             | DbCommand::Outbound { .. }
             | DbCommand::CompleteOutbox { .. }
             | DbCommand::RetryOutbox { .. }
-            | DbCommand::DeleteBefore { .. } => CmdKind::Write,
+            | DbCommand::DeleteBefore { .. }
+            | DbCommand::CreateWorkProject { .. }
+            | DbCommand::SetProjectStatus { .. }
+            | DbCommand::CreateWorkTask { .. }
+            | DbCommand::UpdateWorkTask { .. }
+            | DbCommand::DeleteWorkTask { .. }
+            | DbCommand::AddWorkNote { .. } => CmdKind::Write,
         }
     }
 }
@@ -385,5 +396,48 @@ pub(super) enum DbCommand {
         session: SessionId,
         before_seq: u64,
         reply: Reply<()>,
+    },
+    // (Bean World) Bảng điều khiển công việc Project → Task → Note: một nguồn
+    // sự thật dùng chung giữa người thật (REST/UI) và agent (tools).
+    ListWorkProjects {
+        reply: Reply<Vec<WorkProject>>,
+    },
+    CreateWorkProject {
+        project: NewWorkProject,
+        reply: Reply<WorkProject>,
+    },
+    SetProjectStatus {
+        id: u64,
+        status: String,
+        reply: Reply<Option<WorkProject>>,
+    },
+    ListWorkTasks {
+        filter: WorkTaskFilter,
+        reply: Reply<Vec<WorkTask>>,
+    },
+    CreateWorkTask {
+        task: NewWorkTask,
+        reply: Reply<WorkTask>,
+    },
+    UpdateWorkTask {
+        id: u64,
+        update: WorkTaskUpdate,
+        reply: Reply<Option<WorkTask>>,
+    },
+    DeleteWorkTask {
+        id: u64,
+        reply: Reply<bool>,
+    },
+    AddWorkNote {
+        note: NewWorkNote,
+        reply: Reply<WorkNote>,
+    },
+    ListWorkNotes {
+        task_id: u64,
+        reply: Reply<Vec<WorkNote>>,
+    },
+    OpenWorkTasks {
+        limit: usize,
+        reply: Reply<Vec<WorkTask>>,
     },
 }

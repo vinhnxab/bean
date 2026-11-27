@@ -2475,3 +2475,195 @@ fn sandbox_mode_cell() -> Arc<tokio::sync::watch::Sender<bean_types::config::San
     let (tx, _rx) = tokio::sync::watch::channel(bean_types::config::SandboxMode::Docker);
     Arc::new(tx)
 }
+
+/// Bean World REST: bảng công việc dùng chung với agent (tool `work_*`).
+/// 401 khi chưa đăng nhập; CRUD trọn vòng đời project → task → note; validate
+/// ranh giới trả 400, tài nguyên lạ trả 404; mọi ghi đổi phải thấy được qua
+/// cùng một store mà agent dùng.
+#[tokio::test]
+async fn rest_work_crud_roundtrip() {
+    use http_body_util::BodyExt;
+
+    let origin = "http://127.0.0.1:7878";
+    let (_dir, app, _state, store) = fixture(origin, vec![]).await;
+
+    // Chưa đăng nhập → 401 JSON.
+    let response = app
+        .clone()
+        .oneshot(get_request("/api/work/projects", origin, None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let token = login(&app, origin).await;
+    let request = |method: &str, path: String, body: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1:7878")
+            .header(header::ORIGIN, origin)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::COOKIE, format!("bean_session={token}"))
+            .body(Body::from(body.to_owned()))
+            .unwrap()
+    };
+    let json_of = |response: axum::response::Response| async {
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        value
+    };
+
+    // Tạo project — người thật qua UI tự tạo, không cần duyệt như tool của agent.
+    let response = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/work/projects".into(),
+            r#"{"name":"bean world","description":"bảng việc chung"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let projects = store.list_projects().await.unwrap();
+    assert_eq!(projects.len(), 1);
+    let project_id = projects[0].id;
+
+    // Trùng tên → 400 với code `invalid_work` đọc được.
+    let body = json_of(
+        app.clone()
+            .oneshot(request(
+                "POST",
+                "/api/work/projects".into(),
+                r#"{"name":"bean world","description":""}"#,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(body["code"], serde_json::json!("invalid_work"));
+
+    // Task trên project không tồn tại → 404 (báo rõ thay vì để FK từ chối 500).
+    let response = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/work/tasks".into(),
+            &format!(
+                r#"{{"project_id":{},"title":"việc ma","notes":"","assignee":"","priority":"normal"}}"#,
+                project_id + 9_999
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // Tạo task giao cho role developer — server ghi danh người tạo.
+    let response = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/work/tasks".into(),
+            &format!(
+                r#"{{"project_id":{project_id},"title":"sửa lỗi đăng nhập","notes":"","assignee":"developer","priority":"high"}}"#
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let tasks = store
+        .list_work_tasks(bean_memory::WorkTaskFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].created_by, "user:web:admin");
+    assert_eq!(tasks[0].assignee, "developer");
+    assert_eq!(tasks[0].priority, "high");
+    let task_id = tasks[0].id;
+
+    // Priority lạ → 400; lọc theo assignee và status qua query string.
+    let response = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/work/tasks".into(),
+            &format!(
+                r#"{{"project_id":{project_id},"title":"x","notes":"","assignee":"","priority":"gấp"}}"#
+            ),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = json_of(
+        app.clone()
+            .oneshot(get_request(
+                "/api/work/tasks?assignee=developer&status=open",
+                origin,
+                Some(&token),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(body["tasks"].as_array().map(Vec::len), Some(1));
+
+    // Đổi trạng thái task sang done → done_at được store đặt.
+    let response = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            format!("/api/work/tasks/{task_id}"),
+            r#"{"title":null,"notes":null,"status":"done","priority":null,"assignee":null}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        store
+            .list_work_tasks(bean_memory::WorkTaskFilter::default())
+            .await
+            .unwrap()[0]
+            .done_at
+            .is_some()
+    );
+
+    // Ghi chú trao đổi — cùng luồng mà agent dùng qua `work_task_note`.
+    let response = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            format!("/api/work/tasks/{task_id}/notes"),
+            r#"{"text":"đã nhận, đang làm"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let notes = store.list_work_notes(task_id).await.unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].author, "user:web:admin");
+
+    // Xoá task → ghi chú cascade mất theo.
+    let response = app
+        .clone()
+        .oneshot(request(
+            "DELETE",
+            format!("/api/work/tasks/{task_id}"),
+            "{}",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(store.list_work_notes(task_id).await.unwrap().is_empty());
+
+    // Archive project.
+    let response = app
+        .oneshot(request(
+            "PATCH",
+            format!("/api/work/projects/{project_id}"),
+            r#"{"status":"archived"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(store.list_projects().await.unwrap()[0].status, "archived");
+}

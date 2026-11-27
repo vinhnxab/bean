@@ -240,6 +240,134 @@ pub struct WebSessionInfo {
     pub expires_at: String,
 }
 
+// ---------------------------------------------------------------------------
+// Bean World — bảng điều khiển công việc (projects → tasks → notes).
+// Subagent (role) là "user" được giao việc; người thật và agent cùng dùng một
+// nguồn sự thật duy nhất trong SQLite.
+// ---------------------------------------------------------------------------
+
+/// Yêu cầu tạo project mới (tool `project_create` / REST).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NewWorkProject {
+    /// Tên project, duy nhất, 1..=120 ký tự.
+    pub name: String,
+    /// Mô tả ngắn mục đích project; có thể rỗng.
+    pub description: String,
+}
+
+/// Một project trong Bean World.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkProject {
+    /// ID project.
+    pub id: u64,
+    /// Tên project, duy nhất.
+    pub name: String,
+    /// Mô tả ngắn.
+    pub description: String,
+    /// `active` hoặc `archived`.
+    pub status: String,
+    /// RFC3339 UTC lúc tạo.
+    pub created_at: String,
+    /// RFC3339 UTC lần sửa cuối.
+    pub updated_at: String,
+}
+
+/// Bộ lọc khi liệt kê task; `None` = không lọc theo trường đó.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct WorkTaskFilter {
+    /// Chỉ lấy task của project này.
+    pub project_id: Option<u64>,
+    /// Chỉ lấy task giao cho role này (khớp chính xác; rỗng = chưa giao).
+    pub assignee: Option<String>,
+    /// Chỉ lấy task ở trạng thái này (`open`/`in_progress`/`blocked`/`done`).
+    pub status: Option<String>,
+}
+
+/// Yêu cầu tạo task mới (tool `task_add` / REST).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NewWorkTask {
+    /// Project chứa task.
+    pub project_id: u64,
+    /// Tiêu đề việc, 1..=200 ký tự.
+    pub title: String,
+    /// Thông tin liên quan ban đầu; có thể rỗng.
+    pub notes: String,
+    /// Role subagent được giao (`developer`, `qa`, `marketing`…); rỗng = chưa giao.
+    pub assignee: String,
+    /// `low` / `normal` / `high`.
+    pub priority: String,
+    /// Ai tạo: `user:<id>` hoặc `agent:<role>`.
+    pub created_by: String,
+}
+
+/// Cập nhật một phần của task; `None` = giữ nguyên trường đó.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct WorkTaskUpdate {
+    /// Đổi tiêu đề.
+    pub title: Option<String>,
+    /// Đổi thông tin liên quan (ghi đè).
+    pub notes: Option<String>,
+    /// Đổi trạng thái (`open`/`in_progress`/`blocked`/`done`).
+    pub status: Option<String>,
+    /// Đổi priority (`low`/`normal`/`high`).
+    pub priority: Option<String>,
+    /// Đổi người được giao; chuỗi rỗng = huỷ giao.
+    pub assignee: Option<String>,
+}
+
+/// Một task trong Bean World.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkTask {
+    /// ID task.
+    pub id: u64,
+    /// Project chứa task.
+    pub project_id: u64,
+    /// Tiêu đề việc.
+    pub title: String,
+    /// Thông tin liên quan.
+    pub notes: String,
+    /// `open`/`in_progress`/`blocked`/`done`.
+    pub status: String,
+    /// `low`/`normal`/`high`.
+    pub priority: String,
+    /// Role được giao; rỗng = chưa giao.
+    pub assignee: String,
+    /// Ai tạo: `user:<id>` hoặc `agent:<role>`.
+    pub created_by: String,
+    /// RFC3339 UTC lúc tạo.
+    pub created_at: String,
+    /// RFC3339 UTC lần sửa cuối.
+    pub updated_at: String,
+    /// RFC3339 UTC lúc xong; `None` khi chưa xong.
+    pub done_at: Option<String>,
+}
+
+/// Yêu cầu thêm ghi chú trao đổi vào task (append-only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NewWorkNote {
+    /// Task gắn ghi chú.
+    pub task_id: u64,
+    /// Ai viết: `user:<id>` hoặc `agent:<role>`.
+    pub author: String,
+    /// Nội dung ghi chú, 1..=4000 ký tự.
+    pub text: String,
+}
+
+/// Một ghi chú trao đổi trên task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkNote {
+    /// ID ghi chú.
+    pub id: u64,
+    /// Task chứa ghi chú.
+    pub task_id: u64,
+    /// Ai viết.
+    pub author: String,
+    /// Nội dung.
+    pub text: String,
+    /// RFC3339 UTC lúc viết.
+    pub created_at: String,
+}
+
 /// Một bản ghi outbox đã tới hạn gửi lại.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutboxEntry {

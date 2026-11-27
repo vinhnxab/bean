@@ -32,6 +32,7 @@ pub trait Store:
     + crate::traits::traits::MessageStore
     + crate::traits::traits::MemoryStore
     + crate::traits::traits::TaskStore
+    + crate::traits::traits::WorkStore
     + crate::traits::traits::UsageStore
     + crate::traits::traits::OutboxStore
     + crate::traits::traits::WebSessionStore

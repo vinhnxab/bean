@@ -126,6 +126,11 @@ pub const BROWSER_TOOL_GROUP: &str = "browser";
 /// Tên nhóm tool QA trong `[tools] enabled` (M27).
 pub const QA_TOOL_GROUP: &str = "qa";
 
+/// Tên nhóm tool Bean World trong `[tools] enabled` — bảng công việc
+/// `Project → Task → Note` dùng chung giữa người thật (UI/REST) và agent
+/// (tool `work_*`).
+pub const WORK_TOOL_GROUP: &str = "work";
+
 /// Nhóm tool hợp lệ cho `[tools] enabled` (agents.md mục 7.3).
 pub const KNOWN_TOOL_GROUPS: &[&str] = &[
     "files",
@@ -139,6 +144,7 @@ pub const KNOWN_TOOL_GROUPS: &[&str] = &[
     BROWSER_TOOL_GROUP,
     BILLING_TOOL_GROUP,
     QA_TOOL_GROUP,
+    WORK_TOOL_GROUP,
 ];
 
 /// Tên nhóm tool billing trong `[tools] enabled`.

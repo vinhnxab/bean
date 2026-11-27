@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AuthMeResponse, LoginRequest } from "@/api/bindings";
+import type { WorkTaskListQuery } from "@/api/client";
 import { api } from "@/api/client";
 
 export type AuthUser = AuthMeResponse;
@@ -49,6 +50,13 @@ export const queryKeys = {
   secrets: ["secrets"] as const,
   /** Trạng thái Web Push + danh sách subscription đã đăng ký (admin). */
   pushStatus: ["push-status"] as const,
+  // Bean World — bảng công việc `Project → Task → Note` dùng chung với agent
+  // (tool `work_*`). Invalidate tiền tố `work` là đánh trúng cả ba khoá dưới.
+  work: ["work"] as const,
+  workProjects: ["work", "projects"] as const,
+  /** Khoá kèm bộ lọc màn đang chọn — đổi filter là query riêng, không trộn cache. */
+  workTasks: (filter: WorkTaskListQuery) => ["work", "tasks", filter] as const,
+  workNotes: (taskId: number) => ["work", "tasks", taskId, "notes"] as const,
 };
 
 export function useAuth() {

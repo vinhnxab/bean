@@ -60,3 +60,4 @@ mod messages;
 mod parity;
 mod persist;
 mod session;
+mod work;

@@ -30,6 +30,12 @@ mod command;
 mod impl_store;
 mod inner;
 pub(crate) mod migration;
+// `pub(crate)`: validator + trần ký tự của q_bw là nguồn chân lý chung, bản
+// in-memory (`memory.rs`) phải dùng lại để hai store không lệch ngữ nghĩa.
+pub(crate) mod q_bw;
+mod q_bw_note;
+mod q_bw_project;
+mod q_bw_task;
 mod q_fts_sanitize;
 mod q_history_search;
 mod q_mcp;

@@ -63,6 +63,7 @@ mod budget;
 mod compaction;
 mod memory;
 mod memory_push;
+mod memory_work;
 mod shared;
 mod sqlite;
 mod trait_def;
@@ -96,15 +97,24 @@ pub use budget::{
     ensure_daily_budget, ensure_role_daily_budget, record_usage, record_usage_for_role,
 };
 pub use memory::MemoryStore;
+// Luật validate Bean World — REST và tool dùng lại để không lệch với store.
 pub use sqlite::SqliteStore;
+pub use sqlite::q_bw::{
+    NOTES_MAX_CHARS as WORK_NOTES_MAX_CHARS, PROJECT_NAME_MAX_CHARS as WORK_PROJECT_NAME_MAX_CHARS,
+    TASK_PRIORITIES as WORK_TASK_PRIORITIES, TASK_STATUSES as WORK_TASK_STATUSES,
+    TASK_TITLE_MAX_CHARS as WORK_TASK_TITLE_MAX_CHARS, validate_priority as validate_work_priority,
+    validate_status as validate_work_status,
+};
 pub use trait_def::Store;
 pub use types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MemorySource, MessageRecord, NewPushSubscription,
-    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
-    StoreError, StoredMessage, WebSessionInfo,
+    NewScheduledTask, NewWorkNote, NewWorkProject, NewWorkTask, OutboxEntry, PushSubscription,
+    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    WorkNote, WorkProject, WorkTask, WorkTaskFilter, WorkTaskUpdate,
 };
 
 pub use crate::traits::traits::{
     McpClientStore, MemoryStore as MemoryOpsStore, MessageStore, OutboxStore, PushStore,
     SessionStore, TaskStore, ToolOverride, ToolOverrideStore, UsageStore, WebSessionStore,
+    WorkStore,
 };

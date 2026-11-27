@@ -131,9 +131,9 @@ async fn migration_v2_resumes_after_partial_schema_change() {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    // 9 = đã chạy tới migration mới nhất (v8 `tool_overrides` runtime toggle,
-    // v9 `push_subscriptions` cho Web Push).
-    assert_eq!(version, 9);
+    // 10 = đã chạy tới migration mới nhất (v8 `tool_overrides` runtime toggle,
+    // v9 `push_subscriptions` cho Web Push, v10 `work_*` cho Bean World).
+    assert_eq!(version, 10);
 }
 
 /// Migration v7 → v8: DB cũ (hàng tồn tại = tool bị tắt, không cột `enabled`)

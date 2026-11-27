@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use bean_billing::{BillingClient, billing_read_cost};
 use bean_core::{
     Channel, Decision, Incoming, Router, RouterDeps, SqliteStore, SystemClock, memory_tools,
-    schedule_tools,
+    schedule_tools, work_tools,
 };
 use bean_llm::{FakeProvider, LlmProvider};
 use bean_marketing::{PublishClient, marketing_draft, marketing_publish};
@@ -396,6 +396,17 @@ pub(crate) async fn build_registry(
         enabled_groups,
         &mut seed_disabled,
         "skill",
+    )?;
+
+    // (Bean World) Bảng công việc Project → Task → Note dùng chung người thật + agent:
+    // một nguồn sự thật nằm ở store. `work_project_create` là Confirm, còn lại Safe.
+    register_group(
+        &mut registry,
+        work_tools(store.clone()),
+        "work",
+        enabled_groups,
+        &mut seed_disabled,
+        "work",
     )?;
 
     // (D25) `update_plan` — cơ chế lập kế hoạch của chính vòng lặp, đăng ký **luôn**

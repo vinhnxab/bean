@@ -244,6 +244,49 @@ pub(super) fn run_migration(conn: &Connection) -> Result<(), StoreError> {
         conn.pragma_update(None, "user_version", 9)
             .map_err(internal)?;
     }
+    if version < 10 {
+        // Bean World: bảng điều khiển công việc (projects → tasks → notes).
+        // `IF NOT EXISTS` ⇒ chạy lại vô hại; FK CASCADE xoá notes cùng task,
+        // xoá project cùng toàn bộ task của nó.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS work_projects (
+               id INTEGER PRIMARY KEY,
+               name TEXT NOT NULL UNIQUE,
+               description TEXT NOT NULL DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'active',
+               created_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS work_tasks (
+               id INTEGER PRIMARY KEY,
+               project_id INTEGER NOT NULL REFERENCES work_projects(id) ON DELETE CASCADE,
+               title TEXT NOT NULL,
+               notes TEXT NOT NULL DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'open',
+               priority TEXT NOT NULL DEFAULT 'normal',
+               assignee TEXT NOT NULL DEFAULT '',
+               created_by TEXT NOT NULL DEFAULT '',
+               created_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL,
+               done_at TEXT
+             );
+             CREATE INDEX IF NOT EXISTS work_tasks_project
+               ON work_tasks(project_id, status);
+             CREATE INDEX IF NOT EXISTS work_tasks_assignee
+               ON work_tasks(assignee, status);
+             CREATE TABLE IF NOT EXISTS work_notes (
+               id INTEGER PRIMARY KEY,
+               task_id INTEGER NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+               author TEXT NOT NULL DEFAULT '',
+               text TEXT NOT NULL,
+               created_at TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS work_notes_task ON work_notes(task_id, id);",
+        )
+        .map_err(|err| StoreError::Internal(format!("migration v10 bean world thất bại: {err}")))?;
+        conn.pragma_update(None, "user_version", 10)
+            .map_err(internal)?;
+    }
     Ok(())
 }
 

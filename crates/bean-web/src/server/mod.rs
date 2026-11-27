@@ -68,6 +68,7 @@ mod guard;
 mod rebind;
 mod rest_audit_tools;
 mod rest_auth_status;
+mod rest_bw;
 mod rest_config;
 mod rest_host_mode;
 mod rest_lan_access;

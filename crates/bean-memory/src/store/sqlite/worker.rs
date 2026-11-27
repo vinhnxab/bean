@@ -20,6 +20,10 @@
 use rusqlite::Connection;
 
 use super::command::DbCommand;
+use super::q_bw::{
+    add_work_note, create_project, create_work_task, delete_work_task, list_projects,
+    list_work_notes, list_work_tasks, open_work_tasks, set_project_status, update_work_task,
+};
 use super::q_history_search::{delete_before, list_messages, load_history, memory_search};
 use super::q_mcp::{create_mcp_client, delete_mcp_client, get_mcp_client, list_mcp_clients};
 use super::q_memory_outbox::{
@@ -389,6 +393,36 @@ pub(super) fn dispatch(conn: &mut Connection, cmd: DbCommand) {
             reply,
         } => {
             let _ = reply.send(delete_before(conn, session, before_seq));
+        }
+        DbCommand::ListWorkProjects { reply } => {
+            let _ = reply.send(list_projects(conn));
+        }
+        DbCommand::CreateWorkProject { project, reply } => {
+            let _ = reply.send(create_project(conn, project));
+        }
+        DbCommand::SetProjectStatus { id, status, reply } => {
+            let _ = reply.send(set_project_status(conn, id, &status));
+        }
+        DbCommand::ListWorkTasks { filter, reply } => {
+            let _ = reply.send(list_work_tasks(conn, &filter));
+        }
+        DbCommand::CreateWorkTask { task, reply } => {
+            let _ = reply.send(create_work_task(conn, task));
+        }
+        DbCommand::UpdateWorkTask { id, update, reply } => {
+            let _ = reply.send(update_work_task(conn, id, &update));
+        }
+        DbCommand::DeleteWorkTask { id, reply } => {
+            let _ = reply.send(delete_work_task(conn, id));
+        }
+        DbCommand::AddWorkNote { note, reply } => {
+            let _ = reply.send(add_work_note(conn, note));
+        }
+        DbCommand::ListWorkNotes { task_id, reply } => {
+            let _ = reply.send(list_work_notes(conn, task_id));
+        }
+        DbCommand::OpenWorkTasks { limit, reply } => {
+            let _ = reply.send(open_work_tasks(conn, limit));
         }
     }
 }

@@ -19,6 +19,7 @@ pub mod memory_tool;
 pub mod safe_cut;
 pub mod store;
 pub mod traits;
+pub mod work_tool;
 
 pub use memory_tool::memory_tools;
 pub use safe_cut::{
@@ -26,7 +27,12 @@ pub use safe_cut::{
 };
 pub use store::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MemoryStore, MessageRecord, NewPushSubscription,
-    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionSummary, SqliteStore,
-    Store, StoreError, StoredMessage, ToolOverride, ToolOverrideStore, WebSessionInfo,
-    ensure_daily_budget, ensure_role_daily_budget, record_usage, record_usage_for_role,
+    NewScheduledTask, NewWorkNote, NewWorkProject, NewWorkTask, OutboxEntry, PushSubscription,
+    ScheduledTask, SessionSummary, SqliteStore, Store, StoreError, StoredMessage, ToolOverride,
+    ToolOverrideStore, WORK_NOTES_MAX_CHARS, WORK_PROJECT_NAME_MAX_CHARS, WORK_TASK_PRIORITIES,
+    WORK_TASK_STATUSES, WORK_TASK_TITLE_MAX_CHARS, WebSessionInfo, WorkNote, WorkProject,
+    WorkStore, WorkTask, WorkTaskFilter, WorkTaskUpdate, ensure_daily_budget,
+    ensure_role_daily_budget, record_usage, record_usage_for_role, validate_work_priority,
+    validate_work_status,
 };
+pub use work_tool::work_tools;

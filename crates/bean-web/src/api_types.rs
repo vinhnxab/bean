@@ -638,6 +638,173 @@ pub struct OkResponse {
     pub ok: bool,
 }
 
+// ---------------------------------------------------------------------------
+// Bean World — bảng công việc Project → Task → Note dùng chung người thật + agent
+// ---------------------------------------------------------------------------
+
+/// Project Bean World trả về REST.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkProjectDto {
+    /// ID project.
+    pub id: u64,
+    /// Tên project, duy nhất.
+    pub name: String,
+    /// Mô tả mục đích.
+    pub description: String,
+    /// `active` hoặc `archived`.
+    pub status: String,
+    /// Thời điểm tạo UTC.
+    pub created_at: String,
+    /// Thời điểm cập nhật cuối UTC.
+    pub updated_at: String,
+}
+
+/// Danh sách project Bean World.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkProjectListResponse {
+    /// Các project, mới nhất trước.
+    pub projects: Vec<WorkProjectDto>,
+}
+
+/// Request tạo project Bean World.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct WorkProjectCreateRequest {
+    /// Tên project, 1..=120 ký tự, duy nhất.
+    pub name: String,
+    /// Mô tả mục đích; tối đa 4000 ký tự.
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Request đổi trạng thái project (`active`/`archived`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct WorkProjectStatusRequest {
+    /// Trạng thái mới: `active` hoặc `archived`.
+    pub status: String,
+}
+
+/// Task Bean World trả về REST.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkTaskDto {
+    /// ID task.
+    pub id: u64,
+    /// ID project chứa task.
+    pub project_id: u64,
+    /// Tiêu đề việc.
+    pub title: String,
+    /// Thông tin liên quan.
+    pub notes: String,
+    /// `open`/`in_progress`/`blocked`/`done`.
+    pub status: String,
+    /// `low`/`normal`/`high`.
+    pub priority: String,
+    /// Role subagent được giao; rỗng = chưa giao.
+    pub assignee: String,
+    /// Ai tạo: `user:<id>` hoặc `agent`.
+    pub created_by: String,
+    /// Thời điểm tạo UTC.
+    pub created_at: String,
+    /// Thời điểm cập nhật cuối UTC.
+    pub updated_at: String,
+    /// Thời điểm xong (chỉ khi `status = done`).
+    pub done_at: Option<String>,
+}
+
+/// Danh sách task Bean World.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkTaskListResponse {
+    /// Các task, mới nhất trước.
+    pub tasks: Vec<WorkTaskDto>,
+}
+
+/// Request tạo task Bean World.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct WorkTaskCreateRequest {
+    /// Project chứa task.
+    pub project_id: u64,
+    /// Tiêu đề việc, 1..=200 ký tự.
+    pub title: String,
+    /// Thông tin liên quan ban đầu; tối đa 4000 ký tự.
+    #[serde(default)]
+    pub notes: String,
+    /// Role subagent được giao; rỗng = chưa giao.
+    #[serde(default)]
+    pub assignee: String,
+    /// `low`/`normal`/`high`; mặc định `normal`.
+    #[serde(default = "default_work_priority")]
+    pub priority: String,
+}
+
+/// Request cập nhật một phần task Bean World; bỏ qua trường không đổi.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct WorkTaskUpdateRequest {
+    /// Sửa tiêu đề.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Ghi đè thông tin liên quan.
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Đổi trạng thái.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Đổi priority.
+    #[serde(default)]
+    pub priority: Option<String>,
+    /// Giao việc cho role; chuỗi rỗng = huỷ giao.
+    #[serde(default)]
+    pub assignee: Option<String>,
+}
+
+/// Ghi chú trao đổi trên task Bean World.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkNoteDto {
+    /// ID ghi chú.
+    pub id: u64,
+    /// ID task chứa ghi chú.
+    pub task_id: u64,
+    /// Ai viết: `user:<id>` hoặc `agent`.
+    pub author: String,
+    /// Nội dung.
+    pub text: String,
+    /// Thời điểm viết UTC.
+    pub created_at: String,
+}
+
+/// Danh sách ghi chú của một task (cũ nhất trước).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkNoteListResponse {
+    /// Các ghi chú.
+    pub notes: Vec<WorkNoteDto>,
+}
+
+/// Request thêm ghi chú vào task Bean World.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct WorkNoteCreateRequest {
+    /// Nội dung ghi chú, 1..=4000 ký tự.
+    pub text: String,
+}
+
+/// Mặc định priority khi request không gửi trường này.
+fn default_work_priority() -> String {
+    "normal".to_string()
+}
+
 /// Mức rủi ro wire.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

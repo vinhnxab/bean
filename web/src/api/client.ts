@@ -61,6 +61,17 @@ import type {
   VoiceTranscribeRequest,
   VoiceTranscribeResponse,
   VoiceUpdateRequest,
+  WorkNoteCreateRequest,
+  WorkNoteDto,
+  WorkNoteListResponse,
+  WorkProjectCreateRequest,
+  WorkProjectDto,
+  WorkProjectListResponse,
+  WorkProjectStatusRequest,
+  WorkTaskCreateRequest,
+  WorkTaskDto,
+  WorkTaskListResponse,
+  WorkTaskUpdateRequest,
 } from "@/api/bindings";
 import type { ApiError as ApiErrorDto } from "@/api/generated/ApiError";
 import type { HostModeDto } from "@/api/generated/HostModeDto";
@@ -160,6 +171,13 @@ function withQuery(
 }
 
 export type SessionListOptions = Partial<SessionQuery>;
+
+/** Bộ lọc của `GET /api/work/tasks`; bỏ trường nào là không lọc theo trường đó. */
+export type WorkTaskListQuery = {
+  projectId?: number;
+  assignee?: string;
+  status?: string;
+};
 
 export const api = {
   me: (signal?: AbortSignal) => requestJson<AuthMeResponse>("/api/auth/me", { signal }),
@@ -344,6 +362,46 @@ export const api = {
     requestJson<TaskDto>(`/api/tasks/${id}`, { method: "PATCH", body: request }),
 
   deleteTask: (id: number) => requestJson<DeleteResponse>(`/api/tasks/${id}`, { method: "DELETE", body: {} }),
+
+  // -----------------------------------------------------------------------
+  // Bean World — bảng công việc `Project → Task → Note` dùng chung với agent
+  // (tool `work_*`). Cùng nguồn sự thật với agent: mọi ghi đổi hiện ngay trong
+  // phiên chat của nó và ngược lại.
+  // -----------------------------------------------------------------------
+
+  listWorkProjects: (signal?: AbortSignal) =>
+    requestJson<WorkProjectListResponse>("/api/work/projects", { signal }),
+
+  createWorkProject: (request: WorkProjectCreateRequest) =>
+    requestJson<WorkProjectDto>("/api/work/projects", { method: "POST", body: request }),
+
+  updateWorkProject: (id: number, request: WorkProjectStatusRequest) =>
+    requestJson<WorkProjectDto>(`/api/work/projects/${id}`, { method: "PATCH", body: request }),
+
+  listWorkTasks: (query: WorkTaskListQuery = {}, signal?: AbortSignal) =>
+    requestJson<WorkTaskListResponse>(
+      withQuery("/api/work/tasks", {
+        project_id: query.projectId,
+        assignee: query.assignee,
+        status: query.status,
+      }),
+      { signal },
+    ),
+
+  createWorkTask: (request: WorkTaskCreateRequest) =>
+    requestJson<WorkTaskDto>("/api/work/tasks", { method: "POST", body: request }),
+
+  updateWorkTask: (id: number, request: WorkTaskUpdateRequest) =>
+    requestJson<WorkTaskDto>(`/api/work/tasks/${id}`, { method: "PATCH", body: request }),
+
+  deleteWorkTask: (id: number) =>
+    requestJson<DeleteResponse>(`/api/work/tasks/${id}`, { method: "DELETE", body: {} }),
+
+  listWorkNotes: (taskId: number, signal?: AbortSignal) =>
+    requestJson<WorkNoteListResponse>(`/api/work/tasks/${taskId}/notes`, { signal }),
+
+  addWorkNote: (taskId: number, request: WorkNoteCreateRequest) =>
+    requestJson<WorkNoteDto>(`/api/work/tasks/${taskId}/notes`, { method: "POST", body: request }),
 
   /**
    * Trang audit mới nhất (cũ hơn `before`).

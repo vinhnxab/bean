@@ -16,6 +16,10 @@ use tower_http::services::{ServeDir, ServeFile};
 use super::guard::security_headers;
 use super::rest_audit_tools::{list_audit, list_mcp_servers, list_tools, set_tool_enabled};
 use super::rest_auth_status::{auth_me, change_password, list_agents, login, logout, status};
+use super::rest_bw::{
+    add_work_note, create_work_project, create_work_task, delete_work_task, list_work_notes,
+    list_work_projects, list_work_tasks, update_work_project, update_work_task,
+};
 use super::rest_config::{
     create_llm_provider_profile, delete_llm_provider_profile, get_llm_config, update_llm_model,
     update_llm_provider, update_llm_provider_profile,
@@ -113,6 +117,22 @@ pub fn build_router(state: WebState) -> AxumRouter {
         .route("/skills/{name}", get(get_skill))
         .route("/tasks", get(list_tasks).post(create_task))
         .route("/tasks/{id}", patch(update_task).delete(delete_task))
+        // Bean World (bảng công việc dùng chung người thật + agent): task notes
+        // phải khai trước `/work/tasks/{id}` để không nuốt path `{id}/notes`.
+        .route(
+            "/work/projects",
+            get(list_work_projects).post(create_work_project),
+        )
+        .route("/work/projects/{id}", patch(update_work_project))
+        .route(
+            "/work/tasks/{id}/notes",
+            get(list_work_notes).post(add_work_note),
+        )
+        .route("/work/tasks", get(list_work_tasks).post(create_work_task))
+        .route(
+            "/work/tasks/{id}",
+            patch(update_work_task).delete(delete_work_task),
+        )
         .route("/audit", get(list_audit))
         // M30 (D23.6): kiểm tra bản mới — chỉ hỏi GitHub, không tải/cài; check
         // tay khi người dùng bấm nút, không tự gọi định kỳ.

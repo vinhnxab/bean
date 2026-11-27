@@ -18,8 +18,9 @@ use crate::store::Store;
 use crate::store::compaction::compact_via;
 use crate::store::types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewPushSubscription,
-    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
-    StoreError, StoredMessage, WebSessionInfo,
+    NewScheduledTask, NewWorkNote, NewWorkProject, NewWorkTask, OutboxEntry, PushSubscription,
+    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    WorkNote, WorkProject, WorkTask, WorkTaskFilter, WorkTaskUpdate,
 };
 use crate::traits::traits::*;
 #[async_trait::async_trait]
@@ -641,6 +642,68 @@ impl PushStore for SqliteStore {
             reply,
         })
         .await
+    }
+}
+
+#[async_trait::async_trait]
+impl WorkStore for SqliteStore {
+    async fn list_projects(&self) -> Result<Vec<WorkProject>, StoreError> {
+        self.request(move |reply| DbCommand::ListWorkProjects { reply })
+            .await
+    }
+
+    async fn create_project(&self, project: NewWorkProject) -> Result<WorkProject, StoreError> {
+        self.request(move |reply| DbCommand::CreateWorkProject { project, reply })
+            .await
+    }
+
+    async fn set_project_status(
+        &self,
+        id: u64,
+        status: &str,
+    ) -> Result<Option<WorkProject>, StoreError> {
+        let status = status.to_string();
+        self.request(move |reply| DbCommand::SetProjectStatus { id, status, reply })
+            .await
+    }
+
+    async fn list_work_tasks(&self, filter: WorkTaskFilter) -> Result<Vec<WorkTask>, StoreError> {
+        self.request(move |reply| DbCommand::ListWorkTasks { filter, reply })
+            .await
+    }
+
+    async fn create_work_task(&self, task: NewWorkTask) -> Result<WorkTask, StoreError> {
+        self.request(move |reply| DbCommand::CreateWorkTask { task, reply })
+            .await
+    }
+
+    async fn update_work_task(
+        &self,
+        id: u64,
+        update: WorkTaskUpdate,
+    ) -> Result<Option<WorkTask>, StoreError> {
+        self.request(move |reply| DbCommand::UpdateWorkTask { id, update, reply })
+            .await
+    }
+
+    async fn delete_work_task(&self, id: u64) -> Result<bool, StoreError> {
+        self.request(move |reply| DbCommand::DeleteWorkTask { id, reply })
+            .await
+    }
+
+    async fn add_work_note(&self, note: NewWorkNote) -> Result<WorkNote, StoreError> {
+        self.request(move |reply| DbCommand::AddWorkNote { note, reply })
+            .await
+    }
+
+    async fn list_work_notes(&self, task_id: u64) -> Result<Vec<WorkNote>, StoreError> {
+        self.request(move |reply| DbCommand::ListWorkNotes { task_id, reply })
+            .await
+    }
+
+    async fn open_work_tasks(&self, limit: usize) -> Result<Vec<WorkTask>, StoreError> {
+        self.request(move |reply| DbCommand::OpenWorkTasks { limit, reply })
+            .await
     }
 }
 

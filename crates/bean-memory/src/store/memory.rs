@@ -28,7 +28,7 @@ use super::shared::{now_rfc3339, seq_to_index, slice_start, title_from, truncate
 use super::types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MemorySource, MessageRecord, NewScheduledTask,
     OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary, StoreError,
-    StoredMessage, WebSessionInfo,
+    StoredMessage, WebSessionInfo, WorkNote, WorkProject, WorkTask,
 };
 use super::{MEMORY_HIT_PREVIEW_CHARS, MEMORY_SEARCH_LIMIT, Store};
 use crate::traits::traits::*;
@@ -83,11 +83,19 @@ pub struct MemoryStore {
     /// `pub(super)` vì impl `PushStore` nằm ở `memory_push.rs` (tách ranh giới
     /// nghiệp vụ, giữ trần số dòng của test kiến trúc).
     pub(super) push_subscriptions: RwLock<Vec<PushSubscription>>,
+    // (Bean World) Bảng điều khiển công việc — ngữ nghĩa nằm ở `memory_work.rs`;
+    // `pub(super)` vì impl `WorkStore` tách sang module anh em (như `memory_push.rs`).
+    pub(super) work_projects: RwLock<Vec<WorkProject>>,
+    pub(super) work_tasks: RwLock<Vec<WorkTask>>,
+    pub(super) work_notes: RwLock<Vec<WorkNote>>,
     next_session_id: RwLock<i64>,
     next_memory_id: RwLock<u64>,
     next_task_id: RwLock<u64>,
     next_message_id: RwLock<u64>,
     next_outbox_id: RwLock<u64>,
+    pub(super) next_work_project_id: RwLock<u64>,
+    pub(super) next_work_task_id: RwLock<u64>,
+    pub(super) next_work_note_id: RwLock<u64>,
 }
 
 impl Default for MemoryStore {
@@ -103,11 +111,17 @@ impl Default for MemoryStore {
             mcp_clients: RwLock::new(Vec::new()),
             tool_overrides: RwLock::new(BTreeMap::new()),
             push_subscriptions: RwLock::new(Vec::new()),
+            work_projects: RwLock::new(Vec::new()),
+            work_tasks: RwLock::new(Vec::new()),
+            work_notes: RwLock::new(Vec::new()),
             next_session_id: RwLock::new(1),
             next_memory_id: RwLock::new(1),
             next_task_id: RwLock::new(1),
             next_message_id: RwLock::new(1),
             next_outbox_id: RwLock::new(1),
+            next_work_project_id: RwLock::new(1),
+            next_work_task_id: RwLock::new(1),
+            next_work_note_id: RwLock::new(1),
         }
     }
 }

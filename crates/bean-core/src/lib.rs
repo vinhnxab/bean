@@ -40,4 +40,4 @@ pub use run_io::{Decision, RunIo};
 pub use scheduler::{
     Clock, FixedClock, Scheduler, SchedulerError, SystemClock, next_run_after, schedule_tools,
 };
-pub use store::{MemoryStore, SqliteStore, Store, memory_tools};
+pub use store::{MemoryStore, SqliteStore, Store, memory_tools, work_tools};

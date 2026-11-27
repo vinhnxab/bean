@@ -67,7 +67,9 @@ base_url = "https://openrouter.ai/api/v1"
 
 [tools]
 # Nhóm `browser` chỉ có tác dụng khi `[browser].enabled = true` (mặc định tắt).
-enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing", "browser"]
+# Nhóm `work` = tools Bean World (`work_project_*`, `work_task_*`): bảng công việc
+# dùng chung giữa người thật và agent; `work_project_create` là Confirm.
+enabled = ["files", "shell", "web", "memory", "skills", "schedule", "billing", "browser", "work"]
 
 # ---------------------------------------------------------------------------
 # M26 — Tool browser nội bộ: nói thẳng Chrome DevTools Protocol qua crate Rust

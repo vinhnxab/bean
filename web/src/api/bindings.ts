@@ -96,3 +96,14 @@ export type { VoiceTranscribeRequest } from "./generated/VoiceTranscribeRequest"
 export type { VoiceTranscribeResponse } from "./generated/VoiceTranscribeResponse";
 export type { VoiceUpdateRequest } from "./generated/VoiceUpdateRequest";
 export type { WebChannelDto } from "./generated/WebChannelDto";
+export type { WorkNoteCreateRequest } from "./generated/WorkNoteCreateRequest";
+export type { WorkNoteDto } from "./generated/WorkNoteDto";
+export type { WorkNoteListResponse } from "./generated/WorkNoteListResponse";
+export type { WorkProjectCreateRequest } from "./generated/WorkProjectCreateRequest";
+export type { WorkProjectDto } from "./generated/WorkProjectDto";
+export type { WorkProjectListResponse } from "./generated/WorkProjectListResponse";
+export type { WorkProjectStatusRequest } from "./generated/WorkProjectStatusRequest";
+export type { WorkTaskCreateRequest } from "./generated/WorkTaskCreateRequest";
+export type { WorkTaskDto } from "./generated/WorkTaskDto";
+export type { WorkTaskListResponse } from "./generated/WorkTaskListResponse";
+export type { WorkTaskUpdateRequest } from "./generated/WorkTaskUpdateRequest";

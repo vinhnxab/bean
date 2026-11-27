@@ -28,8 +28,9 @@
 
 use crate::store::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MessageRecord, NewPushSubscription,
-    NewScheduledTask, OutboxEntry, PushSubscription, ScheduledTask, SessionInfo, SessionSummary,
-    StoreError, StoredMessage, WebSessionInfo,
+    NewScheduledTask, NewWorkNote, NewWorkProject, NewWorkTask, OutboxEntry, PushSubscription,
+    ScheduledTask, SessionInfo, SessionSummary, StoreError, StoredMessage, WebSessionInfo,
+    WorkNote, WorkProject, WorkTask, WorkTaskFilter, WorkTaskUpdate,
 };
 use bean_types::{Message, Outbound, SessionId, Usage};
 
@@ -244,6 +245,55 @@ pub trait TaskStore: Send + Sync {
 
     /// Cập nhật trạng thái runtime sau khi run kết thúc.
     async fn set_task_status(&self, id: u64, status: &str) -> Result<bool, StoreError>;
+}
+
+// ============================================================================ //
+// WORK STORE - Single Responsibility: Bean World (projects → tasks → notes)
+// ============================================================================ //
+
+/// Bean World: bảng điều khiển công việc dùng chung giữa người thật và agent.
+/// Khác [`TaskStore`] (tác vụ cron của scheduler) — đây là việc làm có trạng thái
+/// và người được giao (subagent = "user" trong board).
+#[async_trait::async_trait]
+pub trait WorkStore: Send + Sync {
+    /// Liệt kê project, mới nhất trước.
+    async fn list_projects(&self) -> Result<Vec<WorkProject>, StoreError>;
+
+    /// Tạo project; tên trùng trả lỗi `conflict`.
+    async fn create_project(&self, project: NewWorkProject) -> Result<WorkProject, StoreError>;
+
+    /// Đổi trạng thái project (`active`/`archived`); `None` nếu không tồn tại.
+    async fn set_project_status(
+        &self,
+        id: u64,
+        status: &str,
+    ) -> Result<Option<WorkProject>, StoreError>;
+
+    /// Liệt kê task theo bộ lọc, mới nhất trước.
+    async fn list_work_tasks(&self, filter: WorkTaskFilter) -> Result<Vec<WorkTask>, StoreError>;
+
+    /// Tạo task; project không tồn tại trả lỗi `not_found`.
+    async fn create_work_task(&self, task: NewWorkTask) -> Result<WorkTask, StoreError>;
+
+    /// Cập nhật một phần task; `None` nếu không tồn tại.
+    async fn update_work_task(
+        &self,
+        id: u64,
+        update: WorkTaskUpdate,
+    ) -> Result<Option<WorkTask>, StoreError>;
+
+    /// Xoá task (ghi chú cascade); trả false nếu không tồn tại.
+    async fn delete_work_task(&self, id: u64) -> Result<bool, StoreError>;
+
+    /// Thêm ghi chú trao đổi (append-only); task không tồn tại trả lỗi `not_found`.
+    async fn add_work_note(&self, note: NewWorkNote) -> Result<WorkNote, StoreError>;
+
+    /// Ghi chú của một task, cũ nhất trước.
+    async fn list_work_notes(&self, task_id: u64) -> Result<Vec<WorkNote>, StoreError>;
+
+    /// Các task chưa xong (open/in_progress/blocked), ưu tiên priority rồi mới nhất —
+    /// nguồn cho phần inject vào system prompt.
+    async fn open_work_tasks(&self, limit: usize) -> Result<Vec<WorkTask>, StoreError>;
 }
 
 // ============================================================================ //
