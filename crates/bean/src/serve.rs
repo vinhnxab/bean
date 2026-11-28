@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use bean_channels::TelegramChannel;
 use bean_core::{Channel, Router, RouterDeps, Scheduler};
-use bean_memory::{SqliteStore, Store};
+use bean_memory::{SqliteStore, Store, repair_interrupted_runs};
 use bean_skills::SkillCatalog;
 use bean_types::Config;
 use bean_web::{
@@ -82,6 +82,18 @@ pub async fn run(args: &ServeArgs, config_path: Option<&Path>) -> Result<()> {
             .map_err(|error| anyhow::anyhow!(error.to_string()))
             .context("không mở được SQLite store")?,
     );
+    // Run bị ngắt (crash/kill giữa chừng) để lại `assistant(tool_calls)` thiếu tool
+    // result — lần gọi API kế trên phiên đó sẽ 400 (mục 22.1). Vá đuôi lịch sử NGAY
+    // sau khi mở store, trước khi Router nhận run mới nên không có tranh chấp writer.
+    let repaired = repair_interrupted_runs(&chat::store_path(&config))
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .context("không khôi phục được run dang dở sau restart")?;
+    if repaired > 0 {
+        tracing::info!(
+            repaired,
+            "đã chèn tool result tổng hợp cho tool_call bị ngắt lúc restart"
+        );
+    }
     let store_dyn: Arc<dyn Store> = store.clone();
     // M29: kho secret thống nhất — mọi key resolve theo env > secrets.env (D19.3).
     let secret_store = chat::secret_store(&config);

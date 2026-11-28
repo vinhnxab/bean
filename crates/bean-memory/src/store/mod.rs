@@ -99,12 +99,14 @@ pub use budget::{
 pub use memory::MemoryStore;
 // Luật validate Bean World — REST và tool dùng lại để không lệch với store.
 pub use sqlite::SqliteStore;
+// Khôi phục run bị ngắt sau restart — chạy một lần lúc boot trong `serve`.
 pub use sqlite::q_bw::{
     NOTES_MAX_CHARS as WORK_NOTES_MAX_CHARS, PROJECT_NAME_MAX_CHARS as WORK_PROJECT_NAME_MAX_CHARS,
     TASK_PRIORITIES as WORK_TASK_PRIORITIES, TASK_STATUSES as WORK_TASK_STATUSES,
     TASK_TITLE_MAX_CHARS as WORK_TASK_TITLE_MAX_CHARS, validate_priority as validate_work_priority,
     validate_status as validate_work_status,
 };
+pub use sqlite::repair_interrupted_runs;
 pub use trait_def::Store;
 pub use types::{
     McpClientInfo, MemoryRecord, MemorySearchHit, MemorySource, MessageRecord, NewPushSubscription,

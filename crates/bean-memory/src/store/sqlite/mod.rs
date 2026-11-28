@@ -46,10 +46,12 @@ mod q_session;
 mod q_task;
 mod q_tool;
 mod q_usage_web;
+mod repair;
 pub(crate) mod schema;
 mod worker;
 
 pub use inner::SqliteStore;
+pub use repair::repair_interrupted_runs;
 
 // ---------------------------------------------------------------------------
 // Truy vấn SQL — mỗi file một nhóm nghiệp vụ (xem `q_*.rs`)

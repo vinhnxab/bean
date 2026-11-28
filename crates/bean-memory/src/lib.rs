@@ -32,7 +32,7 @@ pub use store::{
     ToolOverrideStore, WORK_NOTES_MAX_CHARS, WORK_PROJECT_NAME_MAX_CHARS, WORK_TASK_PRIORITIES,
     WORK_TASK_STATUSES, WORK_TASK_TITLE_MAX_CHARS, WebSessionInfo, WorkNote, WorkProject,
     WorkStore, WorkTask, WorkTaskFilter, WorkTaskUpdate, ensure_daily_budget,
-    ensure_role_daily_budget, record_usage, record_usage_for_role, validate_work_priority,
-    validate_work_status,
+    ensure_role_daily_budget, record_usage, record_usage_for_role, repair_interrupted_runs,
+    validate_work_priority, validate_work_status,
 };
 pub use work_tool::work_tools;
