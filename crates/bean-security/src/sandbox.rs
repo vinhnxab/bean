@@ -15,7 +15,7 @@
 //! (host mode kill tiến trình con) rồi trả [`SandboxError::Timeout`]. Output cắt ở
 //! ranh giới UTF-8. I/O chặn → caller bọc `spawn_blocking` (mục 22.8).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -84,6 +84,19 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
+    /// Chế độ hiện hành trong cấu hình của bản sao này (hot-swap D22.5b đổi qua
+    /// [`Self::with_mode`]) — tool shell nền đọc để chọn cách spawn.
+    #[must_use]
+    pub(crate) fn mode(&self) -> SandboxMode {
+        self.cfg.mode
+    }
+
+    /// Thư mục workspace — cwd cho lệnh host mode.
+    #[must_use]
+    pub(crate) fn workspace_path(&self) -> &Path {
+        &self.workspace
+    }
+
     /// Dựng sandbox cho `workspace` với cấu hình `[security.sandbox]`.
     #[must_use]
     pub fn new(cfg: SandboxConfig, workspace: PathBuf) -> Self {
@@ -162,7 +175,7 @@ impl Sandbox {
     }
 
     /// Tên container kế tiếp (dùng cho kill khi timeout/huỷ) — duy nhất trong tiến trình.
-    fn next_container_name() -> String {
+    pub(crate) fn next_container_name() -> String {
         let n = CONTAINER_SEQ.fetch_add(1, Ordering::Relaxed);
         format!("bean-sbx-{}-{n}", std::process::id())
     }
@@ -246,7 +259,7 @@ impl Sandbox {
         args
     }
 
-    fn docker_run_args(&self, container_name: &str, command: &str) -> Vec<String> {
+    pub(crate) fn docker_run_args(&self, container_name: &str, command: &str) -> Vec<String> {
         let mut args = self.docker_run_prefix(container_name);
         args.push(self.cfg.image.clone());
         // sh -c để thực thi chuỗi lệnh (image chuẩn có /bin/sh — Debian slim, không Node).
@@ -424,7 +437,7 @@ fn cap_stream(s: String) -> String {
 
 /// Kill một container theo tên — best effort (docker có thể không có daemon/container
 /// đã thoát); luôn trả về để caller không treo.
-async fn kill_container(name: &str) {
+pub(crate) async fn kill_container(name: &str) {
     let res = tokio::process::Command::new("docker")
         .arg("kill")
         .arg(name)
@@ -533,7 +546,7 @@ async fn run_docker(
 /// * Windows: `cmd /C <command>` — `cmd.exe` luôn có mặt và truyền exit code của
 ///   lệnh cuối ra đúng; Windows PowerShell 5.1 (`-Command`) thường trả 0 dù lệnh
 ///   con thất bại, làm `run_shell` báo lỗi sai cho model.
-fn host_shell_args(command: &str) -> (&'static str, Vec<String>) {
+pub(crate) fn host_shell_args(command: &str) -> (&'static str, Vec<String>) {
     #[cfg(windows)]
     {
         ("cmd", vec!["/C".to_string(), command.to_string()])

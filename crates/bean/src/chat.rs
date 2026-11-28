@@ -32,7 +32,8 @@ use bean_memory::{ToolOverride, ToolOverrideStore};
 use bean_qa::{SuiteCatalog, qa_test};
 use bean_scan::{ScanScope, ScannerCmd, security_scan};
 use bean_security::{
-    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, web_fetch, web_search,
+    AuditLog, CapWorkspace, SafeHttpClient, Sandbox, run_shell_for_projects, shell_bg_tools,
+    web_fetch, web_search,
 };
 use bean_skills::{SkillCatalog, skill_tools};
 use bean_tools::{
@@ -342,13 +343,21 @@ pub(crate) async fn build_registry(
         config.security.sandbox.clone(),
         config.agent.workspace.clone(),
     ));
+    // run_shell + bộ background shell dùng chung một nhóm "shell": cùng risk policy
+    // (docker Safe khi network=false, host whitelist Q8) nên bật/tắt theo nhóm.
+    let mut shell_tools = vec![run_shell_for_projects(
+        Arc::clone(&sandbox),
+        project_sandboxes.clone(),
+        sandbox_mode.clone(),
+    )];
+    shell_tools.extend(shell_bg_tools(
+        Arc::clone(&sandbox),
+        project_sandboxes,
+        sandbox_mode,
+    ));
     register_group(
         &mut registry,
-        vec![run_shell_for_projects(
-            sandbox,
-            project_sandboxes,
-            sandbox_mode,
-        )],
+        shell_tools,
         "shell",
         enabled_groups,
         &mut seed_disabled,

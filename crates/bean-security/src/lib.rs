@@ -20,6 +20,7 @@ pub mod policy;
 pub mod ratelimit;
 pub mod sandbox;
 pub mod shell;
+pub mod shell_bg;
 pub mod ssrf;
 pub mod untrusted;
 pub mod web;
@@ -34,6 +35,7 @@ pub use policy::{DenyReason, PolicyDecision, SessionPolicy, decide, deny_list_re
 pub use ratelimit::{DEFAULT_MAX_LOCK, DEFAULT_THRESHOLD, DEFAULT_WINDOW, RateLimiter};
 pub use sandbox::{Sandbox, SandboxError, ShellOutcome};
 pub use shell::{run_shell, run_shell_for_projects};
+pub use shell_bg::shell_bg_tools;
 pub use ssrf::{FetchedPage, SafeHttpClient, SsrfError};
 pub use untrusted::{UntrustedFlag, wrap as wrap_untrusted};
 pub use web::{SearchConfigError, web_fetch, web_search};
